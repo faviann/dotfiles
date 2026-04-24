@@ -29,8 +29,20 @@ export BW_SESSION=$(bw unlock --raw)
 
 ## 4. Apply dotfiles
 
+Writes personal config including `~/.gitconfig`, `~/.ssh/`, and `~/.ansible/vault-pass`.
+
 ```bash
 chezmoi init --apply git@github.com:faviann/dotfiles.git
+```
+
+## 5. Clone ServerManagementScripts (if needed on this machine)
+
+The vault passphrase is already on disk from step 4.
+
+```bash
+git clone git@github.com:faviann/ServerManagementScripts.git
+cd ServerManagementScripts
+ansible-playbook bootstrap.yml
 ```
 
 ## Day-to-day: pull and re-apply
@@ -43,14 +55,21 @@ chezmoi update
 ## Verify
 
 ```bash
-cat ~/.gitconfig           # git config applied
-cat ~/.ssh/allowed_signers # signing key line present
-echo ${#ANTHROPIC_API_KEY} # > 0 means secret injected
-fish_greeting              # should be silent if BW_SESSION is set
+cat ~/.gitconfig                        # git config applied
+cat ~/.ssh/allowed_signers              # signing key line present
+cat ~/.ansible/vault-pass | wc -c       # > 0 means vault passphrase written
+test ! -f ~/.config/fish/config.fish || fish_greeting
 ```
 
 ## Hostname contract
 
 The LXC workstation must be named `workstation` (set by the Ansible repo).
-This is what triggers `is_lxc = true` in `.chezmoi.toml.tmpl`, which skips
-fish config on that machine.
+This triggers `is_lxc = true` in `.chezmoi.toml.tmpl`, which skips fish config
+on that machine.
+
+When lifecycle playbooks run from the workstation itself, they exclude that host
+by default. To manage it intentionally, run:
+
+```bash
+ansible-playbook site.yml -e proxmox_lifecycle_target_hosts=lxcs --limit workstation
+```

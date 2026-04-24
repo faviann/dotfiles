@@ -1,8 +1,6 @@
-# Secrets injected by chezmoi from Bitwarden at apply time
-set -gx ANTHROPIC_API_KEY {{ (bitwarden "notes" "dotfiles/anthropic-api-key") }}
-set -gx OPENAI_API_KEY {{ (bitwarden "notes" "dotfiles/openai-api-key") }}
-set -gx GITHUB_COPILOT_TOKEN {{ (bitwarden "notes" "dotfiles/copilot-token") }}
-set -gx GH_TOKEN {{ (bitwarden "notes" "dotfiles/gh-token") }}
-
 # PATH
 fish_add_path ~/.local/bin
+
+# Ansible lifecycle playbooks exclude workstation when run on that host.
+# Override intentionally, e.g.:
+# ansible-playbook site.yml -e proxmox_lifecycle_target_hosts=lxcs --limit workstation

@@ -1,8 +1,6 @@
-# Secrets injected by chezmoi from Bitwarden at apply time
-export ANTHROPIC_API_KEY={{ (bitwarden "notes" "dotfiles/anthropic-api-key") }}
-export OPENAI_API_KEY={{ (bitwarden "notes" "dotfiles/openai-api-key") }}
-export GITHUB_COPILOT_TOKEN={{ (bitwarden "notes" "dotfiles/copilot-token") }}
-export GH_TOKEN={{ (bitwarden "notes" "dotfiles/gh-token") }}
-
 # PATH
 export PATH="$HOME/.local/bin:$PATH"
+
+# Ansible lifecycle playbooks exclude workstation when run on that host.
+# Override intentionally, e.g.:
+# ansible-playbook site.yml -e proxmox_lifecycle_target_hosts=lxcs --limit workstation
