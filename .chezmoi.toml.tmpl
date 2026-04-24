@@ -1,0 +1,7 @@
+{{- $is_lxc := false -}}
+{{- if eq .chezmoi.hostname "workstation" -}}
+{{-   $is_lxc = true -}}
+{{- end -}}
+
+[data]
+  is_lxc = {{ $is_lxc }}
