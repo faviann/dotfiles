@@ -3,21 +3,16 @@ set -euo pipefail
 
 ssh_dir="$HOME/.ssh"
 known_hosts="$ssh_dir/known_hosts"
+pinned_line="github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 
 mkdir -p "$ssh_dir"
 chmod 700 "$ssh_dir"
 touch "$known_hosts"
 chmod 600 "$known_hosts"
 
-tmp_file="$(mktemp)"
-trap 'rm -f "$tmp_file"' EXIT
-
-ssh-keyscan -t ed25519 github.com > "$tmp_file" 2>/dev/null
-
-if [ ! -s "$tmp_file" ]; then
-  echo "Failed to fetch github.com SSH host key with ssh-keyscan." >&2
-  exit 1
+if grep -Fxq "$pinned_line" "$known_hosts"; then
+  exit 0
 fi
 
 ssh-keygen -R github.com -f "$known_hosts" >/dev/null 2>&1 || true
-cat "$tmp_file" >> "$known_hosts"
+printf '%s\n' "$pinned_line" >> "$known_hosts"

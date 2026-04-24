@@ -28,8 +28,9 @@ chezmoi init --apply https://github.com/faviann/dotfiles.git
 ```
 
 After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`, and
-`~/.ssh/known_hosts`. A run-after script then switches the chezmoi source repo
-origin to `git@github.com:faviann/dotfiles.git`.
+`~/.ssh/known_hosts`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
+does not scan the network during apply. A run-after script then switches the
+chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
 
 ## Bitwarden SSH Key Item
 
