@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source_dir="{{ .chezmoi.sourceDir }}"
+expected_https="https://github.com/faviann/dotfiles.git"
+expected_https_no_suffix="https://github.com/faviann/dotfiles"
+expected_ssh="git@github.com:faviann/dotfiles.git"
+
+if [ ! -d "$source_dir/.git" ]; then
+  echo "chezmoi source repo is not a git checkout: $source_dir" >&2
+  exit 1
+fi
+
+current_remote="$(git -C "$source_dir" remote get-url origin 2>/dev/null || true)"
+
+case "$current_remote" in
+  "$expected_ssh")
+    exit 0
+    ;;
+  "$expected_https"|"$expected_https_no_suffix")
+    git -C "$source_dir" remote set-url origin "$expected_ssh"
+    ;;
+  "")
+    echo "chezmoi source repo has no origin remote: $source_dir" >&2
+    exit 1
+    ;;
+  *)
+    echo "Refusing to change unexpected chezmoi origin remote: $current_remote" >&2
+    exit 1
+    ;;
+esac

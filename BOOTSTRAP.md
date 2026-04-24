@@ -1,43 +1,114 @@
 # Bootstrap - New Machine Setup
 
-Run these steps in order on any new machine.
+Run these steps in order on any new workstation.
 
-## 1. Generate SSH key (once per machine)
-
-```bash
-ssh-keygen -t ed25519 -C "faviann@gmail.com" -f ~/.ssh/id_ed25519
-```
-
-Then add `~/.ssh/id_ed25519.pub` to GitHub:
-- **Settings -> SSH and GPG keys -> New SSH key**
-- Add once as **Authentication Key**
-- Add again as **Signing Key**
-
-## 2. Install chezmoi and Bitwarden CLI
+## 1. Install chezmoi and Bitwarden CLI
 
 ```bash
 sh -c "$(curl -fsLS get.chezmoi.io)" -- -b ~/.local/bin
 sudo snap install bw
 ```
 
-## 3. Unlock Bitwarden
+## 2. Unlock Bitwarden
 
 ```bash
 bw login                                  # first time only
 export BW_SESSION=$(bw unlock --raw)
 ```
 
-## 4. Apply dotfiles
+Do not paste or commit secrets. Keep the session token in your shell only.
 
-Writes personal config including `~/.gitconfig`, `~/.ssh/`, and `~/.ansible/vault-pass`.
+## 3. Bootstrap over HTTPS
+
+The first checkout uses HTTPS so a new machine does not need an SSH key before
+chezmoi can render one from Bitwarden.
 
 ```bash
-chezmoi init --apply git@github.com:faviann/dotfiles.git
+chezmoi init --apply https://github.com/faviann/dotfiles.git
 ```
 
-## 5. Clone ServerManagementScripts (if needed on this machine)
+After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`, and
+`~/.ssh/known_hosts`. A run-after script then switches the chezmoi source repo
+origin to `git@github.com:faviann/dotfiles.git`.
 
-The vault passphrase is already on disk from step 4.
+## Bitwarden SSH Key Item
+
+Create or maintain one Bitwarden item named:
+
+```text
+dotfiles/workstation-ssh-key
+```
+
+The item must contain:
+
+- Notes: the private OpenSSH Ed25519 key for `~/.ssh/id_ed25519`
+- Custom field `public_key`: the matching public key for `~/.ssh/id_ed25519.pub`
+
+Keep the private key only in the item notes. Do not duplicate it into docs,
+Ansible vars, shell history, or plaintext files.
+
+## GitHub Registration
+
+Register the same public key in GitHub twice:
+
+- Settings -> SSH and GPG keys -> New SSH key -> Authentication Key
+- Settings -> SSH and GPG keys -> New SSH key -> Signing Key
+
+This gives the workstation one stable SSH identity for both Git authentication
+and commit signing.
+
+## Lightweight Verification
+
+Check that the rendered public key matches the private key without printing the
+private key:
+
+```bash
+diff -u ~/.ssh/id_ed25519.pub <(ssh-keygen -y -f ~/.ssh/id_ed25519)
+```
+
+No output means the key pair matches.
+
+Check GitHub SSH auth:
+
+```bash
+ssh -T git@github.com
+```
+
+GitHub should identify the account and report that shell access is not provided.
+
+## Optional GitHub CLI Auth
+
+If you use `gh`, authenticate without generating or uploading another SSH key:
+
+```bash
+gh auth login --git-protocol ssh --skip-ssh-key
+```
+
+## Rotation Runbook
+
+1. Generate a replacement Ed25519 key on a trusted machine.
+2. Update the Bitwarden item notes with the replacement private key.
+3. Update the `public_key` custom field with the matching public key.
+4. Add the replacement public key to GitHub as both an Authentication Key and a
+   Signing Key.
+5. Run `chezmoi apply` on each workstation after unlocking Bitwarden.
+6. Verify with the `diff` command above and `ssh -T git@github.com`.
+7. Remove the old Authentication Key and Signing Key from GitHub after every
+   workstation has the replacement key.
+
+## Day-to-Day Updates
+
+```bash
+export BW_SESSION=$(bw unlock --raw)
+chezmoi update
+```
+
+`chezmoi update` pulls from the SSH origin after the first bootstrap and then
+re-applies templates from Bitwarden.
+
+## Clone ServerManagementScripts
+
+The vault passphrase is written by chezmoi from Bitwarden before this step.
 
 ```bash
 git clone git@github.com:faviann/ServerManagementScripts.git
@@ -45,27 +116,11 @@ cd ServerManagementScripts
 ansible-playbook bootstrap.yml
 ```
 
-## Day-to-day: pull and re-apply
+## Hostname Contract
 
-```bash
-export BW_SESSION=$(bw unlock --raw)
-chezmoi update
-```
-
-## Verify
-
-```bash
-cat ~/.gitconfig                        # git config applied
-cat ~/.ssh/allowed_signers              # signing key line present
-cat ~/.ansible/vault-pass | wc -c       # > 0 means vault passphrase written
-test ! -f ~/.config/fish/config.fish || fish_greeting
-```
-
-## Hostname contract
-
-The LXC workstation must be named `workstation` (set by the Ansible repo).
-This triggers `is_lxc = true` in `.chezmoi.toml.tmpl`, which skips fish config
-on that machine.
+The LXC workstation must be named `workstation` as set by the Ansible repo.
+That hostname triggers `is_lxc = true` in `.chezmoi.toml.tmpl`, which skips fish
+config on that machine.
 
 When lifecycle playbooks run from the workstation itself, they exclude that host
 by default. To manage it intentionally, run:
