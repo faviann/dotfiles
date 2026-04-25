@@ -3,4 +3,4 @@ fish_add_path ~/.local/bin
 
 # Ansible lifecycle playbooks exclude workstation when run on that host.
 # Override intentionally, e.g.:
-# ansible-playbook site.yml -e proxmox_lifecycle_target_hosts=lxcs --limit workstation
+# ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation
