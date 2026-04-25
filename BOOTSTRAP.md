@@ -64,7 +64,9 @@ Check that the rendered public key matches the private key without printing the
 private key:
 
 ```bash
-diff -u ~/.ssh/id_ed25519.pub <(ssh-keygen -y -f ~/.ssh/id_ed25519)
+diff -u \
+  <(awk 'NF >= 2 { print $1 " " $2; exit }' ~/.ssh/id_ed25519.pub) \
+  <(ssh-keygen -y -f ~/.ssh/id_ed25519 | awk 'NF >= 2 { print $1 " " $2; exit }')
 ```
 
 No output means the key pair matches.

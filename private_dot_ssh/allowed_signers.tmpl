@@ -1,1 +1,1 @@
-faviann@gmail.com {{ output "cat" (joinPath .chezmoi.homeDir ".ssh" "id_ed25519.pub") | trim }}
+faviann@gmail.com {{ (bitwardenFields "item" "dotfiles/workstation-ssh-key").public_key.value }}
