@@ -116,7 +116,7 @@ The vault passphrase is written by chezmoi from Bitwarden before this step.
 ```bash
 git clone git@github.com:faviann/ServerManagementScripts.git
 cd ServerManagementScripts
-ansible-playbook bootstrap.yml
+./setup.sh
 ```
 
 ## Hostname Contract
@@ -129,5 +129,5 @@ When lifecycle playbooks run from the workstation itself, they exclude that host
 by default. To manage it intentionally, run:
 
 ```bash
-ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation
+uv run --locked ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation
 ```

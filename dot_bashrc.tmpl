@@ -3,4 +3,4 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # Ansible lifecycle playbooks exclude workstation when run on that host.
 # Override intentionally, e.g.:
-# ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation
+# uv run --locked ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation
