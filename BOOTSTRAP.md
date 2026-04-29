@@ -18,6 +18,39 @@ export BW_SESSION=$(bw unlock --raw)
 
 Do not paste or commit secrets. Keep the session token in your shell only.
 
+## Unattended Workstation Rebuild
+
+The Ansible workstation bootstrap uses a controller-side wrapper. It prompts
+for the Bitwarden master password, pulls deployment API key values from
+Bitwarden, passes them to Ansible as process-local environment variables, and
+clears them on exit.
+
+Create a Bitwarden item named:
+
+```text
+dotfiles/workstation-bitwarden-api-key
+```
+
+Custom fields:
+
+```text
+client_id
+client_secret
+```
+
+Then run from a trusted Ansible controller:
+
+```bash
+./scripts/workstation-bootstrap-deploy.sh
+```
+
+The target bootstrap envelope is written only to `/run/workstation-bootstrap`
+and is deleted by the bootstrap script. Do not store these values in dotfiles,
+Ansible vault, shell history, or repo files.
+
+GitHub CLI auth is regenerated from the Bitwarden item
+`dotfiles/github-cli-token`, with the token stored in item notes.
+
 ## 3. Bootstrap over HTTPS
 
 The first checkout uses HTTPS so a new machine does not need an SSH key before
