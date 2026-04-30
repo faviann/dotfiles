@@ -7,7 +7,10 @@ fi
 
 # Auto-launch AoE on SSH login.
 _aoe_autolaunch() {
-	[[ -n "${SSH_CONNECTION:-}" || -n "${SSH_TTY:-}" ]] || return
+	[[ $- == *i* ]] || return
+	[[ -t 0 && -t 1 ]] || return
+	[[ -n "${SSH_TTY:-}" ]] || return
+	[[ -z "${SSH_ORIGINAL_COMMAND:-}" ]] || return
 	[[ -n "${TMUX:-}" ]] && return
 	[[ -e "$HOME/.local/state/workstation-setup/complete" ]] || return
 	command -v aoe >/dev/null 2>&1 || return

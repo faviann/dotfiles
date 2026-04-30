@@ -6,4 +6,10 @@ if ! command -v aoe >/dev/null 2>&1; then
 fi
 
 systemctl --user daemon-reload
-systemctl --user enable --now aoe-serve.service
+systemctl --user enable aoe-serve.service
+
+if systemctl --user is-active --quiet aoe-serve.service; then
+    systemctl --user restart aoe-serve.service
+else
+    systemctl --user start aoe-serve.service
+fi
