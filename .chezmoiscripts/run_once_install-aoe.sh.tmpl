@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v aoe >/dev/null 2>&1; then
+    exit 0
+fi
+
+curl -fsSL https://raw.githubusercontent.com/njbrake/agent-of-empires/main/scripts/install.sh | \
+    INSTALL_DIR="$HOME/.local/bin" bash
