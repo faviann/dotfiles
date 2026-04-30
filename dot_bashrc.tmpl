@@ -5,6 +5,23 @@ if command -v mise >/dev/null 2>&1; then
 	eval "$(mise activate bash)"
 fi
 
+# Auto-launch AoE on SSH login.
+_aoe_autolaunch() {
+	[[ -n "${SSH_CONNECTION:-}" || -n "${SSH_TTY:-}" ]] || return
+	[[ -n "${TMUX:-}" ]] && return
+	[[ -e "$HOME/.local/state/workstation-setup/complete" ]] || return
+	command -v aoe >/dev/null 2>&1 || return
+	command -v tmux >/dev/null 2>&1 || return
+
+	if tmux has-session -t main 2>/dev/null; then
+		exec tmux attach-session -t main
+	else
+		exec tmux new-session -s main "aoe; exec ${SHELL:-/bin/bash} -il"
+	fi
+}
+_aoe_autolaunch
+unset -f _aoe_autolaunch
+
 # Ansible lifecycle playbooks exclude workstation when run on that host.
 # Override intentionally, e.g.:
 # uv run --locked ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation
