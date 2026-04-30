@@ -1,0 +1,13 @@
+[Unit]
+Description=Agent of Empires web dashboard
+After=default.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env aoe serve --host 0.0.0.0 --port 4000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
