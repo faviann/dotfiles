@@ -5,5 +5,11 @@ if command -v aoe >/dev/null 2>&1; then
     exit 0
 fi
 
-curl -fsSL https://raw.githubusercontent.com/njbrake/agent-of-empires/main/scripts/install.sh | \
-    INSTALL_DIR="$HOME/.local/bin" bash
+readonly AOE_INSTALL_COMMIT="5daae698fe536753ecbce7d8cc8e9d6d65755d8b"
+readonly AOE_INSTALL_URL="https://raw.githubusercontent.com/njbrake/agent-of-empires/${AOE_INSTALL_COMMIT}/scripts/install.sh"
+
+tmp_script="$(mktemp)"
+trap 'rm -f "$tmp_script"' EXIT
+
+curl -fsSL "$AOE_INSTALL_URL" -o "$tmp_script"
+INSTALL_DIR="$HOME/.local/bin" bash "$tmp_script"

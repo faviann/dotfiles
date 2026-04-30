@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if ! command -v aoe >/dev/null 2>&1; then
-    exit 0
-fi
-
 systemctl --user daemon-reload
 systemctl --user enable aoe-serve.service aoe-lan-proxy.socket
+
+if ! command -v aoe >/dev/null 2>&1; then
+    systemctl --user stop aoe-lan-proxy.socket || true
+    systemctl --user stop aoe-serve.service || true
+    exit 0
+fi
 
 if systemctl --user is-active --quiet aoe-serve.service; then
     systemctl --user restart aoe-serve.service
