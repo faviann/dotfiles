@@ -7,12 +7,6 @@
 
   programs.home-manager.enable = true;
 
-  home.file.".config/systemd/user/aoe-serve.service".force = true;
-  home.file.".config/systemd/user/aoe-lan-proxy.service".force = true;
-  home.file.".config/systemd/user/aoe-lan-proxy.socket".force = true;
-  home.file.".config/systemd/user/default.target.wants/aoe-serve.service".force = true;
-  home.file.".config/systemd/user/sockets.target.wants/aoe-lan-proxy.socket".force = true;
-
   home.packages = with pkgs; [
     nodejs
     uv
