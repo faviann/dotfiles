@@ -17,7 +17,6 @@
     fzf
     codex
     claude-code
-    home-manager
     hermesPackage
   ];
 
