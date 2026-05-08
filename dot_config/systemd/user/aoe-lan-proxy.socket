@@ -1,9 +1,0 @@
-[Unit]
-Description=AoE LAN proxy socket
-
-[Socket]
-ListenStream=0.0.0.0:4001
-NoDelay=true
-
-[Install]
-WantedBy=sockets.target

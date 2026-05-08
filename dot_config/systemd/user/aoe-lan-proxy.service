@@ -1,7 +1,0 @@
-[Unit]
-Description=AoE LAN proxy
-Requires=aoe-serve.service
-After=aoe-serve.service
-
-[Service]
-ExecStart=/lib/systemd/systemd-socket-proxyd 127.0.0.1:4000

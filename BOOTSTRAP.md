@@ -18,39 +18,6 @@ export BW_SESSION=$(bw unlock --raw)
 
 Do not paste or commit secrets. Keep the session token in your shell only.
 
-## Unattended Workstation Rebuild
-
-The Ansible workstation bootstrap uses a controller-side wrapper. It prompts
-for the Bitwarden master password, pulls deployment API key values from
-Bitwarden, passes them to Ansible as process-local environment variables, and
-clears them on exit.
-
-Create a Bitwarden item named:
-
-```text
-dotfiles/workstation-bitwarden-api-key
-```
-
-Custom fields:
-
-```text
-client_id
-client_secret
-```
-
-Then run from a trusted Ansible controller:
-
-```bash
-./scripts/workstation-bootstrap-deploy.sh
-```
-
-The target bootstrap envelope is written only to `/run/workstation-bootstrap`
-and is deleted by the bootstrap script. Do not store these values in dotfiles,
-Ansible vault, shell history, or repo files.
-
-GitHub CLI auth is regenerated from the Bitwarden item
-`dotfiles/github-cli-token`, with the token stored in item notes.
-
 ## 3. Bootstrap over HTTPS
 
 The first checkout uses HTTPS so a new machine does not need an SSH key before
@@ -64,6 +31,24 @@ After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`, and
 `~/.ssh/known_hosts`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
 does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
+
+## 4. Apply Home Manager on the Workstation LXC
+
+The Ansible-managed `workstation` LXC installs Determinate Nix and a
+`workstation-setup` helper. Run that helper after Bitwarden is unlocked:
+
+```bash
+workstation-setup
+```
+
+It runs `chezmoi init/update`, applies the `#workstation` Home Manager flake,
+authenticates GitHub CLI from the `dotfiles/github-cli-token` Bitwarden item,
+and validates the expected tools. Home Manager installs the normal user tools,
+including `uv`, `gh`, Codex, Claude Code, and Hermes.
+
+Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
+has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
+before enabling the bind mount.
 
 ## Bitwarden SSH Key Item
 
@@ -144,7 +129,9 @@ re-applies templates from Bitwarden.
 
 ## Clone ServerManagementScripts
 
-The vault passphrase is written by chezmoi from Bitwarden before this step.
+On the managed `workstation` LXC, run `workstation-setup` before this step so
+Home Manager has installed `uv`. The vault passphrase is written by chezmoi
+from Bitwarden before this step.
 
 ```bash
 git clone git@github.com:faviann/ServerManagementScripts.git
