@@ -1,4 +1,4 @@
-{ pkgs, lib, hermesPackage, ... }:
+{ pkgs, lib, config, hermesPackage, ... }:
 
 {
   home.username = "faviann";
@@ -104,7 +104,7 @@
 
   programs.openclaw = {
     enable = true;
-    stateDir = "~/.openclaw";
+    stateDir = "${config.home.homeDirectory}/.openclaw";
     systemd.enable = true;
     systemd.unitName = "openclaw-gateway";
   };
