@@ -101,4 +101,17 @@
     };
     Install.WantedBy = [ "default.target" ];
   };
+
+  programs.openclaw = {
+    enable = true;
+    stateDir = "~/.openclaw";
+    systemd.enable = true;
+    systemd.unitName = "openclaw-gateway";
+  };
+
+  # The nix-openclaw module targets graphical-session.target by default.
+  # Override to default.target for headless LXC (same pattern as hermes-gateway).
+  systemd.user.services.openclaw-gateway = {
+    Install.WantedBy = lib.mkForce [ "default.target" ];
+  };
 }
