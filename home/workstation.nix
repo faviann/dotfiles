@@ -70,4 +70,35 @@
 
     Install.WantedBy = [ "sockets.target" ];
   };
+
+  systemd.user.services.hermes-gateway = {
+    Unit = {
+      Description = "Hermes Agent gateway";
+      After = [ "default.target" ];
+    };
+    Service = {
+      Type = "simple";
+      Environment = "PATH=%h/.nix-profile/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin";
+      ExecStart = "/usr/bin/env hermes gateway run";
+      Restart = "on-failure";
+      RestartSec = 10;
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  systemd.user.services.hermes-dashboard = {
+    Unit = {
+      Description = "Hermes Agent dashboard";
+      Requires = [ "hermes-gateway.service" ];
+      After = [ "default.target" "hermes-gateway.service" ];
+    };
+    Service = {
+      Type = "simple";
+      Environment = "PATH=%h/.nix-profile/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin";
+      ExecStart = "/usr/bin/env hermes dashboard --host 0.0.0.0 --port 9119 --no-open --insecure";
+      Restart = "on-failure";
+      RestartSec = 10;
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
 }
