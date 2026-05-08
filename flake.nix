@@ -8,6 +8,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent.url = "github:NousResearch/hermes-agent";
+    nix-openclaw = {
+      url = "github:openclaw/nix-openclaw";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.home-manager.follows = "home-manager";
+    };
   };
 
   outputs =
@@ -15,6 +20,7 @@
       nixpkgs,
       home-manager,
       hermes-agent,
+      nix-openclaw,
       ...
     }:
     let
@@ -22,6 +28,7 @@
       pkgs = import nixpkgs {
         inherit system;
         config.allowUnfree = true;
+        config.permittedInsecurePackages = [ "openclaw-2026.4.22" ];
       };
     in
     {
@@ -31,6 +38,7 @@
           hermesPackage = hermes-agent.packages.${system}.default;
         };
         modules = [
+          nix-openclaw.homeManagerModules.openclaw
           ./home/workstation.nix
         ];
       };
