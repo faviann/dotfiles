@@ -25,10 +25,13 @@
     }:
     let
       system = "x86_64-linux";
+      openclawOverlay = import "${nix-openclaw}/nix/overlay.nix" {
+        openclawToolPkgs = nix-openclaw.inputs.nix-openclaw-tools.packages.${system};
+      };
       pkgs = import nixpkgs {
         inherit system;
+        overlays = [ openclawOverlay ];
         config.allowUnfree = true;
-        config.permittedInsecurePackages = [ "openclaw-2026.4.22" ];
       };
     in
     {

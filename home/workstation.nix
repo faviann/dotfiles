@@ -111,8 +111,8 @@
 
   # The nix-openclaw module writes openclaw.json as a read-only nix-store symlink,
   # which prevents openclaw from persisting runtime state (auth tokens, model choices, etc.).
-  # These two hooks bracket home-manager's writeBoundary to preserve the mutable config:
-  # save it before the symlink is written, restore it after.
+  # These two hooks bracket nix-openclaw's generated config link:
+  # save it before Home Manager writes links, restore it after openclawConfigFiles.
   home.activation.openclawSaveConfig = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
     _oc_config="${config.programs.openclaw.stateDir}/openclaw.json"
     _oc_saved="${config.programs.openclaw.stateDir}/openclaw.json.pre-hm"
@@ -121,7 +121,7 @@
     fi
   '';
 
-  home.activation.openclawMutableConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+  home.activation.openclawMutableConfig = lib.hm.dag.entryAfter [ "openclawConfigFiles" ] ''
     _oc_config="${config.programs.openclaw.stateDir}/openclaw.json"
     _oc_saved="${config.programs.openclaw.stateDir}/openclaw.json.pre-hm"
     if [ -f "$_oc_saved" ]; then
