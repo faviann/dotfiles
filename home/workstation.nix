@@ -109,6 +109,31 @@
     systemd.unitName = "openclaw-gateway";
   };
 
+  # The nix-openclaw module writes openclaw.json as a read-only nix-store symlink,
+  # which prevents openclaw from persisting runtime state (auth tokens, model choices, etc.).
+  # These two hooks bracket home-manager's writeBoundary to preserve the mutable config:
+  # save it before the symlink is written, restore it after.
+  home.activation.openclawSaveConfig = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
+    _oc_config="${config.programs.openclaw.stateDir}/openclaw.json"
+    _oc_saved="${config.programs.openclaw.stateDir}/openclaw.json.pre-hm"
+    if [ -f "$_oc_config" ] && [ ! -L "$_oc_config" ]; then
+      cp "$_oc_config" "$_oc_saved"
+    fi
+  '';
+
+  home.activation.openclawMutableConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    _oc_config="${config.programs.openclaw.stateDir}/openclaw.json"
+    _oc_saved="${config.programs.openclaw.stateDir}/openclaw.json.pre-hm"
+    if [ -f "$_oc_saved" ]; then
+      mv "$_oc_saved" "$_oc_config"
+      chmod 600 "$_oc_config"
+    elif [ -L "$_oc_config" ]; then
+      cp "$(readlink "$_oc_config")" "$_oc_config.tmp"
+      mv "$_oc_config.tmp" "$_oc_config"
+      chmod 600 "$_oc_config"
+    fi
+  '';
+
   # The nix-openclaw module targets graphical-session.target by default.
   # Override to default.target for headless LXC (same pattern as hermes-gateway).
   systemd.user.services.openclaw-gateway = {
