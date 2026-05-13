@@ -14,6 +14,13 @@ actual_prefix="$(npm config get prefix)"
 test "$actual_prefix" = "$EXPECTED_PREFIX" \
   || fail "npm prefix must be $EXPECTED_PREFIX, got $actual_prefix"
 
+for binary in codex claude pi; do
+  binary_path="$EXPECTED_PREFIX/bin/$binary"
+  if [ -e "$binary_path" ] || [ -L "$binary_path" ]; then
+    rm -f "$binary_path"
+  fi
+done
+
 npm install --global \
   @openai/codex@latest \
   @anthropic-ai/claude-code@latest \
