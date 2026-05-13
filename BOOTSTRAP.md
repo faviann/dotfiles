@@ -43,8 +43,9 @@ workstation-setup
 
 It runs `chezmoi init/update`, applies the `#workstation` Home Manager flake,
 authenticates GitHub CLI from the `dotfiles/github-cli-token` Bitwarden item,
-and validates the expected tools. Home Manager installs the normal user tools,
-including `uv`, `gh`, Codex, Claude Code, and Hermes.
+and validates the expected tools. Home Manager installs the stable base tools,
+including Node/npm, `uv`, `gh`, and Hermes. The `update-agent-tools` helper
+installs or refreshes Codex, Claude Code, and Pi.dev through npm.
 
 Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
 has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`

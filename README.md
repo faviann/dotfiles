@@ -7,10 +7,22 @@ See `BOOTSTRAP.md` for new machine setup.
 ## Workstation Home Manager
 
 The `workstation` Home Manager flake installs user tooling for the Debian LXC
-workstation: Node.js, `uv`, `gh`, `jq`, `ripgrep`, `fd`, `fzf`, Codex, Claude
-Code, and Hermes. Hermes is installed from `github:NousResearch/hermes-agent`
-as a normal non-NixOS package; provider credentials and runtime configuration
-stay in `~/.hermes`.
+workstation: Node.js/npm, `uv`, `gh`, `jq`, `ripgrep`, `fd`, `fzf`, and
+Hermes. Hermes is installed from `github:NousResearch/hermes-agent` as a
+normal non-NixOS package; provider credentials and runtime configuration stay
+in `~/.hermes`.
+
+Codex, Claude Code, and Pi.dev are intentionally installed through the explicit
+npm latest layer instead of pinned Nix packages:
+
+```bash
+update-agent-tools
+```
+
+Home Manager provides Node/npm and writes the npm prefix as
+`/home/faviann/.local`; `update-agent-tools` installs or refreshes
+`@openai/codex`, `@anthropic-ai/claude-code`, and
+`@earendil-works/pi-coding-agent` into `~/.local/bin`.
 
 Apply it through the Ansible-installed `workstation-setup` command, or build it
 directly while developing dotfiles:

@@ -15,8 +15,6 @@
     ripgrep
     fd
     fzf
-    codex
-    claude-code
     hermesPackage
   ];
 
@@ -41,7 +39,7 @@
 
     Service = {
       Type = "simple";
-      Environment = "PATH=%h/.nix-profile/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin";
+      Environment = "PATH=%h/.local/bin:%h/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin";
       ExecStart = "/usr/bin/env aoe serve --host 127.0.0.1 --port 4000 --no-auth";
       Restart = "on-failure";
       RestartSec = 5;
@@ -78,7 +76,7 @@
     };
     Service = {
       Type = "simple";
-      Environment = "PATH=%h/.nix-profile/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin";
+      Environment = "PATH=%h/.local/bin:%h/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin";
       ExecStart = "/usr/bin/env hermes gateway run";
       Restart = "on-failure";
       RestartSec = 10;
@@ -94,7 +92,7 @@
     };
     Service = {
       Type = "simple";
-      Environment = "PATH=%h/.nix-profile/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin";
+      Environment = "PATH=%h/.local/bin:%h/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin";
       ExecStart = "/usr/bin/env hermes dashboard --host 0.0.0.0 --port 9119 --no-open --insecure";
       Restart = "on-failure";
       RestartSec = 10;

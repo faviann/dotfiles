@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+EXPECTED_PREFIX="/home/faviann/.local"
+
+fail() {
+  printf 'update-agent-tools: %s\n' "$*" >&2
+  exit 1
+}
+
+command -v npm >/dev/null 2>&1 || fail "npm missing from PATH"
+
+actual_prefix="$(npm config get prefix)"
+test "$actual_prefix" = "$EXPECTED_PREFIX" \
+  || fail "npm prefix must be $EXPECTED_PREFIX, got $actual_prefix"
+
+npm install --global \
+  @openai/codex@latest \
+  @anthropic-ai/claude-code@latest \
+  @earendil-works/pi-coding-agent@latest
+
+hash -r 2>/dev/null || true
+
+for binary in codex claude pi; do
+  expected_path="$EXPECTED_PREFIX/bin/$binary"
+  actual_path="$(command -v "$binary" || true)"
+  test "$actual_path" = "$expected_path" \
+    || fail "$binary must resolve to $expected_path, got ${actual_path:-missing}"
+done
+
+codex --version
+claude --version
+pi --version
