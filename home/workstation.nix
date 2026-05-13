@@ -136,7 +136,12 @@
 
   # The nix-openclaw module targets graphical-session.target by default.
   # Override to default.target for headless LXC (same pattern as hermes-gateway).
+  # Keep logs in journald so the service does not depend on volatile /tmp paths.
   systemd.user.services.openclaw-gateway = {
+    Service = {
+      StandardOutput = lib.mkForce "journal";
+      StandardError = lib.mkForce "journal";
+    };
     Install.WantedBy = lib.mkForce [ "default.target" ];
   };
 }
