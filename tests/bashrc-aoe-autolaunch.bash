@@ -53,37 +53,29 @@ run_shell() {
   local stderr_file="$3"
   local interactive_with_tty="$4"
   local command_line
+  local -a shell_environment=(
+    "HOME=$home"
+    "PATH=$home/.local/bin"
+    "BASHRC_PATH=$BASHRC_PATH"
+    "COMMAND_LOG=$home/command-log"
+    "CHECK_OUTPUT=${CHECK_OUTPUT:-}"
+    "SSH_TTY=${TEST_SSH_TTY:-}"
+    "SSH_ORIGINAL_COMMAND=${TEST_SSH_ORIGINAL_COMMAND:-}"
+    "SHELL=/bin/bash"
+    "TMUX=${TEST_TMUX:-}"
+    "TMUX_SESSION_EXISTS=${TMUX_SESSION_EXISTS:-1}"
+  )
 
   if [[ "$interactive_with_tty" == "1" ]]; then
     printf -v command_line '%q ' \
       /usr/bin/bash --noprofile --norc -i -c 'source "$BASHRC_PATH"'
-    env \
-      HOME="$home" \
-      PATH="$home/.local/bin" \
-      BASHRC_PATH="$BASHRC_PATH" \
-      COMMAND_LOG="$home/command-log" \
-      CHECK_OUTPUT="${CHECK_OUTPUT:-}" \
-      SSH_TTY="${TEST_SSH_TTY:-}" \
-      SSH_ORIGINAL_COMMAND="${TEST_SSH_ORIGINAL_COMMAND:-}" \
-      SHELL=/bin/bash \
-      TMUX="${TEST_TMUX:-}" \
-      TMUX_SESSION_EXISTS="${TMUX_SESSION_EXISTS:-1}" \
+    env "${shell_environment[@]}" \
       /usr/bin/script -qefc "$command_line" /dev/null \
         >"$stdout_file" 2>"$stderr_file"
     tr -d '\r' <"$stdout_file" >"$stdout_file.normalized"
     mv "$stdout_file.normalized" "$stdout_file"
   else
-    env \
-      HOME="$home" \
-      PATH="$home/.local/bin" \
-      BASHRC_PATH="$BASHRC_PATH" \
-      COMMAND_LOG="$home/command-log" \
-      CHECK_OUTPUT="${CHECK_OUTPUT:-}" \
-      SSH_TTY="${TEST_SSH_TTY:-}" \
-      SSH_ORIGINAL_COMMAND="${TEST_SSH_ORIGINAL_COMMAND:-}" \
-      SHELL=/bin/bash \
-      TMUX="${TEST_TMUX:-}" \
-      TMUX_SESSION_EXISTS="${TMUX_SESSION_EXISTS:-1}" \
+    env "${shell_environment[@]}" \
       /usr/bin/bash --noprofile --norc -c 'source "$BASHRC_PATH"' \
         >"$stdout_file" 2>"$stderr_file"
   fi
@@ -168,7 +160,7 @@ assert_context_skips_autolaunch() {
 
   case "$missing_prerequisite" in
     marker) rm "$test_dir/.local/state/workstation-setup/complete" ;;
-    aoe|tmux|update-agent-tools) rm "$test_dir/.local/bin/$missing_prerequisite" ;;
+    aoe|tmux) rm "$test_dir/.local/bin/$missing_prerequisite" ;;
     '') ;;
     *) fail "unknown test prerequisite: $missing_prerequisite" ;;
   esac
@@ -205,13 +197,36 @@ test_excluded_shell_contexts_skip_the_check() {
     'workstation without AoE' 1 /dev/pts/1 '' '' aoe
   assert_context_skips_autolaunch \
     'workstation without tmux' 1 /dev/pts/1 '' '' tmux
-  assert_context_skips_autolaunch \
-    'workstation without update-agent-tools' 1 /dev/pts/1 '' '' update-agent-tools
+}
+
+test_missing_checker_preserves_existing_autolaunch() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir"
+  rm "$test_dir/.local/bin/update-agent-tools"
+
+  TEST_SSH_TTY=/dev/pts/1 \
+    CHECK_OUTPUT='this notice must not be shown' \
+    run_shell "$test_dir" "$test_dir/stdout" "$test_dir/stderr" 1 \
+    || fail "SSH login without the checker failed: $(<"$test_dir/stderr")"
+
+  diff -u \
+    <(printf '%s\n' \
+      'tmux has-session -t main' \
+      'tmux attach-session -t main') \
+    "$test_dir/command-log" \
+    || fail "missing checker suppressed the existing AoE auto-launch"
+  [[ ! -s "$test_dir/stdout" ]] \
+    || fail "missing checker added login output: $(<"$test_dir/stdout")"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "missing checker added login error output: $(<"$test_dir/stderr")"
 }
 
 test_due_check_finishes_before_existing_session_attach
 test_due_check_finishes_before_new_session_launch
 test_silent_check_adds_no_login_output
 test_excluded_shell_contexts_skip_the_check
+test_missing_checker_preserves_existing_autolaunch
 
 printf 'PASS: bashrc AoE auto-launch boundary\n'

@@ -19,9 +19,10 @@ _aoe_autolaunch() {
 	[[ -e "$HOME/.local/state/workstation-setup/complete" ]] || return
 	command -v aoe >/dev/null 2>&1 || return
 	command -v tmux >/dev/null 2>&1 || return
-	command -v update-agent-tools >/dev/null 2>&1 || return
 
-	update-agent-tools --check-if-due
+	if command -v update-agent-tools >/dev/null 2>&1; then
+		update-agent-tools --check-if-due
+	fi
 
 	if tmux has-session -t main 2>/dev/null; then
 		exec tmux attach-session -t main
