@@ -29,6 +29,9 @@ check_toolchain() {
   local installed
   local aoe_current="missing"
   local aoe_latest
+  local bundled_codex_range
+  local bundled_codex_versions
+  local bundled_codex_latest
   local codex_latest
 
   command -v curl >/dev/null 2>&1 || fail "curl missing from PATH"
@@ -45,6 +48,22 @@ check_toolchain() {
   test -n "$installed" || fail "could not inspect globally installed npm packages"
 
   codex_latest="$(npm view @openai/codex@latest version)"
+  bundled_codex_range="$(npm view \
+    @agentclientprotocol/codex-acp@latest \
+    'dependencies.@openai/codex')"
+  bundled_codex_versions="$(npm view \
+    "@openai/codex@$bundled_codex_range" \
+    version \
+    --json)"
+  bundled_codex_latest="$(jq -er '
+    if type == "array" then . else [.] end
+    | map(select(
+        type == "string"
+        and length > 0
+        and (contains("-") | not)
+      ))
+    | last
+  ' <<<"$bundled_codex_versions")"
 
   check_component "AoE" \
     "$aoe_current" \
@@ -69,7 +88,7 @@ check_toolchain() {
     "$(npm view pi-acp@latest version)"
   check_component "Codex runtime (codex-acp)" \
     "$(jq -r '.dependencies["@agentclientprotocol/codex-acp"].dependencies["@openai/codex"].version // "missing"' <<<"$installed")" \
-    "$codex_latest"
+    "$bundled_codex_latest"
 }
 
 if [[ "${1:-}" == "--check" ]]; then

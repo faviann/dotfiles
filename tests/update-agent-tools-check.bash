@@ -86,6 +86,16 @@ EOF
   exit 0
 fi
 
+if [[ "$*" == "view @agentclientprotocol/codex-acp@latest dependencies.@openai/codex" ]]; then
+  printf '%s\n' "$BUNDLED_CODEX_RANGE"
+  exit 0
+fi
+
+if [[ "$*" == "view @openai/codex@$BUNDLED_CODEX_RANGE version --json" ]]; then
+  printf '%s\n' "$BUNDLED_CODEX_VERSIONS_JSON"
+  exit 0
+fi
+
 if [[ "$1" == "view" && "$3" == "version" ]]; then
   case "$2" in
     '@openai/codex@latest') printf '%s\n' "$CODEX_LATEST" ;;
@@ -130,6 +140,8 @@ run_check() {
     PI_ACP_CURRENT="${PI_ACP_CURRENT:-7.8.9}" \
     PI_ACP_LATEST="${PI_ACP_LATEST:-7.8.9}" \
     BUNDLED_CODEX_CURRENT="${BUNDLED_CODEX_CURRENT:-2.3.4}" \
+    BUNDLED_CODEX_RANGE="${BUNDLED_CODEX_RANGE:-^2.3.0}" \
+    BUNDLED_CODEX_VERSIONS_JSON="${BUNDLED_CODEX_VERSIONS_JSON:-[\"2.3.3\",\"2.3.4\"]}" \
     bash "$COMMAND" --check >"$stdout_file" 2>"$stderr_file"
 }
 
@@ -236,8 +248,80 @@ test_nested_codex_runtime_is_a_distinct_scope() {
     || fail "nested Codex check wrote stderr: $(<"$test_dir/stderr")"
 }
 
+test_nested_codex_uses_latest_adapter_compatible_target() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if ! CODEX_CURRENT="2.4.0" \
+    CODEX_LATEST="2.4.0" \
+    BUNDLED_CODEX_CURRENT="2.3.3" \
+    BUNDLED_CODEX_RANGE="^2.3.0" \
+    BUNDLED_CODEX_VERSIONS_JSON='["2.3.3","2.3.4"]' \
+    run_check "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "adapter-compatible Codex check exited nonzero: $(<"$test_dir/stderr")"
+  fi
+
+  diff -u \
+    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\n') \
+    "$test_dir/stdout" \
+    || fail "adapter-compatible Codex output did not match"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "adapter-compatible Codex check wrote stderr: $(<"$test_dir/stderr")"
+}
+
+test_nested_codex_accepts_a_single_compatible_version() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if ! CODEX_CURRENT="2.4.0" \
+    CODEX_LATEST="2.4.0" \
+    BUNDLED_CODEX_CURRENT="2.3.3" \
+    BUNDLED_CODEX_RANGE="~2.3.4" \
+    BUNDLED_CODEX_VERSIONS_JSON='"2.3.4"' \
+    run_check "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "single-version Codex check exited nonzero: $(<"$test_dir/stderr")"
+  fi
+
+  diff -u \
+    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\n') \
+    "$test_dir/stdout" \
+    || fail "single-version Codex output did not match"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "single-version Codex check wrote stderr: $(<"$test_dir/stderr")"
+}
+
+test_nested_codex_ignores_compatible_prereleases() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if ! CODEX_CURRENT="2.4.0" \
+    CODEX_LATEST="2.4.0" \
+    BUNDLED_CODEX_CURRENT="2.3.3" \
+    BUNDLED_CODEX_RANGE="^2.3.0 || >=2.5.0-beta.0 <2.5.0" \
+    BUNDLED_CODEX_VERSIONS_JSON='["2.3.3","2.3.4","2.5.0-beta.1"]' \
+    run_check "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "stable nested Codex check exited nonzero: $(<"$test_dir/stderr")"
+  fi
+
+  diff -u \
+    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\n') \
+    "$test_dir/stdout" \
+    || fail "stable nested Codex output did not match"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "stable nested Codex check wrote stderr: $(<"$test_dir/stderr")"
+}
+
 test_current_toolchain_is_silent
 test_outdated_components_report_exact_versions
 test_missing_components_are_reported
 test_nested_codex_runtime_is_a_distinct_scope
+test_nested_codex_uses_latest_adapter_compatible_target
+test_nested_codex_accepts_a_single_compatible_version
+test_nested_codex_ignores_compatible_prereleases
 printf 'PASS: update-agent-tools --check\n'
