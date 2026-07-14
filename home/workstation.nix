@@ -31,6 +31,27 @@
 
   systemd.user.startServices = "sd-switch";
 
+  home.activation.bootstrapAgentTools = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
+    export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:$PATH"
+
+    _agent_tools_missing=false
+    for _agent_tool in \
+      aoe codex claude pi codex-acp claude-agent-acp pi-acp; do
+      if ! command -v "$_agent_tool" >/dev/null 2>&1; then
+        _agent_tools_missing=true
+        break
+      fi
+    done
+
+    if [ "$_agent_tools_missing" = true ]; then
+      command -v aoe >/dev/null 2>&1 \
+        || { echo "Agent-tool bootstrap requires chezmoi to install AoE first" >&2; exit 1; }
+      command -v update-agent-tools >/dev/null 2>&1 \
+        || { echo "Agent-tool bootstrap requires the dotfiles updater" >&2; exit 1; }
+      update-agent-tools --yes
+    fi
+  '';
+
   systemd.user.services.aoe-serve = {
     Unit = {
       Description = "Agent of Empires web dashboard";
