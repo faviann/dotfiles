@@ -162,6 +162,42 @@ captured_workers_replaced_and_healthy() {
   ' <<<"$current_workers" >/dev/null
 }
 
+wait_for_aoe_service() {
+  local health_attempt=1
+
+  while (( health_attempt <= 10 )); do
+    if systemctl --user is-active --quiet aoe-serve.service; then
+      return 0
+    fi
+    if (( health_attempt < 10 )); then
+      sleep 1
+    fi
+    health_attempt=$((health_attempt + 1))
+  done
+  return 1
+}
+
+wait_for_aoe_health() {
+  local health_attempt=1
+
+  aoe_health_component="AoE service"
+  while (( health_attempt <= 10 )); do
+    if systemctl --user is-active --quiet aoe-serve.service; then
+      aoe_health_component="AoE ACP diagnostics"
+      if aoe acp doctor; then
+        return 0
+      fi
+    else
+      aoe_health_component="AoE service"
+    fi
+    if (( health_attempt < 10 )); then
+      sleep 1
+    fi
+    health_attempt=$((health_attempt + 1))
+  done
+  return 1
+}
+
 install_npm_component() {
   local component="$1"
   local package="$2"
@@ -484,103 +520,66 @@ if ! systemctl --user restart aoe-serve.service; then
   activation_fail "activation" "AoE service restart"
 fi
 
-health_attempt=1
-health_component="AoE service"
-service_healthy=false
-while (( health_attempt <= 10 )); do
-  if systemctl --user is-active --quiet aoe-serve.service; then
-    health_component="AoE ACP diagnostics"
-    if aoe acp doctor; then
-      service_healthy=true
-      break
-    fi
-  else
-    health_component="AoE service"
-  fi
-  if (( health_attempt < 10 )); then
-    sleep 1
-  fi
-  health_attempt=$((health_attempt + 1))
-done
-
-[[ "$service_healthy" == true ]] \
-  || activation_fail "post-activation verification" "$health_component"
-
 if (( captured_worker_count > 0 )); then
-  current_workers="$(read_acp_workers)" \
-    || activation_fail "post-activation verification" "ACP session replacement"
-  mapfile -t workers_to_restart < <(jq -r \
-    --argjson captured "$captured_workers" '
-      . as $current
-      | [
-          $captured[] as $before
-          | select(
-              any(
-                $current[];
-                .session_id == $before.session_id
-                and .pid != $before.pid
-              )
-              | not
-            )
-          | $before.session_id
-        ]
-      | unique[]
-    ' <<<"$current_workers")
-  for worker_session_id in "${workers_to_restart[@]}"; do
+  wait_for_aoe_service \
+    || activation_fail "post-activation verification" "AoE service"
+
+  mapfile -t captured_worker_sessions < <(jq -r '
+    unique_by(.session_id)
+    | .[].session_id
+  ' <<<"$captured_workers")
+  for worker_session_id in "${captured_worker_sessions[@]}"; do
+    current_workers="$(read_acp_workers)" \
+      || activation_fail \
+        "post-activation verification" \
+        "ACP session replacement"
+    if jq -e \
+      --arg session_id "$worker_session_id" \
+      --argjson captured "$captured_workers" '
+        ($captured
+          | map(select(.session_id == $session_id))
+          | first
+        ) as $before
+        | any(
+            .[];
+            .session_id == $session_id
+            and .pid != $before.pid
+          )
+      ' <<<"$current_workers" >/dev/null; then
+      continue
+    fi
     if ! aoe acp restart "$worker_session_id"; then
       activation_fail "activation" "ACP worker restart"
     fi
   done
 
   workers_healthy=false
-  if ((${#workers_to_restart[@]} == 0)) \
-    && captured_workers_replaced_and_healthy \
+  worker_health_attempt=1
+  while (( worker_health_attempt <= 10 )); do
+    current_workers="$(read_acp_workers)" \
+      || activation_fail \
+        "post-activation verification" \
+        "ACP session replacement"
+    if captured_workers_replaced_and_healthy \
       "$current_workers" "$captured_workers"; then
-    workers_healthy=true
-  else
-    worker_health_attempt=1
-    while (( worker_health_attempt <= 10 )); do
-      current_workers="$(read_acp_workers)" \
-        || activation_fail \
-          "post-activation verification" \
-          "ACP session replacement"
-      if captured_workers_replaced_and_healthy \
-        "$current_workers" "$captured_workers"; then
-        workers_healthy=true
-        break
-      fi
-      if (( worker_health_attempt < 10 )); then
-        sleep 1
-      fi
-      worker_health_attempt=$((worker_health_attempt + 1))
-    done
-  fi
+      workers_healthy=true
+      break
+    fi
+    if (( worker_health_attempt < 10 )); then
+      sleep 1
+    fi
+    worker_health_attempt=$((worker_health_attempt + 1))
+  done
   [[ "$workers_healthy" == true ]] \
     || activation_fail \
       "post-activation verification" \
       "ACP session replacement"
-
-  health_attempt=1
-  health_component="AoE service"
-  service_healthy=false
-  while (( health_attempt <= 10 )); do
-    if systemctl --user is-active --quiet aoe-serve.service; then
-      health_component="AoE ACP diagnostics"
-      if aoe acp doctor; then
-        service_healthy=true
-        break
-      fi
-    else
-      health_component="AoE service"
-    fi
-    if (( health_attempt < 10 )); then
-      sleep 1
-    fi
-    health_attempt=$((health_attempt + 1))
-  done
-  [[ "$service_healthy" == true ]] \
-    || activation_fail "post-activation verification" "$health_component"
 fi
+
+wait_for_aoe_health \
+  || activation_fail \
+    "post-activation verification" \
+    "$aoe_health_component"
 
 activation_time_input="${UPDATE_AGENT_TOOLS_ACTIVATION_NOW:-${UPDATE_AGENT_TOOLS_NOW:-now}}"
 successful_activation_iso="$(date -u -d "$activation_time_input" +%Y-%m-%dT%H:%M:%SZ)" \
