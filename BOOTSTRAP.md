@@ -43,9 +43,16 @@ workstation-setup
 
 It runs `chezmoi init/update`, applies the `#workstation` Home Manager flake,
 authenticates GitHub CLI from the `dotfiles/github-cli-token` Bitwarden item,
-and validates the expected tools. Home Manager installs the stable base tools,
-including Node/npm, `uv`, `gh`, and Hermes. The `update-agent-tools` helper
-installs or refreshes Codex, Claude Code, and Pi.dev through npm.
+and validates the expected tools. Chezmoi installs AoE first. Home Manager then
+installs the stable base tools, including Node/npm, `uv`, `gh`, and Hermes,
+loads the AoE user units, and hands off to `update-agent-tools --yes` if any
+managed agent command is missing. That handoff installs the standalone Codex,
+Claude Code, and Pi CLIs plus the `codex-acp`, `claude-agent-acp`, and `pi-acp`
+adapters. No package lookup or additional homelab/Ansible change is required.
+
+AoE's host-level `acp.allow_agent_install` setting stays disabled; dotfiles is
+the package owner. The bootstrap update is part of `workstation-setup`, not an
+SSH-login installation or a background schedule.
 
 Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
 has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
@@ -127,6 +134,34 @@ chezmoi update
 
 `chezmoi update` pulls from the SSH origin after the first bootstrap and then
 re-applies templates from Bitwarden.
+
+Maintain the full AoE agent toolchain with one command:
+
+```bash
+update-agent-tools
+```
+
+It updates AoE; the standalone Codex, Claude Code, and Pi CLIs; and the
+`codex-acp`, `claude-agent-acp`, and `pi-acp` adapters as one unit. The Codex
+runtime bundled inside `codex-acp` is separate from the standalone Codex CLI;
+updating one does not update the other, so the updater checks both scopes.
+
+An interactive update asks once when running ACP sessions would be restarted
+and reports only the number affected. Automation must pass `--yes` to authorize
+that disruption; otherwise it refuses safely. Installation and pre-activation
+verification finish before the AoE service or ACP workers restart. Bounded
+service, ACP diagnostic, and worker-health checks must pass before success is
+recorded.
+
+Interactive SSH login only checks freshness: it never installs. Successful
+checks are due every 24 hours, failed checks retry after one hour, current state
+is silent, and notices show names and versions rather than release notes. There
+is no background scheduling or per-component update command.
+
+Failed updates do not roll back automatically. Use the reported phase and
+component, inspect `systemctl --user status aoe-serve.service` and
+`journalctl --user-unit aoe-serve.service` when activation is involved, correct
+the underlying problem, and rerun `update-agent-tools`.
 
 ## Clone ServerManagementScripts
 
