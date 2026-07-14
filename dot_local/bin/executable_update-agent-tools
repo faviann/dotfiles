@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_PREFIX="/home/faviann/.local"
+EXPECTED_PREFIX="$HOME/.local"
+AOE_LATEST_RELEASE_URL="https://api.github.com/repos/njbrake/agent-of-empires/releases/latest"
 
 fail() {
   printf 'update-agent-tools: %s\n' "$*" >&2
@@ -13,6 +14,90 @@ command -v npm >/dev/null 2>&1 || fail "npm missing from PATH"
 actual_prefix="$(npm config get prefix)"
 test "$actual_prefix" = "$EXPECTED_PREFIX" \
   || fail "npm prefix must be $EXPECTED_PREFIX, got $actual_prefix"
+
+check_component() {
+  local name="$1"
+  local current="$2"
+  local latest="$3"
+
+  if [[ "$current" != "$latest" ]]; then
+    printf '%s: %s -> %s\n' "$name" "$current" "$latest"
+  fi
+}
+
+check_toolchain() {
+  local installed
+  local aoe_current="missing"
+  local aoe_latest
+  local bundled_codex_range
+  local bundled_codex_versions
+  local bundled_codex_latest
+  local codex_latest
+
+  command -v curl >/dev/null 2>&1 || fail "curl missing from PATH"
+  command -v jq >/dev/null 2>&1 || fail "jq missing from PATH"
+
+  if command -v aoe >/dev/null 2>&1; then
+    aoe_current="$(aoe --version)"
+    aoe_current="${aoe_current##* }"
+  fi
+  aoe_latest="$(curl -fsSL "$AOE_LATEST_RELEASE_URL" | jq -r '.tag_name')"
+  aoe_latest="${aoe_latest#v}"
+
+  installed="$(npm list --global --json --all 2>/dev/null || true)"
+  test -n "$installed" || fail "could not inspect globally installed npm packages"
+
+  codex_latest="$(npm view @openai/codex@latest version)"
+  bundled_codex_range="$(npm view \
+    @agentclientprotocol/codex-acp@latest \
+    'dependencies.@openai/codex')"
+  bundled_codex_versions="$(npm view \
+    "@openai/codex@$bundled_codex_range" \
+    version \
+    --json)"
+  bundled_codex_latest="$(jq -er '
+    if type == "array" then . else [.] end
+    | map(select(
+        type == "string"
+        and length > 0
+        and (contains("-") | not)
+      ))
+    | last
+  ' <<<"$bundled_codex_versions")"
+
+  check_component "AoE" \
+    "$aoe_current" \
+    "$aoe_latest"
+  check_component "Codex CLI (standalone)" \
+    "$(jq -r '.dependencies["@openai/codex"].version // "missing"' <<<"$installed")" \
+    "$codex_latest"
+  check_component "Claude Code CLI" \
+    "$(jq -r '.dependencies["@anthropic-ai/claude-code"].version // "missing"' <<<"$installed")" \
+    "$(npm view @anthropic-ai/claude-code@latest version)"
+  check_component "Pi agent CLI" \
+    "$(jq -r '.dependencies["@earendil-works/pi-coding-agent"].version // "missing"' <<<"$installed")" \
+    "$(npm view @earendil-works/pi-coding-agent@latest version)"
+  check_component "codex-acp adapter" \
+    "$(jq -r '.dependencies["@agentclientprotocol/codex-acp"].version // "missing"' <<<"$installed")" \
+    "$(npm view @agentclientprotocol/codex-acp@latest version)"
+  check_component "claude-agent-acp adapter" \
+    "$(jq -r '.dependencies["@agentclientprotocol/claude-agent-acp"].version // "missing"' <<<"$installed")" \
+    "$(npm view @agentclientprotocol/claude-agent-acp@latest version)"
+  check_component "pi-acp adapter" \
+    "$(jq -r '.dependencies["pi-acp"].version // "missing"' <<<"$installed")" \
+    "$(npm view pi-acp@latest version)"
+  check_component "Codex runtime (codex-acp)" \
+    "$(jq -r '.dependencies["@agentclientprotocol/codex-acp"].dependencies["@openai/codex"].version // "missing"' <<<"$installed")" \
+    "$bundled_codex_latest"
+}
+
+if [[ "${1:-}" == "--check" ]]; then
+  [[ $# -eq 1 ]] || fail "--check does not accept arguments"
+  check_toolchain
+  exit 0
+fi
+
+[[ $# -eq 0 ]] || fail "unknown argument: $1"
 
 for binary in codex claude pi; do
   binary_path="$EXPECTED_PREFIX/bin/$binary"
