@@ -119,6 +119,49 @@ activation_fail() {
   fail "$phase failed: $component"
 }
 
+read_acp_workers() {
+  local workers
+
+  workers="$(aoe acp ps --json)" || return 1
+  jq -ce '
+    if type != "array" then error("expected an array") else . end
+    | map(
+        if (
+          (.session_id | type) == "string"
+          and (.session_id | length) > 0
+          and (.pid | type) == "number"
+          and (.alive | type) == "boolean"
+          and (.build_stale | type) == "boolean"
+        ) then {
+          session_id,
+          pid,
+          alive,
+          build_stale
+        } else error("invalid ACP worker") end
+      )
+  ' <<<"$workers"
+}
+
+captured_workers_replaced_and_healthy() {
+  local current_workers="$1"
+  local captured_workers="$2"
+
+  jq -e --argjson captured "$captured_workers" '
+    . as $current
+    | [
+        $captured[] as $before
+        | any(
+            $current[];
+            .session_id == $before.session_id
+            and .pid != $before.pid
+            and .alive == true
+            and .build_stale == false
+          )
+      ]
+    | all
+  ' <<<"$current_workers" >/dev/null
+}
+
 install_npm_component() {
   local component="$1"
   local package="$2"
@@ -350,10 +393,44 @@ if [[ "${1:-}" == "--check-if-due" ]]; then
   fi
 fi
 
-[[ $# -eq 0 ]] || fail "unknown argument: $1"
+assume_yes=false
+if [[ $# -eq 1 && "$1" == "--yes" ]]; then
+  assume_yes=true
+elif [[ $# -ne 0 ]]; then
+  fail "unknown argument: $1"
+fi
 
 command -v aoe >/dev/null 2>&1 \
   || fail "installation failed: AoE command missing from PATH"
+captured_workers="$(read_acp_workers)" \
+  || fail "unable to inspect running ACP sessions"
+captured_workers="$(jq -c '
+  [
+    .[]
+    | select(.alive == true)
+    | {session_id, pid}
+  ]
+  | unique_by([.session_id, .pid])
+' <<<"$captured_workers")" \
+  || fail "unable to inspect running ACP sessions"
+captured_worker_count="$(jq -r 'length' <<<"$captured_workers")"
+if [[ "$captured_worker_count" -eq 1 ]]; then
+  captured_worker_noun="session"
+else
+  captured_worker_noun="sessions"
+fi
+if (( captured_worker_count > 0 )) && [[ "$assume_yes" == false ]]; then
+  if [[ ! -t 0 ]]; then
+    fail "$captured_worker_count running ACP $captured_worker_noun would be disrupted; rerun with --yes to authorize replacement"
+  fi
+  printf 'update-agent-tools: %s running ACP %s would be disrupted. Continue? [y/N] ' \
+    "$captured_worker_count" "$captured_worker_noun" >&2
+  if ! IFS= read -r disruption_confirmation \
+    || [[ ! "$disruption_confirmation" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+    fail "update cancelled"
+  fi
+fi
+
 if ! aoe update --yes; then
   fail "installation failed: AoE"
 fi
@@ -409,15 +486,13 @@ fi
 
 health_attempt=1
 health_component="AoE service"
+service_healthy=false
 while (( health_attempt <= 10 )); do
   if systemctl --user is-active --quiet aoe-serve.service; then
     health_component="AoE ACP diagnostics"
     if aoe acp doctor; then
-      activation_time_input="${UPDATE_AGENT_TOOLS_ACTIVATION_NOW:-${UPDATE_AGENT_TOOLS_NOW:-now}}"
-      successful_activation_iso="$(date -u -d "$activation_time_input" +%Y-%m-%dT%H:%M:%SZ)" \
-        || activation_fail "post-activation verification" "activation timestamp"
-      write_activation_state "$successful_activation_iso" "" ""
-      exit 0
+      service_healthy=true
+      break
     fi
   else
     health_component="AoE service"
@@ -428,4 +503,62 @@ while (( health_attempt <= 10 )); do
   health_attempt=$((health_attempt + 1))
 done
 
-activation_fail "post-activation verification" "$health_component"
+[[ "$service_healthy" == true ]] \
+  || activation_fail "post-activation verification" "$health_component"
+
+if (( captured_worker_count > 0 )); then
+  current_workers="$(read_acp_workers)" \
+    || activation_fail "post-activation verification" "ACP session replacement"
+  mapfile -t workers_to_restart < <(jq -r \
+    --argjson captured "$captured_workers" '
+      . as $current
+      | [
+          $captured[] as $before
+          | ([
+              $current[]
+              | select(.session_id == $before.session_id)
+            ] | first) as $after
+          | select($after == null or $after.pid == $before.pid)
+          | $before.session_id
+        ]
+      | unique[]
+    ' <<<"$current_workers")
+  for worker_session_id in "${workers_to_restart[@]}"; do
+    if ! aoe acp restart "$worker_session_id"; then
+      activation_fail "activation" "ACP worker restart"
+    fi
+  done
+
+  workers_healthy=false
+  if ((${#workers_to_restart[@]} == 0)) \
+    && captured_workers_replaced_and_healthy \
+      "$current_workers" "$captured_workers"; then
+    workers_healthy=true
+  else
+    worker_health_attempt=1
+    while (( worker_health_attempt <= 10 )); do
+      current_workers="$(read_acp_workers)" \
+        || activation_fail \
+          "post-activation verification" \
+          "ACP session replacement"
+      if captured_workers_replaced_and_healthy \
+        "$current_workers" "$captured_workers"; then
+        workers_healthy=true
+        break
+      fi
+      if (( worker_health_attempt < 10 )); then
+        sleep 1
+      fi
+      worker_health_attempt=$((worker_health_attempt + 1))
+    done
+  fi
+  [[ "$workers_healthy" == true ]] \
+    || activation_fail \
+      "post-activation verification" \
+      "ACP session replacement"
+fi
+
+activation_time_input="${UPDATE_AGENT_TOOLS_ACTIVATION_NOW:-${UPDATE_AGENT_TOOLS_NOW:-now}}"
+successful_activation_iso="$(date -u -d "$activation_time_input" +%Y-%m-%dT%H:%M:%SZ)" \
+  || activation_fail "post-activation verification" "activation timestamp"
+write_activation_state "$successful_activation_iso" "" ""
