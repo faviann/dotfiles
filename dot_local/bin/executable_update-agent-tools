@@ -142,9 +142,20 @@ is_stable_version() {
   [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+][0-9A-Za-z.-]+)?$ ]]
 }
 
+check_failure_component() {
+  printf 'update-agent-tools-check-component: %s\n' "$1" >&2
+  return 1
+}
+
+require_stable_version() {
+  local component="$1"
+  local version="$2"
+
+  is_stable_version "$version" || check_failure_component "$component"
+}
+
 check_toolchain() {
   local installed
-  local latest_version
   local aoe_current="missing"
   local aoe_latest
   local bundled_codex_range
@@ -157,33 +168,44 @@ check_toolchain() {
   local pi_acp_latest
   local codex_latest
 
-  command -v curl >/dev/null 2>&1 || fail "curl missing from PATH"
-  command -v jq >/dev/null 2>&1 || fail "jq missing from PATH"
+  command -v curl >/dev/null 2>&1 \
+    || { check_failure_component "AoE"; return 1; }
+  command -v jq >/dev/null 2>&1 \
+    || { check_failure_component "npm package inventory"; return 1; }
 
   if command -v aoe >/dev/null 2>&1; then
-    aoe_current="$(aoe --version)" || return 1
+    aoe_current="$(aoe --version)" \
+      || { check_failure_component "AoE"; return 1; }
     aoe_current="${aoe_current##* }"
   fi
   aoe_latest="$(curl -fsSL "$AOE_LATEST_RELEASE_URL" | jq -r '.tag_name')" \
-    || return 1
-  [[ -n "$aoe_latest" && "$aoe_latest" != "null" ]] || return 1
+    || { check_failure_component "AoE"; return 1; }
+  [[ -n "$aoe_latest" && "$aoe_latest" != "null" ]] \
+    || { check_failure_component "AoE"; return 1; }
   aoe_latest="${aoe_latest#v}"
-  is_stable_version "$aoe_latest" || return 1
+  require_stable_version "AoE" "$aoe_latest" || return 1
 
   installed="$(npm list --global --json --all 2>/dev/null || true)"
-  test -n "$installed" || fail "could not inspect globally installed npm packages"
+  [[ -n "$installed" ]] \
+    || { check_failure_component "npm package inventory"; return 1; }
+  jq -e 'type == "object"' <<<"$installed" >/dev/null \
+    || { check_failure_component "npm package inventory"; return 1; }
 
-  codex_latest="$(npm view @openai/codex@latest version)" || return 1
+  codex_latest="$(npm view @openai/codex@latest version)" \
+    || { check_failure_component "Codex CLI (standalone)"; return 1; }
   bundled_codex_range="$(npm view \
     @agentclientprotocol/codex-acp@latest \
-    'dependencies.@openai/codex')" || return 1
-  [[ "$bundled_codex_range" =~ [^[:space:]] ]] || return 1
+    'dependencies.@openai/codex')" \
+    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
+  [[ "$bundled_codex_range" =~ [^[:space:]] ]] \
+    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
   [[ "$bundled_codex_range" != "null" && "$bundled_codex_range" != "undefined" ]] \
-    || return 1
+    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
   bundled_codex_versions="$(npm view \
     "@openai/codex@$bundled_codex_range" \
     version \
-    --json)" || return 1
+    --json)" \
+    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
   bundled_codex_latest="$(jq -er '
     if type == "array" then . else [.] end
     | map(select(
@@ -192,26 +214,27 @@ check_toolchain() {
         and (contains("-") | not)
       ))
     | last
-  ' <<<"$bundled_codex_versions")" || return 1
+  ' <<<"$bundled_codex_versions")" \
+    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
   claude_latest="$(npm view @anthropic-ai/claude-code@latest version)" \
-    || return 1
+    || { check_failure_component "Claude Code CLI"; return 1; }
   pi_latest="$(npm view @earendil-works/pi-coding-agent@latest version)" \
-    || return 1
+    || { check_failure_component "Pi agent CLI"; return 1; }
   codex_acp_latest="$(npm view @agentclientprotocol/codex-acp@latest version)" \
-    || return 1
+    || { check_failure_component "codex-acp adapter"; return 1; }
   claude_acp_latest="$(npm view @agentclientprotocol/claude-agent-acp@latest version)" \
+    || { check_failure_component "claude-agent-acp adapter"; return 1; }
+  pi_acp_latest="$(npm view pi-acp@latest version)" \
+    || { check_failure_component "pi-acp adapter"; return 1; }
+  require_stable_version "Codex CLI (standalone)" "$codex_latest" || return 1
+  require_stable_version "Codex runtime (codex-acp)" "$bundled_codex_latest" \
     || return 1
-  pi_acp_latest="$(npm view pi-acp@latest version)" || return 1
-  for latest_version in \
-    "$codex_latest" \
-    "$bundled_codex_latest" \
-    "$claude_latest" \
-    "$pi_latest" \
-    "$codex_acp_latest" \
-    "$claude_acp_latest" \
-    "$pi_acp_latest"; do
-    is_stable_version "$latest_version" || return 1
-  done
+  require_stable_version "Claude Code CLI" "$claude_latest" || return 1
+  require_stable_version "Pi agent CLI" "$pi_latest" || return 1
+  require_stable_version "codex-acp adapter" "$codex_acp_latest" || return 1
+  require_stable_version "claude-agent-acp adapter" "$claude_acp_latest" \
+    || return 1
+  require_stable_version "pi-acp adapter" "$pi_acp_latest" || return 1
 
   check_component "AoE" \
     "$aoe_current" \
@@ -363,8 +386,11 @@ done
 verification_output_file="$(mktemp "$STATE_DIR/verification.stdout.XXXXXX")"
 verification_error_file="$(mktemp "$STATE_DIR/verification.stderr.XXXXXX")"
 if ! check_toolchain >"$verification_output_file" 2>"$verification_error_file"; then
+  verification_component="$(sed -n \
+    's/^update-agent-tools-check-component: //p' \
+    "$verification_error_file" | tail -n 1)"
   rm -f "$verification_output_file" "$verification_error_file"
-  fail "pre-activation verification failed: installed package versions"
+  fail "pre-activation verification failed: ${verification_component:-toolchain verification}"
 fi
 verification_output="$(<"$verification_output_file")"
 rm -f "$verification_output_file" "$verification_error_file"
@@ -387,7 +413,10 @@ while (( health_attempt <= 10 )); do
   if systemctl --user is-active --quiet aoe-serve.service; then
     health_component="AoE ACP diagnostics"
     if aoe acp doctor; then
-      write_activation_state "$now_iso" "" ""
+      activation_time_input="${UPDATE_AGENT_TOOLS_ACTIVATION_NOW:-${UPDATE_AGENT_TOOLS_NOW:-now}}"
+      successful_activation_iso="$(date -u -d "$activation_time_input" +%Y-%m-%dT%H:%M:%SZ)" \
+        || activation_fail "post-activation verification" "activation timestamp"
+      write_activation_state "$successful_activation_iso" "" ""
       exit 0
     fi
   else

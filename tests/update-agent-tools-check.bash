@@ -107,6 +107,9 @@ if [[ "$*" == "config get prefix" ]]; then
 fi
 
 if [[ "$*" == "list --global --json --all" ]]; then
+  if [[ "${NPM_LIST_EMPTY:-0}" == "1" ]]; then
+    exit 0
+  fi
   codex_current="$CODEX_CURRENT"
   claude_current="$CLAUDE_CURRENT"
   pi_current="$PI_CURRENT"
@@ -246,8 +249,15 @@ set -euo pipefail
 printf 'sleep %s\n' "$*" >>"$COMMAND_LOG"
 STUB
 
+  cat >"$stub_dir/date" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'date %s\n' "$*" >>"$COMMAND_LOG"
+exec /usr/bin/date "$@"
+STUB
+
   chmod +x "$home/.local/bin/aoe" "$stub_dir/curl" "$stub_dir/npm" \
-    "$stub_dir/systemctl" "$stub_dir/sleep"
+    "$stub_dir/systemctl" "$stub_dir/sleep" "$stub_dir/date"
 }
 
 run_tool() {
@@ -262,11 +272,13 @@ run_tool() {
     QUERY_LOG="$home/query-log" \
     COMMAND_LOG="$home/command-log" \
     UPDATE_AGENT_TOOLS_NOW="${UPDATE_AGENT_TOOLS_NOW:-2026-07-14T00:00:00Z}" \
+    UPDATE_AGENT_TOOLS_ACTIVATION_NOW="${UPDATE_AGENT_TOOLS_ACTIVATION_NOW:-}" \
     CURL_FAIL="${CURL_FAIL:-0}" \
     CURL_GATE="${CURL_GATE:-}" \
     NPM_EMPTY_PACKAGE="${NPM_EMPTY_PACKAGE:-}" \
     NPM_FAIL_PACKAGE="${NPM_FAIL_PACKAGE:-}" \
     NPM_FIXTURE="${NPM_FIXTURE:-complete}" \
+    NPM_LIST_EMPTY="${NPM_LIST_EMPTY:-0}" \
     NPM_INSTALL_FAIL_PACKAGE="${NPM_INSTALL_FAIL_PACKAGE:-}" \
     NPM_REQUIRE_CLEARED_SHIMS="${NPM_REQUIRE_CLEARED_SHIMS:-0}" \
     NPM_OMIT_BINARY="${NPM_OMIT_BINARY:-}" \
@@ -749,14 +761,17 @@ EOF
 }
 
 test_default_update_refreshes_and_activates_the_complete_toolchain() {
+  local health_line
   local state_file
   local test_dir
+  local timestamp_line
   test_dir="$(mktemp -d)"
   trap 'rm -rf "$test_dir"' RETURN
   make_stubs "$test_dir/stubs"
   state_file="$test_dir/state/update-agent-tools/state.json"
 
-  run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+  UPDATE_AGENT_TOOLS_ACTIVATION_NOW="2026-07-14T00:03:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
     || fail "complete update exited nonzero: $(<"$test_dir/stderr")"
 
   grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
@@ -768,8 +783,13 @@ test_default_update_refreshes_and_activates_the_complete_toolchain() {
     || fail "complete update did not restart the AoE service"
   grep -Fx 'systemctl --user is-active --quiet aoe-serve.service' "$test_dir/command-log" >/dev/null \
     || fail "complete update did not verify the AoE service"
+  health_line="$(grep -n '^aoe acp doctor$' "$test_dir/command-log" | tail -n 1 | cut -d: -f1)"
+  timestamp_line="$(grep -n '^date -u -d 2026-07-14T00:03:00Z +%Y-%m-%dT%H:%M:%SZ$' \
+    "$test_dir/command-log" | cut -d: -f1)"
+  [[ -n "$timestamp_line" && "$timestamp_line" -gt "$health_line" ]] \
+    || fail "successful activation timestamp was not acquired after health passed"
   jq -e '
-    .last_successful_activation == "2026-07-14T00:00:00Z"
+    .last_successful_activation == "2026-07-14T00:03:00Z"
     and .activation_failure == null
   ' "$state_file" >/dev/null \
     || fail "complete update did not record successful activation"
@@ -877,6 +897,46 @@ test_pre_activation_version_failure_does_not_restart_the_service() {
     || fail "version failure did not identify its phase and component"
   if grep -q '^systemctl ' "$test_dir/command-log"; then
     fail "version failure reached service activation"
+  fi
+}
+
+test_pre_activation_empty_package_inventory_names_its_component() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if NPM_LIST_EMPTY=1 \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "empty pre-activation npm inventory exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: pre-activation verification failed: npm package inventory\n') \
+    "$test_dir/stderr" \
+    || fail "empty npm inventory did not report its phase and component exactly"
+  if grep -q '^systemctl ' "$test_dir/command-log"; then
+    fail "empty npm inventory reached service activation"
+  fi
+}
+
+test_pre_activation_registry_failure_names_the_managed_component() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if NPM_FAIL_PACKAGE='@agentclientprotocol/claude-agent-acp@latest' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "component registry failure exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: pre-activation verification failed: claude-agent-acp adapter\n') \
+    "$test_dir/stderr" \
+    || fail "component registry failure leaked output or lost its exact component"
+  if grep -q '^systemctl ' "$test_dir/command-log"; then
+    fail "component registry failure reached service activation"
   fi
 }
 
@@ -1089,6 +1149,8 @@ test_default_update_removes_stale_cli_shims_before_npm_refresh
 test_pre_activation_diagnostics_failure_does_not_restart_the_service
 test_pre_activation_command_resolution_failure_does_not_restart_the_service
 test_pre_activation_version_failure_does_not_restart_the_service
+test_pre_activation_empty_package_inventory_names_its_component
+test_pre_activation_registry_failure_names_the_managed_component
 test_post_activation_failure_retains_failure_without_rollback
 test_activation_failure_is_recovered_by_a_full_rerun
 test_standalone_and_bundled_codex_remain_separate_on_update
