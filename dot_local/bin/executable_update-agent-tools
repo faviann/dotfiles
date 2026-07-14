@@ -514,11 +514,14 @@ if (( captured_worker_count > 0 )); then
       . as $current
       | [
           $captured[] as $before
-          | ([
-              $current[]
-              | select(.session_id == $before.session_id)
-            ] | first) as $after
-          | select($after == null or $after.pid == $before.pid)
+          | select(
+              any(
+                $current[];
+                .session_id == $before.session_id
+                and .pid != $before.pid
+              )
+              | not
+            )
           | $before.session_id
         ]
       | unique[]
@@ -556,6 +559,27 @@ if (( captured_worker_count > 0 )); then
     || activation_fail \
       "post-activation verification" \
       "ACP session replacement"
+
+  health_attempt=1
+  health_component="AoE service"
+  service_healthy=false
+  while (( health_attempt <= 10 )); do
+    if systemctl --user is-active --quiet aoe-serve.service; then
+      health_component="AoE ACP diagnostics"
+      if aoe acp doctor; then
+        service_healthy=true
+        break
+      fi
+    else
+      health_component="AoE service"
+    fi
+    if (( health_attempt < 10 )); then
+      sleep 1
+    fi
+    health_attempt=$((health_attempt + 1))
+  done
+  [[ "$service_healthy" == true ]] \
+    || activation_fail "post-activation verification" "$health_component"
 fi
 
 activation_time_input="${UPDATE_AGENT_TOOLS_ACTIVATION_NOW:-${UPDATE_AGENT_TOOLS_NOW:-now}}"

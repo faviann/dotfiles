@@ -987,6 +987,30 @@ test_workers_are_reconciled_by_identity_after_pre_activation_verification() {
     || fail "successful activation was recorded before captured workers were healthy"
 }
 
+test_coexisting_old_and_replacement_identities_do_not_restart_again() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  ACP_PS_SEQUENCE_JSON='[
+    [{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}],
+    [
+      {"session_id":"private-session","pid":101,"alive":true,"build_stale":true},
+      {"session_id":"private-session","pid":201,"alive":true,"build_stale":false}
+    ]
+  ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "coexisting replacement identity update failed: $(<"$test_dir/stderr")"
+
+  if grep -Fx 'aoe acp restart private-session' \
+    "$test_dir/command-log" >/dev/null; then
+    fail "coexisting healthy replacement identity was restarted again"
+  fi
+  [[ "$(grep -c '^aoe acp ps --json$' "$test_dir/command-log")" -eq 2 ]] \
+    || fail "coexisting replacement was not accepted from the current identity set"
+}
+
 test_worker_replacement_health_failure_is_bounded_and_not_successful() {
   local state_dir
   local state_file
@@ -1021,6 +1045,51 @@ test_worker_replacement_health_failure_is_bounded_and_not_successful() {
     and .activation_failure.component == "ACP session replacement"
   ' "$state_file" >/dev/null \
     || fail "worker health failure wrote a success timestamp or lost recovery state"
+}
+
+test_final_service_health_failure_after_worker_replacement_is_bounded() {
+  local state_dir
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_dir="$test_dir/state/update-agent-tools"
+  state_file="$state_dir/state.json"
+  mkdir -p "$state_dir"
+  printf '%s\n' '{"last_successful_activation":"2026-07-01T00:00:00Z","activation_failure":null}' \
+    >"$state_file"
+
+  if AOE_DOCTOR_FAIL_AFTER=3 \
+    UPDATE_AGENT_TOOLS_ACTIVATION_NOW="2026-07-14T00:05:00Z" \
+    ACP_PS_SEQUENCE_JSON='[
+      [{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}],
+      [{"session_id":"private-session","pid":101,"alive":true,"build_stale":true}],
+      [{"session_id":"private-session","pid":201,"alive":true,"build_stale":false}]
+    ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes; then
+    fail "final ACP diagnostics failure after worker replacement exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: post-activation verification failed: AoE ACP diagnostics\n') \
+    "$test_dir/stderr" \
+    || fail "final diagnostics failure lost phase/component reporting"
+  [[ "$(grep -c '^systemctl --user is-active --quiet aoe-serve.service$' \
+    "$test_dir/command-log")" -eq 11 ]] \
+    || fail "final daemon health verification was not bounded"
+  [[ "$(grep -c '^aoe acp doctor$' "$test_dir/command-log")" -eq 12 ]] \
+    || fail "final ACP diagnostics verification was not bounded"
+  if grep -Fx 'date -u -d 2026-07-14T00:05:00Z +%Y-%m-%dT%H:%M:%SZ' \
+    "$test_dir/command-log" >/dev/null; then
+    fail "failed final health verification acquired a success timestamp"
+  fi
+  jq -e '
+    .last_successful_activation == "2026-07-01T00:00:00Z"
+    and .activation_failure.phase == "post-activation verification"
+    and .activation_failure.component == "AoE ACP diagnostics"
+  ' "$state_file" >/dev/null \
+    || fail "failed final health verification wrote success or lost recovery state"
 }
 
 test_partial_install_does_not_restart_the_service() {
@@ -1377,7 +1446,9 @@ test_noninteractive_update_with_running_workers_requires_yes
 test_yes_authorizes_noninteractive_update_with_running_workers
 test_interactive_decline_happens_once_before_mutation
 test_workers_are_reconciled_by_identity_after_pre_activation_verification
+test_coexisting_old_and_replacement_identities_do_not_restart_again
 test_worker_replacement_health_failure_is_bounded_and_not_successful
+test_final_service_health_failure_after_worker_replacement_is_bounded
 test_partial_install_does_not_restart_the_service
 test_default_update_removes_stale_cli_shims_before_npm_refresh
 test_pre_activation_diagnostics_failure_does_not_restart_the_service
