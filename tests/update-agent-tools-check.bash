@@ -58,6 +58,15 @@ set -euo pipefail
 
 printf 'npm %s\n' "$*" >>"$COMMAND_LOG"
 
+if [[ "$1" == "view" && "${NPM_FAIL_PACKAGE:-}" == "$2" ]]; then
+  printf 'npm registry unavailable\n' >&2
+  exit 1
+fi
+
+if [[ "$1" == "view" && "${NPM_EMPTY_PACKAGE:-}" == "$2" ]]; then
+  exit 0
+fi
+
 if [[ "$*" == "config get prefix" ]]; then
   printf '%s/.local\n' "$HOME"
   exit 0
@@ -145,6 +154,8 @@ run_tool() {
     UPDATE_AGENT_TOOLS_NOW="${UPDATE_AGENT_TOOLS_NOW:-2026-07-14T00:00:00Z}" \
     CURL_FAIL="${CURL_FAIL:-0}" \
     CURL_GATE="${CURL_GATE:-}" \
+    NPM_EMPTY_PACKAGE="${NPM_EMPTY_PACKAGE:-}" \
+    NPM_FAIL_PACKAGE="${NPM_FAIL_PACKAGE:-}" \
     NPM_FIXTURE="${NPM_FIXTURE:-complete}" \
     AOE_CURRENT="${AOE_CURRENT:-1.2.3}" \
     AOE_LATEST="${AOE_LATEST:-1.2.3}" \
@@ -342,6 +353,90 @@ test_failed_check_preserves_cache_and_retries_after_one_hour() {
     || fail "one-hour retry did not perform fresh release queries"
 }
 
+test_empty_npm_version_is_a_failed_check() {
+  local expected_failure
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  AOE_CURRENT="1.2.2" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-12T08:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-1" "$test_dir/stderr-1" --check-if-due \
+    || fail "empty-npm cache seed exited nonzero: $(<"$test_dir/stderr-1")"
+
+  expected_failure='update-agent-tools: agent-tool update check failed; last successful check: 2026-07-12T08:00:00Z; next retry: 2026-07-13T09:00:00Z'
+  if NPM_EMPTY_PACKAGE="@openai/codex@latest" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-13T08:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-2" "$test_dir/stderr-2" --check-if-due; then
+    fail "empty npm version was committed as a successful check"
+  fi
+  [[ ! -s "$test_dir/stdout-2" ]] \
+    || fail "empty npm version presented cached output as current"
+  diff -u <(printf '%s\n' "$expected_failure") "$test_dir/stderr-2" \
+    || fail "empty npm version failure output did not match"
+  jq -e '
+    .last_attempt == "2026-07-13T08:00:00Z"
+    and .last_successful_check == "2026-07-12T08:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "failed"
+  ' "$state_file" >/dev/null \
+    || fail "empty npm version replaced the last known-good state"
+}
+
+test_npm_registry_failure_preserves_cache_and_retries_after_one_hour() {
+  local expected_failure
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  AOE_CURRENT="1.2.2" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-10T06:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-1" "$test_dir/stderr-1" --check-if-due \
+    || fail "npm-failure cache seed exited nonzero: $(<"$test_dir/stderr-1")"
+
+  expected_failure='update-agent-tools: agent-tool update check failed; last successful check: 2026-07-10T06:00:00Z; next retry: 2026-07-11T07:00:00Z'
+  if NPM_FAIL_PACKAGE="@anthropic-ai/claude-code@latest" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-11T06:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-2" "$test_dir/stderr-2" --check-if-due; then
+    fail "npm registry failure exited zero"
+  fi
+  [[ ! -s "$test_dir/stdout-2" ]] \
+    || fail "npm registry failure presented cached output as current"
+  diff -u <(printf '%s\n' "$expected_failure") "$test_dir/stderr-2" \
+    || fail "npm registry failure output did not match"
+  jq -e '
+    .last_attempt == "2026-07-11T06:00:00Z"
+    and .last_successful_check == "2026-07-10T06:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "failed"
+  ' "$state_file" >/dev/null \
+    || fail "npm registry failure replaced the last known-good state"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-11T06:59:59Z" \
+    run_tool "$test_dir" "$test_dir/stdout-3" "$test_dir/stderr-3" --check-if-due \
+    || fail "npm pre-retry check exited nonzero"
+  diff -u <(printf '%s\n' "$expected_failure") "$test_dir/stderr-3" \
+    || fail "npm pre-retry failure output did not match"
+  [[ "$(jq -r '.last_attempt' "$state_file")" == "2026-07-11T06:00:00Z" ]] \
+    || fail "npm pre-retry check performed an early attempt"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-11T07:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-4" "$test_dir/stderr-4" --check-if-due \
+    || fail "npm one-hour retry exited nonzero: $(<"$test_dir/stderr-4")"
+  jq -e '
+    .last_attempt == "2026-07-11T07:00:00Z"
+    and .last_successful_check == "2026-07-11T07:00:00Z"
+    and .check_status == "success"
+  ' "$state_file" >/dev/null \
+    || fail "npm registry failure did not retry at one hour"
+}
+
 test_current_toolchain_is_silent() {
   local test_dir
   test_dir="$(mktemp -d)"
@@ -519,6 +614,8 @@ test_state_uses_local_state_fallback
 test_concurrent_due_checks_are_serialized
 test_update_and_check_modes_share_the_state_lock
 test_failed_check_preserves_cache_and_retries_after_one_hour
+test_empty_npm_version_is_a_failed_check
+test_npm_registry_failure_preserves_cache_and_retries_after_one_hour
 test_current_toolchain_is_silent
 test_outdated_components_report_exact_versions
 test_missing_components_are_reported

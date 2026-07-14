@@ -84,8 +84,13 @@ check_component() {
   fi
 }
 
+is_stable_version() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+][0-9A-Za-z.-]+)?$ ]]
+}
+
 check_toolchain() {
   local installed
+  local latest_version
   local aoe_current="missing"
   local aoe_latest
   local bundled_codex_range
@@ -117,6 +122,9 @@ check_toolchain() {
   bundled_codex_range="$(npm view \
     @agentclientprotocol/codex-acp@latest \
     'dependencies.@openai/codex')" || return 1
+  [[ "$bundled_codex_range" =~ [^[:space:]] ]] || return 1
+  [[ "$bundled_codex_range" != "null" && "$bundled_codex_range" != "undefined" ]] \
+    || return 1
   bundled_codex_versions="$(npm view \
     "@openai/codex@$bundled_codex_range" \
     version \
@@ -139,6 +147,16 @@ check_toolchain() {
   claude_acp_latest="$(npm view @agentclientprotocol/claude-agent-acp@latest version)" \
     || return 1
   pi_acp_latest="$(npm view pi-acp@latest version)" || return 1
+  for latest_version in \
+    "$codex_latest" \
+    "$bundled_codex_latest" \
+    "$claude_latest" \
+    "$pi_latest" \
+    "$codex_acp_latest" \
+    "$claude_acp_latest" \
+    "$pi_acp_latest"; do
+    is_stable_version "$latest_version" || return 1
+  done
 
   check_component "AoE" \
     "$aoe_current" \
