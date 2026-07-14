@@ -353,6 +353,57 @@ test_failed_check_preserves_cache_and_retries_after_one_hour() {
     || fail "one-hour retry did not perform fresh release queries"
 }
 
+test_malformed_aoe_release_is_a_failed_check() {
+  local expected_failure
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  AOE_CURRENT="1.2.2" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-08T04:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-1" "$test_dir/stderr-1" --check-if-due \
+    || fail "malformed-AoE cache seed exited nonzero: $(<"$test_dir/stderr-1")"
+
+  expected_failure='update-agent-tools: agent-tool update check failed; last successful check: 2026-07-08T04:00:00Z; next retry: 2026-07-09T05:00:00Z'
+  if AOE_LATEST="not-a-version" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-09T04:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-2" "$test_dir/stderr-2" --check-if-due; then
+    fail "malformed AoE release was committed as a successful check"
+  fi
+  [[ ! -s "$test_dir/stdout-2" ]] \
+    || fail "malformed AoE release presented cached output as current"
+  diff -u <(printf '%s\n' "$expected_failure") "$test_dir/stderr-2" \
+    || fail "malformed AoE release failure output did not match"
+  jq -e '
+    .last_attempt == "2026-07-09T04:00:00Z"
+    and .last_successful_check == "2026-07-08T04:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "failed"
+  ' "$state_file" >/dev/null \
+    || fail "malformed AoE release replaced the last known-good state"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-09T04:59:59Z" \
+    run_tool "$test_dir" "$test_dir/stdout-3" "$test_dir/stderr-3" --check-if-due \
+    || fail "malformed-AoE pre-retry check exited nonzero"
+  diff -u <(printf '%s\n' "$expected_failure") "$test_dir/stderr-3" \
+    || fail "malformed-AoE pre-retry output did not match"
+  [[ "$(jq -r '.last_attempt' "$state_file")" == "2026-07-09T04:00:00Z" ]] \
+    || fail "malformed-AoE pre-retry check performed an early attempt"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-09T05:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-4" "$test_dir/stderr-4" --check-if-due \
+    || fail "malformed-AoE one-hour retry exited nonzero: $(<"$test_dir/stderr-4")"
+  jq -e '
+    .last_attempt == "2026-07-09T05:00:00Z"
+    and .last_successful_check == "2026-07-09T05:00:00Z"
+    and .check_status == "success"
+  ' "$state_file" >/dev/null \
+    || fail "malformed AoE release did not retry at one hour"
+}
+
 test_empty_npm_version_is_a_failed_check() {
   local expected_failure
   local state_file
@@ -614,6 +665,7 @@ test_state_uses_local_state_fallback
 test_concurrent_due_checks_are_serialized
 test_update_and_check_modes_share_the_state_lock
 test_failed_check_preserves_cache_and_retries_after_one_hour
+test_malformed_aoe_release_is_a_failed_check
 test_empty_npm_version_is_a_failed_check
 test_npm_registry_failure_preserves_cache_and_retries_after_one_hour
 test_current_toolchain_is_silent

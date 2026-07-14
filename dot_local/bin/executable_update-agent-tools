@@ -114,6 +114,7 @@ check_toolchain() {
     || return 1
   [[ -n "$aoe_latest" && "$aoe_latest" != "null" ]] || return 1
   aoe_latest="${aoe_latest#v}"
+  is_stable_version "$aoe_latest" || return 1
 
   installed="$(npm list --global --json --all 2>/dev/null || true)"
   test -n "$installed" || fail "could not inspect globally installed npm packages"
