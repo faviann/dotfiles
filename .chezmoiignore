@@ -1,3 +1,12 @@
+# Repository-only documentation
+README.md
+BOOTSTRAP.md
+AGENTS.md
+CONTEXT.md
+CONTEXT-MAP.md
+docs/
+docs/**
+
 {{- if .is_lxc }}
 dot_config/fish
 {{- end }}
