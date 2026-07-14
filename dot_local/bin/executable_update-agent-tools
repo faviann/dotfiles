@@ -556,6 +556,12 @@ if (( captured_worker_count > 0 )); then
       ' <<<"$current_workers" >/dev/null; then
       continue
     fi
+    if ! jq -e \
+      --arg session_id "$worker_session_id" '
+        any(.[]; .session_id == $session_id)
+      ' <<<"$current_workers" >/dev/null; then
+      continue
+    fi
     if ! aoe acp restart "$worker_session_id"; then
       activation_fail "activation" "ACP worker restart"
     fi

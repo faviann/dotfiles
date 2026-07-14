@@ -991,6 +991,36 @@ test_workers_are_reconciled_by_identity_after_pre_activation_verification() {
     || fail "successful activation was recorded before captured workers were healthy"
 }
 
+test_temporarily_unregistered_worker_is_reconciled_without_restart() {
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  ACP_RESTART_FAIL=1 \
+    ACP_PS_SEQUENCE_JSON='[
+      [{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}],
+      [],
+      [{"session_id":"private-session","pid":201,"alive":true,"build_stale":false}]
+    ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "temporarily unregistered worker was not reconciled: $(<"$test_dir/stderr")"
+
+  if grep -Fx 'aoe acp restart private-session' \
+    "$test_dir/command-log" >/dev/null; then
+    fail "temporarily unregistered worker was restarted before it could re-register"
+  fi
+  [[ "$(grep -c '^aoe acp ps --json$' "$test_dir/command-log")" -eq 3 ]] \
+    || fail "temporarily unregistered worker was not reconciled on a later snapshot"
+  jq -e '
+    .last_successful_activation != null
+    and .activation_failure == null
+  ' "$state_file" >/dev/null \
+    || fail "re-registered healthy worker was not recorded as successful activation"
+}
+
 test_coexisting_old_and_replacement_identities_fail_health_without_restarting_again() {
   local state_file
   local test_dir
@@ -1498,6 +1528,7 @@ test_noninteractive_update_with_running_workers_requires_yes
 test_yes_authorizes_noninteractive_update_with_running_workers
 test_interactive_decline_happens_once_before_mutation
 test_workers_are_reconciled_by_identity_after_pre_activation_verification
+test_temporarily_unregistered_worker_is_reconciled_without_restart
 test_coexisting_old_and_replacement_identities_fail_health_without_restarting_again
 test_each_worker_restart_decision_uses_a_fresh_identity_snapshot
 test_worker_replacement_health_failure_is_bounded_and_not_successful
