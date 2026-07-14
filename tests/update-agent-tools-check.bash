@@ -11,15 +11,49 @@ fail() {
 
 make_stubs() {
   local stub_dir="$1"
+  local home
 
   mkdir -p "$stub_dir"
+  home="$(dirname "$stub_dir")"
+  mkdir -p "$home/.local/bin"
 
-  cat >"$stub_dir/aoe" <<'STUB'
+  cat >"$home/.local/bin/aoe" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 
 if [[ "$*" == "--version" ]]; then
-  printf 'aoe %s\n' "$AOE_CURRENT"
+  if [[ -e "$HOME/aoe-updated" ]]; then
+    printf 'aoe %s\n' "$AOE_LATEST"
+  else
+    printf 'aoe %s\n' "$AOE_CURRENT"
+  fi
+  exit 0
+fi
+
+printf 'aoe %s\n' "$*" >>"$COMMAND_LOG"
+
+if [[ "$*" == "update --yes" ]]; then
+  if [[ "${AOE_UPDATE_FAIL:-0}" == "1" ]]; then
+    exit 1
+  fi
+  : >"$HOME/aoe-updated"
+  exit 0
+fi
+
+if [[ "$*" == "acp doctor" ]]; then
+  doctor_count=0
+  if [[ -f "$HOME/doctor-count" ]]; then
+    doctor_count="$(<"$HOME/doctor-count")"
+  fi
+  doctor_count=$((doctor_count + 1))
+  printf '%s\n' "$doctor_count" >"$HOME/doctor-count"
+  if [[ "${AOE_DOCTOR_FAIL_CALL:-0}" == "$doctor_count" ]]; then
+    exit 1
+  fi
+  if [[ "${AOE_DOCTOR_FAIL_AFTER:-0}" -gt 0 \
+    && "$doctor_count" -ge "${AOE_DOCTOR_FAIL_AFTER}" ]]; then
+    exit 1
+  fi
   exit 0
 fi
 
@@ -73,18 +107,40 @@ if [[ "$*" == "config get prefix" ]]; then
 fi
 
 if [[ "$*" == "list --global --json --all" ]]; then
+  if [[ "${NPM_LIST_EMPTY:-0}" == "1" ]]; then
+    exit 0
+  fi
+  codex_current="$CODEX_CURRENT"
+  claude_current="$CLAUDE_CURRENT"
+  pi_current="$PI_CURRENT"
+  codex_acp_current="$CODEX_ACP_CURRENT"
+  claude_acp_current="$CLAUDE_ACP_CURRENT"
+  pi_acp_current="$PI_ACP_CURRENT"
+  bundled_codex_current="$BUNDLED_CODEX_CURRENT"
+  if [[ -e "$HOME/npm-installed" ]]; then
+    codex_current="$CODEX_LATEST"
+    claude_current="$CLAUDE_LATEST"
+    pi_current="$PI_LATEST"
+    codex_acp_current="$CODEX_ACP_LATEST"
+    claude_acp_current="$CLAUDE_ACP_LATEST"
+    pi_acp_current="$PI_ACP_LATEST"
+    bundled_codex_current="$(jq -r 'if type == "array" then .[-1] else . end' <<<"$BUNDLED_CODEX_VERSIONS_JSON")"
+    if [[ -n "${CODEX_POST_INSTALL:-}" ]]; then
+      codex_current="$CODEX_POST_INSTALL"
+    fi
+  fi
   if [[ "${NPM_FIXTURE:-complete}" == "missing" ]]; then
     cat <<EOF
 {
   "dependencies": {
-    "@openai/codex": {"version": "${CODEX_CURRENT}"},
-    "@anthropic-ai/claude-code": {"version": "${CLAUDE_CURRENT}"},
-    "@earendil-works/pi-coding-agent": {"version": "${PI_CURRENT}"},
+    "@openai/codex": {"version": "${codex_current}"},
+    "@anthropic-ai/claude-code": {"version": "${claude_current}"},
+    "@earendil-works/pi-coding-agent": {"version": "${pi_current}"},
     "@agentclientprotocol/codex-acp": {
-      "version": "${CODEX_ACP_CURRENT}",
-      "dependencies": {"@openai/codex": {"version": "${BUNDLED_CODEX_CURRENT}"}}
+      "version": "${codex_acp_current}",
+      "dependencies": {"@openai/codex": {"version": "${bundled_codex_current}"}}
     },
-    "pi-acp": {"version": "${PI_ACP_CURRENT}"}
+    "pi-acp": {"version": "${pi_acp_current}"}
   }
 }
 EOF
@@ -94,15 +150,15 @@ EOF
   cat <<EOF
 {
   "dependencies": {
-    "@openai/codex": {"version": "${CODEX_CURRENT}"},
-    "@anthropic-ai/claude-code": {"version": "${CLAUDE_CURRENT}"},
-    "@earendil-works/pi-coding-agent": {"version": "${PI_CURRENT}"},
+    "@openai/codex": {"version": "${codex_current}"},
+    "@anthropic-ai/claude-code": {"version": "${claude_current}"},
+    "@earendil-works/pi-coding-agent": {"version": "${pi_current}"},
     "@agentclientprotocol/codex-acp": {
-      "version": "${CODEX_ACP_CURRENT}",
-      "dependencies": {"@openai/codex": {"version": "${BUNDLED_CODEX_CURRENT}"}}
+      "version": "${codex_acp_current}",
+      "dependencies": {"@openai/codex": {"version": "${bundled_codex_current}"}}
     },
-    "@agentclientprotocol/claude-agent-acp": {"version": "${CLAUDE_ACP_CURRENT}"},
-    "pi-acp": {"version": "${PI_ACP_CURRENT}"}
+    "@agentclientprotocol/claude-agent-acp": {"version": "${claude_acp_current}"},
+    "pi-acp": {"version": "${pi_acp_current}"}
   }
 }
 EOF
@@ -133,11 +189,75 @@ if [[ "$1" == "view" && "$3" == "version" ]]; then
   exit 0
 fi
 
+if [[ "$1" == "install" && "$2" == "--global" ]]; then
+  package="$3"
+  if [[ "${NPM_REQUIRE_CLEARED_SHIMS:-0}" == "1" ]]; then
+    for stale_binary in codex claude pi; do
+      stale_path="$HOME/.local/bin/$stale_binary"
+      if [[ -e "$stale_path" || -L "$stale_path" ]] \
+        && grep -Fx 'stale-shim' "$stale_path" >/dev/null 2>&1; then
+        printf 'stale shim blocked npm install: %s\n' "$stale_binary" >&2
+        exit 1
+      fi
+    done
+  fi
+  if [[ "${NPM_INSTALL_FAIL_PACKAGE:-}" == "$package" ]]; then
+    exit 1
+  fi
+  case "$package" in
+    '@openai/codex@latest') binary=codex ;;
+    '@anthropic-ai/claude-code@latest') binary=claude ;;
+    '@earendil-works/pi-coding-agent@latest') binary=pi ;;
+    '@agentclientprotocol/codex-acp@latest') binary=codex-acp ;;
+    '@agentclientprotocol/claude-agent-acp@latest') binary=claude-agent-acp ;;
+    'pi-acp@latest') binary=pi-acp ;;
+    *) printf 'unexpected npm install package: %s\n' "$package" >&2; exit 64 ;;
+  esac
+  if [[ "$binary" != "${NPM_OMIT_BINARY:-}" ]]; then
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME/.local/bin/$binary"
+    chmod +x "$HOME/.local/bin/$binary"
+  fi
+  if [[ "$package" == "pi-acp@latest" ]]; then
+    : >"$HOME/npm-installed"
+  fi
+  exit 0
+fi
+
 printf 'unexpected npm invocation: %s\n' "$*" >&2
 exit 64
 STUB
 
-  chmod +x "$stub_dir/aoe" "$stub_dir/curl" "$stub_dir/npm"
+  cat >"$stub_dir/systemctl" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'systemctl %s\n' "$*" >>"$COMMAND_LOG"
+if [[ "$*" == "--user restart aoe-serve.service" ]]; then
+  [[ "${SYSTEMCTL_RESTART_FAIL:-0}" != "1" ]]
+  exit
+fi
+if [[ "$*" == "--user is-active --quiet aoe-serve.service" ]]; then
+  [[ "${SYSTEMCTL_INACTIVE:-0}" != "1" ]]
+  exit
+fi
+exit 64
+STUB
+
+  cat >"$stub_dir/sleep" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'sleep %s\n' "$*" >>"$COMMAND_LOG"
+STUB
+
+  cat >"$stub_dir/date" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'date %s\n' "$*" >>"$COMMAND_LOG"
+exec /usr/bin/date "$@"
+STUB
+
+  chmod +x "$home/.local/bin/aoe" "$stub_dir/curl" "$stub_dir/npm" \
+    "$stub_dir/systemctl" "$stub_dir/sleep" "$stub_dir/date"
 }
 
 run_tool() {
@@ -148,19 +268,30 @@ run_tool() {
 
   HOME="$home" \
     XDG_STATE_HOME="${TEST_XDG_STATE_HOME-$home/state}" \
-    PATH="$home/stubs:/usr/bin:/bin" \
+    PATH="$home/.local/bin:$home/stubs:/usr/bin:/bin" \
     QUERY_LOG="$home/query-log" \
     COMMAND_LOG="$home/command-log" \
     UPDATE_AGENT_TOOLS_NOW="${UPDATE_AGENT_TOOLS_NOW:-2026-07-14T00:00:00Z}" \
+    UPDATE_AGENT_TOOLS_ACTIVATION_NOW="${UPDATE_AGENT_TOOLS_ACTIVATION_NOW:-}" \
     CURL_FAIL="${CURL_FAIL:-0}" \
     CURL_GATE="${CURL_GATE:-}" \
     NPM_EMPTY_PACKAGE="${NPM_EMPTY_PACKAGE:-}" \
     NPM_FAIL_PACKAGE="${NPM_FAIL_PACKAGE:-}" \
     NPM_FIXTURE="${NPM_FIXTURE:-complete}" \
+    NPM_LIST_EMPTY="${NPM_LIST_EMPTY:-0}" \
+    NPM_INSTALL_FAIL_PACKAGE="${NPM_INSTALL_FAIL_PACKAGE:-}" \
+    NPM_REQUIRE_CLEARED_SHIMS="${NPM_REQUIRE_CLEARED_SHIMS:-0}" \
+    NPM_OMIT_BINARY="${NPM_OMIT_BINARY:-}" \
+    AOE_UPDATE_FAIL="${AOE_UPDATE_FAIL:-0}" \
+    AOE_DOCTOR_FAIL_CALL="${AOE_DOCTOR_FAIL_CALL:-0}" \
+    AOE_DOCTOR_FAIL_AFTER="${AOE_DOCTOR_FAIL_AFTER:-0}" \
+    SYSTEMCTL_RESTART_FAIL="${SYSTEMCTL_RESTART_FAIL:-0}" \
+    SYSTEMCTL_INACTIVE="${SYSTEMCTL_INACTIVE:-0}" \
     AOE_CURRENT="${AOE_CURRENT:-1.2.3}" \
     AOE_LATEST="${AOE_LATEST:-1.2.3}" \
     CODEX_CURRENT="${CODEX_CURRENT:-2.3.4}" \
     CODEX_LATEST="${CODEX_LATEST:-2.3.4}" \
+    CODEX_POST_INSTALL="${CODEX_POST_INSTALL:-}" \
     CLAUDE_CURRENT="${CLAUDE_CURRENT:-3.4.5}" \
     CLAUDE_LATEST="${CLAUDE_LATEST:-3.4.5}" \
     PI_CURRENT="${PI_CURRENT:-4.5.6}" \
@@ -179,6 +310,26 @@ run_tool() {
 
 run_check() {
   run_tool "$1" "$2" "$3" --check
+}
+
+assert_complete_npm_refresh() {
+  local command_log="$1"
+  local actual
+  local expected
+  actual="$(mktemp)"
+  expected="$(mktemp)"
+  grep '^npm install --global ' "$command_log" >"$actual" || true
+  cat >"$expected" <<'EOF'
+npm install --global @openai/codex@latest
+npm install --global @anthropic-ai/claude-code@latest
+npm install --global @earendil-works/pi-coding-agent@latest
+npm install --global @agentclientprotocol/codex-acp@latest
+npm install --global @agentclientprotocol/claude-agent-acp@latest
+npm install --global pi-acp@latest
+EOF
+  diff -u "$expected" "$actual" \
+    || fail "default update did not attempt all six managed npm packages"
+  rm -f "$actual" "$expected"
 }
 
 test_due_check_runs_once_per_success_interval() {
@@ -331,9 +482,8 @@ test_update_and_check_modes_share_the_state_lock() {
 
   flock -u "$lock_fd"
   exec {lock_fd}>&-
-  if wait "$update_pid"; then
-    fail "stubbed update unexpectedly succeeded"
-  fi
+  wait "$update_pid" \
+    || fail "update mode failed after the shared lock was released"
   [[ -s "$test_dir/command-log" ]] \
     || fail "update mode did not continue after the shared lock was released"
 }
@@ -592,7 +742,7 @@ test_missing_components_are_reported() {
   test_dir="$(mktemp -d)"
   trap 'rm -rf "$test_dir"' RETURN
   make_stubs "$test_dir/stubs"
-  rm "$test_dir/stubs/aoe"
+  rm "$test_dir/.local/bin/aoe"
 
   if ! NPM_FIXTURE="missing" \
     run_check "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
@@ -608,6 +758,285 @@ EOF
     || fail "missing toolchain output did not match"
   [[ ! -s "$test_dir/stderr" ]] \
     || fail "missing toolchain check wrote stderr: $(<"$test_dir/stderr")"
+}
+
+test_default_update_refreshes_and_activates_the_complete_toolchain() {
+  local health_line
+  local state_file
+  local test_dir
+  local timestamp_line
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  UPDATE_AGENT_TOOLS_ACTIVATION_NOW="2026-07-14T00:03:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+    || fail "complete update exited nonzero: $(<"$test_dir/stderr")"
+
+  grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
+    || fail "complete update did not use AoE self-update"
+  assert_complete_npm_refresh "$test_dir/command-log"
+  [[ "$(grep -c '^aoe acp doctor$' "$test_dir/command-log")" -eq 2 ]] \
+    || fail "complete update did not run pre- and post-activation ACP diagnostics"
+  grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
+    || fail "complete update did not restart the AoE service"
+  grep -Fx 'systemctl --user is-active --quiet aoe-serve.service' "$test_dir/command-log" >/dev/null \
+    || fail "complete update did not verify the AoE service"
+  health_line="$(grep -n '^aoe acp doctor$' "$test_dir/command-log" | tail -n 1 | cut -d: -f1)"
+  timestamp_line="$(grep -n '^date -u -d 2026-07-14T00:03:00Z +%Y-%m-%dT%H:%M:%SZ$' \
+    "$test_dir/command-log" | cut -d: -f1)"
+  [[ -n "$timestamp_line" && "$timestamp_line" -gt "$health_line" ]] \
+    || fail "successful activation timestamp was not acquired after health passed"
+  jq -e '
+    .last_successful_activation == "2026-07-14T00:03:00Z"
+    and .activation_failure == null
+  ' "$state_file" >/dev/null \
+    || fail "complete update did not record successful activation"
+}
+
+test_partial_install_does_not_restart_the_service() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if NPM_INSTALL_FAIL_PACKAGE='@agentclientprotocol/claude-agent-acp@latest' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "partial installation exited zero"
+  fi
+
+  grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
+    || fail "partial installation did not exercise the AoE-success/npm-failure boundary"
+  diff -u \
+    <(printf 'update-agent-tools: installation failed: claude-agent-acp adapter (@agentclientprotocol/claude-agent-acp@latest)\n') \
+    "$test_dir/stderr" \
+    || fail "partial installation did not identify its phase and component"
+  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 5 ]] \
+    || fail "partial installation did not stop at the named failing component"
+  if grep -q '^systemctl ' "$test_dir/command-log"; then
+    fail "partial installation restarted or inspected the service"
+  fi
+}
+
+test_default_update_removes_stale_cli_shims_before_npm_refresh() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  printf 'stale-shim\n' >"$test_dir/.local/bin/codex"
+  printf 'stale-shim\n' >"$test_dir/stale-claude-target"
+  ln -sf "$test_dir/stale-claude-target" "$test_dir/.local/bin/claude"
+  printf 'stale-shim\n' >"$test_dir/.local/bin/pi"
+
+  NPM_REQUIRE_CLEARED_SHIMS=1 \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+    || fail "stale CLI shim replacement failed: $(<"$test_dir/stderr")"
+
+  assert_complete_npm_refresh "$test_dir/command-log"
+  for binary in codex claude pi; do
+    [[ "$(head -n 1 "$test_dir/.local/bin/$binary")" == '#!/usr/bin/env bash' ]] \
+      || fail "stale $binary shim survived the npm refresh"
+  done
+}
+
+test_pre_activation_diagnostics_failure_does_not_restart_the_service() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if AOE_DOCTOR_FAIL_CALL=1 \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "pre-activation diagnostics failure exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: pre-activation verification failed: AoE ACP diagnostics\n') \
+    "$test_dir/stderr" \
+    || fail "pre-activation failure did not identify its phase and component"
+  if grep -q '^systemctl ' "$test_dir/command-log"; then
+    fail "pre-activation diagnostics failure reached service activation"
+  fi
+}
+
+test_pre_activation_command_resolution_failure_does_not_restart_the_service() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if NPM_OMIT_BINARY=codex-acp \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "pre-activation command-resolution failure exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: pre-activation verification failed: codex-acp command must resolve to %s/.local/bin/codex-acp, got missing\n' "$test_dir") \
+    "$test_dir/stderr" \
+    || fail "command-resolution failure did not identify its phase and component"
+  if grep -q '^systemctl ' "$test_dir/command-log"; then
+    fail "command-resolution failure reached service activation"
+  fi
+}
+
+test_pre_activation_version_failure_does_not_restart_the_service() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if CODEX_POST_INSTALL=2.3.3 \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "pre-activation version failure exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: pre-activation verification failed: Codex CLI (standalone) version\n') \
+    "$test_dir/stderr" \
+    || fail "version failure did not identify its phase and component"
+  if grep -q '^systemctl ' "$test_dir/command-log"; then
+    fail "version failure reached service activation"
+  fi
+}
+
+test_pre_activation_empty_package_inventory_names_its_component() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if NPM_LIST_EMPTY=1 \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "empty pre-activation npm inventory exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: pre-activation verification failed: npm package inventory\n') \
+    "$test_dir/stderr" \
+    || fail "empty npm inventory did not report its phase and component exactly"
+  if grep -q '^systemctl ' "$test_dir/command-log"; then
+    fail "empty npm inventory reached service activation"
+  fi
+}
+
+test_pre_activation_registry_failure_names_the_managed_component() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if NPM_FAIL_PACKAGE='@agentclientprotocol/claude-agent-acp@latest' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "component registry failure exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: pre-activation verification failed: claude-agent-acp adapter\n') \
+    "$test_dir/stderr" \
+    || fail "component registry failure leaked output or lost its exact component"
+  if grep -q '^systemctl ' "$test_dir/command-log"; then
+    fail "component registry failure reached service activation"
+  fi
+}
+
+test_post_activation_failure_retains_failure_without_rollback() {
+  local state_dir
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_dir="$test_dir/state/update-agent-tools"
+  state_file="$state_dir/state.json"
+  mkdir -p "$state_dir"
+  printf '%s\n' '{"last_successful_activation":"2026-07-01T00:00:00Z","activation_failure":null}' \
+    >"$state_file"
+
+  if AOE_DOCTOR_FAIL_AFTER=2 \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "post-activation diagnostics failure exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: post-activation verification failed: AoE ACP diagnostics\n') \
+    "$test_dir/stderr" \
+    || fail "post-activation failure did not identify its phase and component"
+  [[ "$(grep -c '^systemctl --user is-active --quiet aoe-serve.service$' "$test_dir/command-log")" -eq 10 ]] \
+    || fail "post-activation health verification was not bounded"
+  jq -e '
+    .last_successful_activation == "2026-07-01T00:00:00Z"
+    and .activation_failure.phase == "post-activation verification"
+    and .activation_failure.component == "AoE ACP diagnostics"
+    and .activation_failure.failed_at == "2026-07-14T00:00:00Z"
+    and (has("version_snapshot") | not)
+    and (has("rollback") | not)
+  ' "$state_file" >/dev/null \
+    || fail "post-activation failure changed the success timestamp or lost recovery state"
+  if grep -Eiq 'rollback|version.snapshot|npm install .*@[0-9]' "$test_dir/command-log"; then
+    fail "post-activation failure attempted rollback or retained a version snapshot"
+  fi
+}
+
+test_activation_failure_is_recovered_by_a_full_rerun() {
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  if SYSTEMCTL_RESTART_FAIL=1 \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-14T01:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-1" "$test_dir/stderr-1"; then
+    fail "service restart failure exited zero"
+  fi
+  jq -e '
+    .last_successful_activation == null
+    and .activation_failure.phase == "activation"
+    and .activation_failure.component == "AoE service restart"
+  ' "$state_file" >/dev/null \
+    || fail "service restart failure was not retained"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-14T02:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-2" "$test_dir/stderr-2" \
+    || fail "activation recovery rerun exited nonzero: $(<"$test_dir/stderr-2")"
+  [[ "$(grep -c '^aoe update --yes$' "$test_dir/command-log")" -eq 2 ]] \
+    || fail "activation recovery did not refresh the whole unit on rerun"
+  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 12 ]] \
+    || fail "activation recovery skipped npm refresh because packages were current"
+  [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' "$test_dir/command-log")" -eq 2 ]] \
+    || fail "activation recovery did not retry service activation"
+  jq -e '
+    .last_successful_activation == "2026-07-14T02:00:00Z"
+    and .activation_failure == null
+  ' "$state_file" >/dev/null \
+    || fail "successful recovery did not clear activation failure and write its timestamp"
+}
+
+test_standalone_and_bundled_codex_remain_separate_on_update() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  CODEX_CURRENT="2.4.0" \
+    CODEX_LATEST="2.4.0" \
+    BUNDLED_CODEX_CURRENT="2.3.3" \
+    BUNDLED_CODEX_RANGE="^2.3.0" \
+    BUNDLED_CODEX_VERSIONS_JSON='["2.3.3","2.3.4"]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+    || fail "separate Codex update exited nonzero: $(<"$test_dir/stderr")"
+
+  assert_complete_npm_refresh "$test_dir/command-log"
+  grep -Fx 'npm install --global @openai/codex@latest' "$test_dir/command-log" >/dev/null \
+    || fail "standalone Codex was not installed independently"
+  grep -Fx 'npm install --global @agentclientprotocol/codex-acp@latest' "$test_dir/command-log" >/dev/null \
+    || fail "codex-acp was not installed independently"
+  grep -Fx 'npm view @openai/codex@latest version' "$test_dir/command-log" >/dev/null \
+    || fail "standalone Codex version was not verified independently"
+  grep -Fx 'npm view @openai/codex@^2.3.0 version --json' "$test_dir/command-log" >/dev/null \
+    || fail "codex-acp bundled runtime was not verified against its adapter-compatible range"
 }
 
 test_nested_codex_runtime_is_a_distinct_scope() {
@@ -714,4 +1143,15 @@ test_nested_codex_runtime_is_a_distinct_scope
 test_nested_codex_uses_latest_adapter_compatible_target
 test_nested_codex_accepts_a_single_compatible_version
 test_nested_codex_ignores_compatible_prereleases
+test_default_update_refreshes_and_activates_the_complete_toolchain
+test_partial_install_does_not_restart_the_service
+test_default_update_removes_stale_cli_shims_before_npm_refresh
+test_pre_activation_diagnostics_failure_does_not_restart_the_service
+test_pre_activation_command_resolution_failure_does_not_restart_the_service
+test_pre_activation_version_failure_does_not_restart_the_service
+test_pre_activation_empty_package_inventory_names_its_component
+test_pre_activation_registry_failure_names_the_managed_component
+test_post_activation_failure_retains_failure_without_rollback
+test_activation_failure_is_recovered_by_a_full_rerun
+test_standalone_and_bundled_codex_remain_separate_on_update
 printf 'PASS: update-agent-tools --check\n'
