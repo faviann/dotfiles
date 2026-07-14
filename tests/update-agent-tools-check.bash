@@ -293,7 +293,7 @@ execute_tool() {
       | script -qefc "$command_line" /dev/null \
         >"$stdout_file" 2>"$stderr_file"
   else
-    bash "$COMMAND" "$@" >"$stdout_file" 2>"$stderr_file"
+    bash "$COMMAND" "$@" </dev/null >"$stdout_file" 2>"$stderr_file"
   fi
 }
 
