@@ -150,12 +150,20 @@ captured_workers_replaced_and_healthy() {
     . as $current
     | [
         $captured[] as $before
-        | any(
-            $current[];
-            .session_id == $before.session_id
-            and .pid != $before.pid
-            and .alive == true
-            and .build_stale == false
+        | (
+            any(
+              $current[];
+              .session_id == $before.session_id
+              and .pid != $before.pid
+              and .alive == true
+              and .build_stale == false
+            )
+            and all(
+              $current[];
+              .session_id != $before.session_id
+              or .pid != $before.pid
+              or .alive != true
+            )
           )
       ]
     | all
