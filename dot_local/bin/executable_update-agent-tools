@@ -3,17 +3,76 @@ set -euo pipefail
 
 EXPECTED_PREFIX="$HOME/.local"
 AOE_LATEST_RELEASE_URL="https://api.github.com/repos/njbrake/agent-of-empires/releases/latest"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+STATE_DIR="$STATE_HOME/update-agent-tools"
+STATE_FILE="$STATE_DIR/state.json"
+LOCK_FILE="$STATE_DIR/lock"
 
 fail() {
   printf 'update-agent-tools: %s\n' "$*" >&2
   exit 1
 }
 
+mkdir -p "$STATE_DIR"
+command -v flock >/dev/null 2>&1 || fail "flock missing from PATH"
+exec 9>"$LOCK_FILE"
+flock 9
+
 command -v npm >/dev/null 2>&1 || fail "npm missing from PATH"
 
 actual_prefix="$(npm config get prefix)"
 test "$actual_prefix" = "$EXPECTED_PREFIX" \
   || fail "npm prefix must be $EXPECTED_PREFIX, got $actual_prefix"
+
+now_epoch="$(date -u -d "${UPDATE_AGENT_TOOLS_NOW:-now}" +%s)" \
+  || fail "invalid current time"
+now_iso="$(date -u -d "@$now_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+
+state_value() {
+  local field="$1"
+
+  if [[ -f "$STATE_FILE" ]]; then
+    jq -er ".$field // empty" "$STATE_FILE" 2>/dev/null || true
+  fi
+}
+
+write_check_state() {
+  local last_attempt="$1"
+  local last_successful_check="$2"
+  local cached_version_result="$3"
+  local check_status="$4"
+  local last_successful_activation
+  local activation_failure
+  local temporary_state
+
+  last_successful_activation="$(state_value last_successful_activation)"
+  activation_failure="$(state_value activation_failure)"
+  temporary_state="$(mktemp "$STATE_DIR/state.json.tmp.XXXXXX")"
+  chmod 600 "$temporary_state"
+  jq -n \
+    --arg last_attempt "$last_attempt" \
+    --arg last_successful_check "$last_successful_check" \
+    --arg cached_version_result "$cached_version_result" \
+    --arg check_status "$check_status" \
+    --arg last_successful_activation "$last_successful_activation" \
+    --arg activation_failure "$activation_failure" \
+    '{
+      last_attempt: $last_attempt,
+      last_successful_check: (
+        if $last_successful_check == "" then null else $last_successful_check end
+      ),
+      cached_version_result: $cached_version_result,
+      check_status: $check_status,
+      last_successful_activation: (
+        if $last_successful_activation == "" then null
+        else $last_successful_activation end
+      ),
+      activation_failure: (
+        if $activation_failure == "" then null else $activation_failure end
+      )
+    }' >"$temporary_state"
+  mv -f "$temporary_state" "$STATE_FILE"
+}
 
 check_component() {
   local name="$1"
@@ -32,29 +91,36 @@ check_toolchain() {
   local bundled_codex_range
   local bundled_codex_versions
   local bundled_codex_latest
+  local claude_latest
+  local pi_latest
+  local codex_acp_latest
+  local claude_acp_latest
+  local pi_acp_latest
   local codex_latest
 
   command -v curl >/dev/null 2>&1 || fail "curl missing from PATH"
   command -v jq >/dev/null 2>&1 || fail "jq missing from PATH"
 
   if command -v aoe >/dev/null 2>&1; then
-    aoe_current="$(aoe --version)"
+    aoe_current="$(aoe --version)" || return 1
     aoe_current="${aoe_current##* }"
   fi
-  aoe_latest="$(curl -fsSL "$AOE_LATEST_RELEASE_URL" | jq -r '.tag_name')"
+  aoe_latest="$(curl -fsSL "$AOE_LATEST_RELEASE_URL" | jq -r '.tag_name')" \
+    || return 1
+  [[ -n "$aoe_latest" && "$aoe_latest" != "null" ]] || return 1
   aoe_latest="${aoe_latest#v}"
 
   installed="$(npm list --global --json --all 2>/dev/null || true)"
   test -n "$installed" || fail "could not inspect globally installed npm packages"
 
-  codex_latest="$(npm view @openai/codex@latest version)"
+  codex_latest="$(npm view @openai/codex@latest version)" || return 1
   bundled_codex_range="$(npm view \
     @agentclientprotocol/codex-acp@latest \
-    'dependencies.@openai/codex')"
+    'dependencies.@openai/codex')" || return 1
   bundled_codex_versions="$(npm view \
     "@openai/codex@$bundled_codex_range" \
     version \
-    --json)"
+    --json)" || return 1
   bundled_codex_latest="$(jq -er '
     if type == "array" then . else [.] end
     | map(select(
@@ -63,7 +129,16 @@ check_toolchain() {
         and (contains("-") | not)
       ))
     | last
-  ' <<<"$bundled_codex_versions")"
+  ' <<<"$bundled_codex_versions")" || return 1
+  claude_latest="$(npm view @anthropic-ai/claude-code@latest version)" \
+    || return 1
+  pi_latest="$(npm view @earendil-works/pi-coding-agent@latest version)" \
+    || return 1
+  codex_acp_latest="$(npm view @agentclientprotocol/codex-acp@latest version)" \
+    || return 1
+  claude_acp_latest="$(npm view @agentclientprotocol/claude-agent-acp@latest version)" \
+    || return 1
+  pi_acp_latest="$(npm view pi-acp@latest version)" || return 1
 
   check_component "AoE" \
     "$aoe_current" \
@@ -73,28 +148,110 @@ check_toolchain() {
     "$codex_latest"
   check_component "Claude Code CLI" \
     "$(jq -r '.dependencies["@anthropic-ai/claude-code"].version // "missing"' <<<"$installed")" \
-    "$(npm view @anthropic-ai/claude-code@latest version)"
+    "$claude_latest"
   check_component "Pi agent CLI" \
     "$(jq -r '.dependencies["@earendil-works/pi-coding-agent"].version // "missing"' <<<"$installed")" \
-    "$(npm view @earendil-works/pi-coding-agent@latest version)"
+    "$pi_latest"
   check_component "codex-acp adapter" \
     "$(jq -r '.dependencies["@agentclientprotocol/codex-acp"].version // "missing"' <<<"$installed")" \
-    "$(npm view @agentclientprotocol/codex-acp@latest version)"
+    "$codex_acp_latest"
   check_component "claude-agent-acp adapter" \
     "$(jq -r '.dependencies["@agentclientprotocol/claude-agent-acp"].version // "missing"' <<<"$installed")" \
-    "$(npm view @agentclientprotocol/claude-agent-acp@latest version)"
+    "$claude_acp_latest"
   check_component "pi-acp adapter" \
     "$(jq -r '.dependencies["pi-acp"].version // "missing"' <<<"$installed")" \
-    "$(npm view pi-acp@latest version)"
+    "$pi_acp_latest"
   check_component "Codex runtime (codex-acp)" \
     "$(jq -r '.dependencies["@agentclientprotocol/codex-acp"].dependencies["@openai/codex"].version // "missing"' <<<"$installed")" \
     "$bundled_codex_latest"
 }
 
+print_cached_result() {
+  local cached_result="$1"
+
+  if [[ -n "$cached_result" ]]; then
+    printf '%s\n' "$cached_result"
+  fi
+}
+
+print_check_failure() {
+  local last_successful_check="$1"
+  local retry_iso="$2"
+
+  printf 'update-agent-tools: agent-tool update check failed; last successful check: %s; next retry: %s\n' \
+    "${last_successful_check:-never}" \
+    "$retry_iso" >&2
+}
+
+run_check() {
+  local output_file
+  local error_file
+  local result
+  local last_successful_check
+  local cached_result
+  local retry_iso
+
+  output_file="$(mktemp "$STATE_DIR/check.stdout.XXXXXX")"
+  error_file="$(mktemp "$STATE_DIR/check.stderr.XXXXXX")"
+  if (check_toolchain) >"$output_file" 2>"$error_file"; then
+    result="$(<"$output_file")"
+    rm -f "$output_file" "$error_file"
+    write_check_state "$now_iso" "$now_iso" "$result" "success"
+    print_cached_result "$result"
+    return 0
+  fi
+
+  rm -f "$output_file" "$error_file"
+  last_successful_check="$(state_value last_successful_check)"
+  cached_result="$(state_value cached_version_result)"
+  write_check_state \
+    "$now_iso" \
+    "$last_successful_check" \
+    "$cached_result" \
+    "failed"
+  retry_iso="$(date -u -d "@$((now_epoch + 3600))" +%Y-%m-%dT%H:%M:%SZ)"
+  print_check_failure "$last_successful_check" "$retry_iso"
+  return 1
+}
+
 if [[ "${1:-}" == "--check" ]]; then
   [[ $# -eq 1 ]] || fail "--check does not accept arguments"
-  check_toolchain
-  exit 0
+  if run_check; then
+    exit 0
+  else
+    exit 1
+  fi
+fi
+
+if [[ "${1:-}" == "--check-if-due" ]]; then
+  local_last_attempt="$(state_value last_attempt)"
+  local_last_successful_check="$(state_value last_successful_check)"
+  local_cached_result="$(state_value cached_version_result)"
+  local_check_status="$(state_value check_status)"
+
+  if [[ -n "$local_last_attempt" ]]; then
+    if [[ "$local_check_status" == "failed" ]]; then
+      next_check_epoch="$(date -u -d "$local_last_attempt + 1 hour" +%s)"
+    else
+      next_check_epoch="$(date -u -d "$local_last_successful_check + 24 hours" +%s)"
+    fi
+
+    if (( now_epoch < next_check_epoch )); then
+      if [[ "$local_check_status" == "failed" ]]; then
+        next_check_iso="$(date -u -d "@$next_check_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+        print_check_failure "$local_last_successful_check" "$next_check_iso"
+      else
+        print_cached_result "$local_cached_result"
+      fi
+      exit 0
+    fi
+  fi
+
+  if run_check; then
+    exit 0
+  else
+    exit 1
+  fi
 fi
 
 [[ $# -eq 0 ]] || fail "unknown argument: $1"
