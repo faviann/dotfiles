@@ -46,7 +46,10 @@ write_check_state() {
   local temporary_state
 
   last_successful_activation="$(state_value last_successful_activation)"
-  activation_failure="$(state_value activation_failure)"
+  activation_failure="null"
+  if [[ -f "$STATE_FILE" ]]; then
+    activation_failure="$(jq -c '.activation_failure // null' "$STATE_FILE" 2>/dev/null || printf 'null')"
+  fi
   temporary_state="$(mktemp "$STATE_DIR/state.json.tmp.XXXXXX")"
   chmod 600 "$temporary_state"
   jq -n \
@@ -55,7 +58,7 @@ write_check_state() {
     --arg cached_version_result "$cached_version_result" \
     --arg check_status "$check_status" \
     --arg last_successful_activation "$last_successful_activation" \
-    --arg activation_failure "$activation_failure" \
+    --argjson activation_failure "$activation_failure" \
     '{
       last_attempt: $last_attempt,
       last_successful_check: (
@@ -67,11 +70,62 @@ write_check_state() {
         if $last_successful_activation == "" then null
         else $last_successful_activation end
       ),
+      activation_failure: $activation_failure
+    }' >"$temporary_state"
+  mv -f "$temporary_state" "$STATE_FILE"
+}
+
+write_activation_state() {
+  local successful_at="$1"
+  local failure_phase="$2"
+  local failure_component="$3"
+  local current_state='{}'
+  local temporary_state
+
+  if [[ -f "$STATE_FILE" ]]; then
+    current_state="$(jq -c . "$STATE_FILE")" \
+      || fail "state update failed: invalid state file"
+  fi
+  temporary_state="$(mktemp "$STATE_DIR/state.json.tmp.XXXXXX")"
+  chmod 600 "$temporary_state"
+  jq -n \
+    --argjson current_state "$current_state" \
+    --arg successful_at "$successful_at" \
+    --arg failure_phase "$failure_phase" \
+    --arg failure_component "$failure_component" \
+    --arg failed_at "$now_iso" \
+    '$current_state + {
+      last_successful_activation: (
+        if $successful_at == "" then $current_state.last_successful_activation
+        else $successful_at end
+      ),
       activation_failure: (
-        if $activation_failure == "" then null else $activation_failure end
+        if $failure_phase == "" then null
+        else {
+          phase: $failure_phase,
+          component: $failure_component,
+          failed_at: $failed_at
+        } end
       )
     }' >"$temporary_state"
   mv -f "$temporary_state" "$STATE_FILE"
+}
+
+activation_fail() {
+  local phase="$1"
+  local component="$2"
+
+  write_activation_state "" "$phase" "$component"
+  fail "$phase failed: $component"
+}
+
+install_npm_component() {
+  local component="$1"
+  local package="$2"
+
+  if ! npm install --global "$package"; then
+    fail "installation failed: $component ($package)"
+  fi
 }
 
 check_component() {
@@ -275,27 +329,74 @@ fi
 
 [[ $# -eq 0 ]] || fail "unknown argument: $1"
 
+command -v aoe >/dev/null 2>&1 \
+  || fail "installation failed: AoE command missing from PATH"
+if ! aoe update --yes; then
+  fail "installation failed: AoE"
+fi
+
 for binary in codex claude pi; do
   binary_path="$EXPECTED_PREFIX/bin/$binary"
-  if [ -e "$binary_path" ] || [ -L "$binary_path" ]; then
+  if [[ -e "$binary_path" || -L "$binary_path" ]]; then
     rm -f "$binary_path"
   fi
 done
 
-npm install --global \
-  @openai/codex@latest \
-  @anthropic-ai/claude-code@latest \
-  @earendil-works/pi-coding-agent@latest
+install_npm_component "Codex CLI (standalone)" "@openai/codex@latest"
+install_npm_component "Claude Code CLI" "@anthropic-ai/claude-code@latest"
+install_npm_component "Pi agent CLI" "@earendil-works/pi-coding-agent@latest"
+install_npm_component "codex-acp adapter" "@agentclientprotocol/codex-acp@latest"
+install_npm_component \
+  "claude-agent-acp adapter" \
+  "@agentclientprotocol/claude-agent-acp@latest"
+install_npm_component "pi-acp adapter" "pi-acp@latest"
 
 hash -r 2>/dev/null || true
 
-for binary in codex claude pi; do
+for binary in aoe codex claude pi codex-acp claude-agent-acp pi-acp; do
   expected_path="$EXPECTED_PREFIX/bin/$binary"
   actual_path="$(command -v "$binary" || true)"
   test "$actual_path" = "$expected_path" \
-    || fail "$binary must resolve to $expected_path, got ${actual_path:-missing}"
+    || fail "pre-activation verification failed: $binary command must resolve to $expected_path, got ${actual_path:-missing}"
 done
 
-codex --version
-claude --version
-pi --version
+verification_output_file="$(mktemp "$STATE_DIR/verification.stdout.XXXXXX")"
+verification_error_file="$(mktemp "$STATE_DIR/verification.stderr.XXXXXX")"
+if ! check_toolchain >"$verification_output_file" 2>"$verification_error_file"; then
+  rm -f "$verification_output_file" "$verification_error_file"
+  fail "pre-activation verification failed: installed package versions"
+fi
+verification_output="$(<"$verification_output_file")"
+rm -f "$verification_output_file" "$verification_error_file"
+if [[ -n "$verification_output" ]]; then
+  failed_component="${verification_output%%:*}"
+  fail "pre-activation verification failed: $failed_component version"
+fi
+
+if ! aoe acp doctor; then
+  fail "pre-activation verification failed: AoE ACP diagnostics"
+fi
+
+if ! systemctl --user restart aoe-serve.service; then
+  activation_fail "activation" "AoE service restart"
+fi
+
+health_attempt=1
+health_component="AoE service"
+while (( health_attempt <= 10 )); do
+  if systemctl --user is-active --quiet aoe-serve.service; then
+    health_component="AoE ACP diagnostics"
+    if aoe acp doctor; then
+      write_activation_state "$now_iso" "" ""
+      exit 0
+    fi
+  else
+    health_component="AoE service"
+  fi
+  if (( health_attempt < 10 )); then
+    sleep 1
+  fi
+  health_attempt=$((health_attempt + 1))
+done
+
+activation_fail "post-activation verification" "$health_component"
