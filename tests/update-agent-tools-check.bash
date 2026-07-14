@@ -57,6 +57,27 @@ if [[ "$*" == "acp doctor" ]]; then
   exit 0
 fi
 
+if [[ "$*" == "acp ps --json" ]]; then
+  ps_count=0
+  if [[ -f "$HOME/acp-ps-count" ]]; then
+    ps_count="$(<"$HOME/acp-ps-count")"
+  fi
+  ps_count=$((ps_count + 1))
+  printf '%s\n' "$ps_count" >"$HOME/acp-ps-count"
+  jq -c --argjson index "$((ps_count - 1))" '
+    if length == 0 then []
+    elif $index < length then .[$index]
+    else .[-1]
+    end
+  ' <<<"$ACP_PS_SEQUENCE_JSON"
+  exit 0
+fi
+
+if [[ "$1" == "acp" && "$2" == "restart" && $# -eq 3 ]]; then
+  [[ "${ACP_RESTART_FAIL:-0}" != "1" ]]
+  exit
+fi
+
 printf 'unexpected aoe invocation: %s\n' "$*" >&2
 exit 64
 STUB
@@ -260,6 +281,22 @@ STUB
     "$stub_dir/systemctl" "$stub_dir/sleep" "$stub_dir/date"
 }
 
+execute_tool() {
+  local stdout_file="$1"
+  local stderr_file="$2"
+  local command_line
+  shift 2
+
+  if [[ "${TEST_RUN_IN_TTY:-0}" == "1" ]]; then
+    printf -v command_line '%q ' bash "$COMMAND" "$@"
+    printf '%s' "${TEST_TTY_INPUT:-}" \
+      | script -qefc "$command_line" /dev/null \
+        >"$stdout_file" 2>"$stderr_file"
+  else
+    bash "$COMMAND" "$@" >"$stdout_file" 2>"$stderr_file"
+  fi
+}
+
 run_tool() {
   local home="$1"
   local stdout_file="$2"
@@ -285,6 +322,8 @@ run_tool() {
     AOE_UPDATE_FAIL="${AOE_UPDATE_FAIL:-0}" \
     AOE_DOCTOR_FAIL_CALL="${AOE_DOCTOR_FAIL_CALL:-0}" \
     AOE_DOCTOR_FAIL_AFTER="${AOE_DOCTOR_FAIL_AFTER:-0}" \
+    ACP_PS_SEQUENCE_JSON="${ACP_PS_SEQUENCE_JSON:-[[]]}" \
+    ACP_RESTART_FAIL="${ACP_RESTART_FAIL:-0}" \
     SYSTEMCTL_RESTART_FAIL="${SYSTEMCTL_RESTART_FAIL:-0}" \
     SYSTEMCTL_INACTIVE="${SYSTEMCTL_INACTIVE:-0}" \
     AOE_CURRENT="${AOE_CURRENT:-1.2.3}" \
@@ -305,7 +344,9 @@ run_tool() {
     BUNDLED_CODEX_CURRENT="${BUNDLED_CODEX_CURRENT:-2.3.4}" \
     BUNDLED_CODEX_RANGE="${BUNDLED_CODEX_RANGE:-^2.3.0}" \
     BUNDLED_CODEX_VERSIONS_JSON="${BUNDLED_CODEX_VERSIONS_JSON:-[\"2.3.3\",\"2.3.4\"]}" \
-    bash "$COMMAND" "$@" >"$stdout_file" 2>"$stderr_file"
+    TEST_RUN_IN_TTY="${TEST_RUN_IN_TTY:-0}" \
+    TEST_TTY_INPUT="${TEST_TTY_INPUT:-}" \
+    execute_tool "$stdout_file" "$stderr_file" "$@"
 }
 
 run_check() {
@@ -795,6 +836,301 @@ test_default_update_refreshes_and_activates_the_complete_toolchain() {
     || fail "complete update did not record successful activation"
 }
 
+test_interactive_update_without_running_workers_does_not_prompt() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  TEST_RUN_IN_TTY=1 \
+    ACP_PS_SEQUENCE_JSON='[[]]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+    || fail "zero-worker interactive update failed: $(<"$test_dir/stderr")"
+
+  if grep -F 'running ACP' "$test_dir/stdout" >/dev/null; then
+    fail "zero-worker interactive update prompted for disruption authorization"
+  fi
+}
+
+test_noninteractive_update_with_running_workers_requires_yes() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if ACP_PS_SEQUENCE_JSON='[[{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}]]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "noninteractive update with a running worker exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: 1 running ACP session would be disrupted; rerun with --yes to authorize replacement\n') \
+    "$test_dir/stderr" \
+    || fail "noninteractive refusal was not actionable or leaked worker metadata"
+  if grep -Eq '^(aoe update|npm install|systemctl |aoe acp restart)' \
+    "$test_dir/command-log"; then
+    fail "noninteractive refusal mutated the installation or restarted a service or worker"
+  fi
+}
+
+test_yes_authorizes_noninteractive_update_with_running_workers() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  ACP_PS_SEQUENCE_JSON='[
+    [{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}],
+    [{"session_id":"private-session","pid":201,"alive":true,"build_stale":false}]
+  ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "--yes update with a running worker failed: $(<"$test_dir/stderr")"
+
+  grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
+    || fail "--yes did not authorize update mutation"
+  if grep -F 'running ACP' "$test_dir/stdout" "$test_dir/stderr" >/dev/null; then
+    fail "--yes requested interactive disruption authorization"
+  fi
+}
+
+test_interactive_decline_happens_once_before_mutation() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if TEST_RUN_IN_TTY=1 \
+    TEST_TTY_INPUT=$'n\n' \
+    ACP_PS_SEQUENCE_JSON='[[
+      {"session_id":"private-session-a","pid":101,"alive":true,"build_stale":false,"title":"secret title"},
+      {"session_id":"private-session-b","pid":102,"alive":true,"build_stale":false,"agent":"secret agent"}
+    ]]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
+    fail "declined interactive update exited zero"
+  fi
+
+  [[ "$(grep -c '2 running ACP sessions would be disrupted' "$test_dir/stdout")" -eq 1 ]] \
+    || fail "interactive update did not prompt once with only the affected count"
+  if grep -Eq 'private-session|secret title|secret agent' "$test_dir/stdout"; then
+    fail "interactive confirmation exposed ACP session metadata"
+  fi
+  if grep -Eq '^(aoe update|npm install|systemctl |aoe acp restart)' \
+    "$test_dir/command-log"; then
+    fail "declined interactive update mutated the installation or restarted a service or worker"
+  fi
+}
+
+test_workers_are_reconciled_by_identity_after_pre_activation_verification() {
+  local capture_line
+  local install_line
+  local pre_activation_line
+  local service_restart_line
+  local test_dir
+  local timestamp_line
+  local worker_health_line
+  local worker_restart_line
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  TEST_RUN_IN_TTY=1 \
+    TEST_TTY_INPUT=$'y\n' \
+    UPDATE_AGENT_TOOLS_ACTIVATION_NOW="2026-07-14T00:04:00Z" \
+    ACP_PS_SEQUENCE_JSON='[
+    [
+      {"session_id":"session-a","pid":101,"alive":true,"build_stale":false},
+      {"session_id":"session-b","pid":102,"alive":true,"build_stale":false},
+      {"session_id":"session-b","pid":102,"alive":true,"build_stale":false}
+    ],
+    [
+      {"session_id":"session-a","pid":201,"alive":true,"build_stale":false},
+      {"session_id":"session-b","pid":102,"alive":true,"build_stale":true}
+    ],
+    [
+      {"session_id":"session-a","pid":201,"alive":true,"build_stale":false},
+      {"session_id":"session-b","pid":102,"alive":true,"build_stale":true}
+    ],
+    [
+      {"session_id":"session-a","pid":201,"alive":true,"build_stale":false},
+      {"session_id":"session-b","pid":202,"alive":true,"build_stale":false}
+    ]
+  ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+    || fail "worker reconciliation failed: $(<"$test_dir/stderr")"
+
+  [[ "$(grep -c '2 running ACP sessions would be disrupted' "$test_dir/stdout")" -eq 1 ]] \
+    || fail "interactive worker update did not request disruption authorization exactly once"
+  if grep -Eq 'session-a|session-b' "$test_dir/stdout"; then
+    fail "interactive worker update exposed captured identities"
+  fi
+  capture_line="$(grep -n '^aoe acp ps --json$' "$test_dir/command-log" \
+    | head -n 1 | cut -d: -f1)"
+  install_line="$(grep -n '^aoe update --yes$' "$test_dir/command-log" \
+    | cut -d: -f1)"
+  [[ "$capture_line" -lt "$install_line" ]] \
+    || fail "running worker identities were not captured before update mutation"
+  [[ "$(grep -c '^aoe acp restart session-b$' "$test_dir/command-log")" -eq 1 ]] \
+    || fail "unchanged duplicate worker identity was not restarted exactly once"
+  if grep -Fx 'aoe acp restart session-a' "$test_dir/command-log" >/dev/null; then
+    fail "worker already replaced by AoE was restarted a second time"
+  fi
+  pre_activation_line="$(grep -n '^aoe acp doctor$' "$test_dir/command-log" \
+    | head -n 1 | cut -d: -f1)"
+  service_restart_line="$(grep -n '^systemctl --user restart aoe-serve.service$' \
+    "$test_dir/command-log" | cut -d: -f1)"
+  worker_restart_line="$(grep -n '^aoe acp restart session-b$' \
+    "$test_dir/command-log" | cut -d: -f1)"
+  [[ "$pre_activation_line" -lt "$service_restart_line" \
+    && "$service_restart_line" -lt "$worker_restart_line" ]] \
+    || fail "daemon or worker restart happened before pre-activation verification completed"
+  worker_health_line="$(grep -n '^aoe acp ps --json$' "$test_dir/command-log" \
+    | tail -n 1 | cut -d: -f1)"
+  timestamp_line="$(grep -n '^date -u -d 2026-07-14T00:04:00Z +%Y-%m-%dT%H:%M:%SZ$' \
+    "$test_dir/command-log" | cut -d: -f1)"
+  [[ "$timestamp_line" -gt "$worker_health_line" ]] \
+    || fail "successful activation was recorded before captured workers were healthy"
+}
+
+test_coexisting_old_and_replacement_identities_do_not_restart_again() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  ACP_PS_SEQUENCE_JSON='[
+    [{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}],
+    [
+      {"session_id":"private-session","pid":101,"alive":true,"build_stale":true},
+      {"session_id":"private-session","pid":201,"alive":true,"build_stale":false}
+    ]
+  ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "coexisting replacement identity update failed: $(<"$test_dir/stderr")"
+
+  if grep -Fx 'aoe acp restart private-session' \
+    "$test_dir/command-log" >/dev/null; then
+    fail "coexisting healthy replacement identity was restarted again"
+  fi
+  [[ "$(grep -c '^aoe acp ps --json$' "$test_dir/command-log")" -eq 3 ]] \
+    || fail "coexisting replacement was not accepted from the current identity set"
+}
+
+test_each_worker_restart_decision_uses_a_fresh_identity_snapshot() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  ACP_PS_SEQUENCE_JSON='[
+    [
+      {"session_id":"session-a","pid":101,"alive":true,"build_stale":false},
+      {"session_id":"session-b","pid":102,"alive":true,"build_stale":false}
+    ],
+    [
+      {"session_id":"session-a","pid":101,"alive":true,"build_stale":true},
+      {"session_id":"session-b","pid":102,"alive":true,"build_stale":true}
+    ],
+    [
+      {"session_id":"session-a","pid":201,"alive":true,"build_stale":false},
+      {"session_id":"session-b","pid":202,"alive":true,"build_stale":false}
+    ]
+  ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "per-worker identity reconciliation failed: $(<"$test_dir/stderr")"
+
+  [[ "$(grep -c '^aoe acp restart session-a$' "$test_dir/command-log")" -eq 1 ]] \
+    || fail "first unchanged worker was not restarted exactly once"
+  if grep -Fx 'aoe acp restart session-b' "$test_dir/command-log" >/dev/null; then
+    fail "later worker auto-replaced during reconciliation was manually restarted"
+  fi
+  [[ "$(grep -c '^aoe acp ps --json$' "$test_dir/command-log")" -eq 4 ]] \
+    || fail "restart decisions did not use immediate per-worker identity snapshots"
+}
+
+test_worker_replacement_health_failure_is_bounded_and_not_successful() {
+  local state_dir
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_dir="$test_dir/state/update-agent-tools"
+  state_file="$state_dir/state.json"
+  mkdir -p "$state_dir"
+  printf '%s\n' '{"last_successful_activation":"2026-07-01T00:00:00Z","activation_failure":null}' \
+    >"$state_file"
+
+  if ACP_PS_SEQUENCE_JSON='[[
+      {"session_id":"private-session","pid":101,"alive":true,"build_stale":false}
+    ]]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes; then
+    fail "unhealthy unreplaced worker exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: post-activation verification failed: ACP session replacement\n') \
+    "$test_dir/stderr" \
+    || fail "worker health failure did not identify the post-activation phase"
+  [[ "$(grep -c '^aoe acp ps --json$' "$test_dir/command-log")" -eq 12 ]] \
+    || fail "worker replacement health wait was not bounded"
+  [[ "$(grep -c '^aoe acp restart private-session$' "$test_dir/command-log")" -eq 1 ]] \
+    || fail "unhealthy worker was restarted more than once"
+  jq -e '
+    .last_successful_activation == "2026-07-01T00:00:00Z"
+    and .activation_failure.phase == "post-activation verification"
+    and .activation_failure.component == "ACP session replacement"
+  ' "$state_file" >/dev/null \
+    || fail "worker health failure wrote a success timestamp or lost recovery state"
+}
+
+test_final_service_health_failure_after_worker_replacement_is_bounded() {
+  local state_dir
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_dir="$test_dir/state/update-agent-tools"
+  state_file="$state_dir/state.json"
+  mkdir -p "$state_dir"
+  printf '%s\n' '{"last_successful_activation":"2026-07-01T00:00:00Z","activation_failure":null}' \
+    >"$state_file"
+
+  if AOE_DOCTOR_FAIL_AFTER=2 \
+    UPDATE_AGENT_TOOLS_ACTIVATION_NOW="2026-07-14T00:05:00Z" \
+    ACP_PS_SEQUENCE_JSON='[
+      [{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}],
+      [{"session_id":"private-session","pid":101,"alive":true,"build_stale":true}],
+      [{"session_id":"private-session","pid":201,"alive":true,"build_stale":false}]
+    ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes; then
+    fail "final ACP diagnostics failure after worker replacement exited zero"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: post-activation verification failed: AoE ACP diagnostics\n') \
+    "$test_dir/stderr" \
+    || fail "final diagnostics failure lost phase/component reporting"
+  [[ "$(grep -c '^systemctl --user is-active --quiet aoe-serve.service$' \
+    "$test_dir/command-log")" -eq 11 ]] \
+    || fail "final daemon health verification was not bounded"
+  [[ "$(grep -c '^aoe acp doctor$' "$test_dir/command-log")" -eq 11 ]] \
+    || fail "final ACP diagnostics verification was not bounded"
+  [[ "$(grep -c '^aoe acp restart private-session$' \
+    "$test_dir/command-log")" -eq 1 ]] \
+    || fail "post-preactivation diagnostics failure prevented required worker restart"
+  if grep -Fx 'date -u -d 2026-07-14T00:05:00Z +%Y-%m-%dT%H:%M:%SZ' \
+    "$test_dir/command-log" >/dev/null; then
+    fail "failed final health verification acquired a success timestamp"
+  fi
+  jq -e '
+    .last_successful_activation == "2026-07-01T00:00:00Z"
+    and .activation_failure.phase == "post-activation verification"
+    and .activation_failure.component == "AoE ACP diagnostics"
+  ' "$state_file" >/dev/null \
+    || fail "failed final health verification wrote success or lost recovery state"
+}
+
 test_partial_install_does_not_restart_the_service() {
   local test_dir
   test_dir="$(mktemp -d)"
@@ -1144,6 +1480,15 @@ test_nested_codex_uses_latest_adapter_compatible_target
 test_nested_codex_accepts_a_single_compatible_version
 test_nested_codex_ignores_compatible_prereleases
 test_default_update_refreshes_and_activates_the_complete_toolchain
+test_interactive_update_without_running_workers_does_not_prompt
+test_noninteractive_update_with_running_workers_requires_yes
+test_yes_authorizes_noninteractive_update_with_running_workers
+test_interactive_decline_happens_once_before_mutation
+test_workers_are_reconciled_by_identity_after_pre_activation_verification
+test_coexisting_old_and_replacement_identities_do_not_restart_again
+test_each_worker_restart_decision_uses_a_fresh_identity_snapshot
+test_worker_replacement_health_failure_is_bounded_and_not_successful
+test_final_service_health_failure_after_worker_replacement_is_bounded
 test_partial_install_does_not_restart_the_service
 test_default_update_removes_stale_cli_shims_before_npm_refresh
 test_pre_activation_diagnostics_failure_does_not_restart_the_service
