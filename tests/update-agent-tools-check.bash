@@ -235,6 +235,44 @@ test_state_uses_local_state_fallback() {
     || fail "fallback state did not contain the command-contract fields"
 }
 
+test_state_writes_replace_the_state_file_atomically() {
+  local first_inode
+  local second_inode
+  local state_dir
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_dir="$test_dir/state/update-agent-tools"
+  state_file="$state_dir/state.json"
+
+  AOE_CURRENT="1.2.2" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-06T02:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-1" "$test_dir/stderr-1" --check \
+    || fail "first atomic-state check exited nonzero: $(<"$test_dir/stderr-1")"
+  first_inode="$(stat -c %i "$state_file")"
+
+  AOE_CURRENT="1.2.2" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-06T03:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout-2" "$test_dir/stderr-2" --check \
+    || fail "second atomic-state check exited nonzero: $(<"$test_dir/stderr-2")"
+  second_inode="$(stat -c %i "$state_file")"
+
+  [[ "$first_inode" != "$second_inode" ]] \
+    || fail "successful state writes rewrote the state file in place"
+  jq -e '
+    .last_attempt == "2026-07-06T03:00:00Z"
+    and .last_successful_check == "2026-07-06T03:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "success"
+  ' "$state_file" >/dev/null \
+    || fail "replacement state file did not contain the final successful result"
+  if compgen -G "$state_dir/state.json.tmp.*" >/dev/null; then
+    fail "atomic replacement left a temporary state artifact"
+  fi
+}
+
 test_concurrent_due_checks_are_serialized() {
   local first_pid
   local second_pid
@@ -662,6 +700,7 @@ test_nested_codex_ignores_compatible_prereleases() {
 
 test_due_check_runs_once_per_success_interval
 test_state_uses_local_state_fallback
+test_state_writes_replace_the_state_file_atomically
 test_concurrent_due_checks_are_serialized
 test_update_and_check_modes_share_the_state_lock
 test_failed_check_preserves_cache_and_retries_after_one_hour
