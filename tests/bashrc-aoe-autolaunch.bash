@@ -98,7 +98,7 @@ run_shell() {
   fi
 }
 
-test_combined_freshness_finishes_before_existing_session_attach() {
+test_due_check_finishes_before_existing_session_attach() {
   local test_dir
   test_dir="$(mktemp -d)"
   trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
@@ -127,7 +127,7 @@ test_combined_freshness_finishes_before_existing_session_attach() {
     || fail "combined freshness did not finish before the existing AoE session attached"
 }
 
-test_combined_freshness_finishes_before_new_session_launch() {
+test_due_check_finishes_before_new_session_launch() {
   local test_dir
   test_dir="$(mktemp -d)"
   trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
@@ -281,7 +281,7 @@ test_excluded_shell_contexts_skip_the_check() {
     'workstation without tmux' 1 /dev/pts/1 '' '' tmux
 }
 
-test_missing_freshness_command_preserves_existing_autolaunch() {
+test_missing_checker_preserves_existing_autolaunch() {
   local test_dir
   test_dir="$(mktemp -d)"
   trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
@@ -309,13 +309,13 @@ test_missing_freshness_command_preserves_existing_autolaunch() {
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
 readonly test_cases=(
-  test_combined_freshness_finishes_before_existing_session_attach
-  test_combined_freshness_finishes_before_new_session_launch
+  test_due_check_finishes_before_existing_session_attach
+  test_due_check_finishes_before_new_session_launch
   test_silent_check_adds_no_login_output
   test_failed_freshness_check_does_not_prevent_existing_session_attach
   test_timed_out_freshness_notice_does_not_prevent_new_session_launch
   test_excluded_shell_contexts_skip_the_check
-  test_missing_freshness_command_preserves_existing_autolaunch
+  test_missing_checker_preserves_existing_autolaunch
 )
 
 suite_dispatch 'bashrc AoE auto-launch boundary' "$@"

@@ -106,10 +106,11 @@ release notes.
 The command refuses unsafe source states such as local content, a non-canonical
 origin, the wrong branch or upstream, and ahead or diverged history. It does
 not reset or discard local work. If ACP sessions are running, an interactive
-update reports only their count and asks once before changing anything.
-Declining leaves the toolchain and running processes alone. For unattended use,
-`workstation-update --yes` authorizes those agent-session restarts; it does not
-authorize overwriting local dotfile changes or bypass any source guard.
+update reports only their count and asks once before changing agent-tool state
+or running processes. Declining leaves the toolchain and running processes
+alone. For unattended use, `workstation-update --yes` authorizes those
+agent-session restarts; it does not authorize overwriting local dotfile changes
+or bypass any source guard.
 
 All installs, command and package-version checks, and `aoe acp doctor` must
 succeed before activation begins. The updater then restarts the AoE user
