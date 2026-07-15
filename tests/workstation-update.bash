@@ -33,7 +33,7 @@ resolved_command_path() {
   done
 }
 
-COMMAND_PATH="$(resolved_command_path bash chmod flock git grep mkdir mv sleep)"
+COMMAND_PATH="$(resolved_command_path bash chmod date flock git grep jq mkdir mktemp mv rm sleep timeout)"
 readonly COMMAND_PATH
 
 write_agent_tools_fixture() {
@@ -55,6 +55,12 @@ if [[ -n "${TEST_AGENT_GATE:-}" ]]; then
   while [[ ! -e "$TEST_AGENT_GATE.release" ]]; do
     sleep 0.01
   done
+fi
+
+if [[ "${1:-}" == '--freshness-check-if-due' ]]; then
+  printf '%s' "${TEST_AGENT_FRESHNESS_STDOUT:-}"
+  printf '%s' "${TEST_AGENT_FRESHNESS_STDERR:-}" >&2
+  exit "${TEST_AGENT_FRESHNESS_STATUS:-0}"
 fi
 
 if [[ "${TEST_AGENT_CHECK_FAIL:-0}" == 1 ]]; then
@@ -153,9 +159,16 @@ STUB
   printf '#!%s\n' "$REAL_BASH" >"$home/stubs/ssh"
   cat >>"$home/stubs/ssh" <<'STUB'
 set -euo pipefail
+printf 'fetch\n' >>"$FETCH_LOG"
 if [[ "${TEST_SSH_FETCH_FAIL:-0}" == 1 ]]; then
   printf 'injected SSH fetch failure\n' >&2
   exit 66
+fi
+if [[ -n "${TEST_SSH_GATE:-}" ]]; then
+  : >"$TEST_SSH_GATE.ready"
+  while [[ ! -e "$TEST_SSH_GATE.release" ]]; do
+    sleep 0.01
+  done
 fi
 exec "$TEST_REAL_GIT_UPLOAD_PACK" "$TEST_REMOTE_REPO"
 STUB
@@ -174,6 +187,7 @@ run_update() {
     TEST_REAL_GIT_UPLOAD_PACK="$REAL_GIT_UPLOAD_PACK" \
     SOURCE_REPO="$test_dir/discovered/source" \
     TEST_REMOTE_REPO="$test_dir/remote.git" \
+    FETCH_LOG="$test_dir/home/fetch-log" \
     GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
     GIT_CONFIG_NOSYSTEM=1 \
     GIT_SSH_VARIANT=ssh \
@@ -189,8 +203,293 @@ run_update() {
     TEST_AGENT_OUTDATED="${TEST_AGENT_OUTDATED:-0}" \
     TEST_AGENT_UPDATE_FAIL="${TEST_AGENT_UPDATE_FAIL:-0}" \
     TEST_AGENT_GATE="${TEST_AGENT_GATE:-}" \
+    TEST_AGENT_FRESHNESS_STDOUT="${TEST_AGENT_FRESHNESS_STDOUT:-}" \
+    TEST_AGENT_FRESHNESS_STDERR="${TEST_AGENT_FRESHNESS_STDERR:-}" \
+    TEST_AGENT_FRESHNESS_STATUS="${TEST_AGENT_FRESHNESS_STATUS:-0}" \
+    TEST_SSH_GATE="${TEST_SSH_GATE:-}" \
+    WORKSTATION_UPDATE_NOW="${WORKSTATION_UPDATE_NOW:-2026-07-15T00:00:00Z}" \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}" \
     bash "$COMMAND" "$@" </dev/null \
       >"$test_dir/home/stdout" 2>"$test_dir/home/stderr"
+}
+
+test_freshness_combines_dotfiles_and_agent_updates_without_mutation() {
+  local before_head
+  local before_target
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  before_head="$(source_commit "$test_dir")"
+  before_target="$(<"$test_dir/home/.managed")"
+  publish_managed_version "$test_dir" v2
+  rm -f "$test_dir/home/agent-tools-log"
+
+  TEST_AGENT_FRESHNESS_STDOUT=$'AoE: 1.2.2 -> 1.2.3\n' \
+    run_update "$test_dir" --freshness \
+    || fail "combined freshness failed: $(<"$test_dir/home/stderr")"
+
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Dotfiles: 1 commit (sanitized below)' \
+      "  $(git -C "$test_dir/discovered/source" rev-parse --short "$before_head")..$(git -C "$test_dir/seed" rev-parse --short HEAD)" \
+      'Agent tools:' \
+      '  AoE: 1.2.2 -> 1.2.3' \
+      'Run: workstation-update') \
+    "$test_dir/home/stdout" \
+    || fail 'combined freshness notice changed'
+  [[ ! -s "$test_dir/home/stderr" ]] \
+    || fail "combined freshness wrote stderr: $(<"$test_dir/home/stderr")"
+  [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
+    || fail 'freshness changed the checked-out commit'
+  [[ "$(<"$test_dir/home/.managed")" == "$before_target" ]] \
+    || fail 'freshness changed a managed target'
+  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'freshness did not render exactly one unified action'
+  diff -u \
+    <(printf '%s\n' 'update-agent-tools v1 --freshness-check-if-due') \
+    "$test_dir/home/agent-tools-log" \
+    || fail 'freshness did not use the internal agent-tool interface'
+}
+
+test_freshness_always_reports_local_blockers_and_incomplete_maintenance() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" fetch --quiet "$test_dir/remote.git" \
+      '+refs/heads/main:refs/remotes/origin/main'
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" merge --quiet --ff-only origin/main
+  printf 'local operator work\n' >>"$test_dir/discovered/source/dot_managed"
+  mkdir -p "$test_dir/home/state/update-agent-tools"
+  printf '%s\n' \
+    '{"activation_failure":{"phase":"activation","component":"AoE service restart"}}' \
+    >"$test_dir/home/state/update-agent-tools/state.json"
+
+  run_update "$test_dir" --freshness \
+    || fail "local freshness failed: $(<"$test_dir/home/stderr")"
+
+  grep -Fqx 'Dotfiles blocker: source repository has local content' \
+    "$test_dir/home/stdout" \
+    || fail 'freshness omitted the always-current dirty-source blocker'
+  grep -Fqx 'Dotfiles: fetched source has not been successfully applied' \
+    "$test_dir/home/stdout" \
+    || fail 'freshness omitted the durable unapplied-commit state'
+  grep -Fqx 'Agent tools: unfinished activation for AoE service restart' \
+    "$test_dir/home/stdout" \
+    || fail 'freshness omitted unresolved activation failure state'
+  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'local/incomplete notice did not contain one action'
+}
+
+test_freshness_sources_age_independently() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+
+  WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
+    run_update "$test_dir" --freshness \
+    || fail "initial freshness failed: $(<"$test_dir/home/stderr")"
+  [[ ! -s "$test_dir/home/stdout" ]] \
+    || fail 'healthy initial freshness was not silent'
+
+  publish_managed_version "$test_dir" v2
+  TEST_AGENT_FRESHNESS_STDOUT=$'AoE: 1.2.2 -> 1.2.3\n' \
+    WORKSTATION_UPDATE_NOW="2026-07-15T23:59:59Z" \
+    run_update "$test_dir" --freshness \
+    || fail "independent agent freshness failed: $(<"$test_dir/home/stderr")"
+
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Agent tools:' \
+      '  AoE: 1.2.2 -> 1.2.3' \
+      'Run: workstation-update') \
+    "$test_dir/home/stdout" \
+    || fail 'fresh agent result was suppressed by the dotfiles cache interval'
+  [[ "$(wc -l <"$test_dir/home/fetch-log")" -eq 1 ]] \
+    || fail 'fresh dotfiles result was queried again before 24 hours'
+
+  WORKSTATION_UPDATE_NOW="2026-07-16T00:00:00Z" \
+    run_update "$test_dir" --freshness \
+    || fail "due dotfiles freshness failed: $(<"$test_dir/home/stderr")"
+  grep -Fqx 'Dotfiles: 1 commit (sanitized below)' "$test_dir/home/stdout" \
+    || fail 'dotfiles source did not become due independently at 24 hours'
+  [[ "$(wc -l <"$test_dir/home/fetch-log")" -eq 2 ]] \
+    || fail 'due dotfiles result did not query the remote once'
+}
+
+test_freshness_failures_retain_each_source_result() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+
+  TEST_AGENT_FRESHNESS_STDOUT=$'AoE: 1.2.2 -> 1.2.3\n' \
+    WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
+    run_update "$test_dir" --freshness \
+    || fail "initial stale-result setup failed: $(<"$test_dir/home/stderr")"
+
+  publish_managed_version "$test_dir" v3
+  mkdir -p "$test_dir/home/state/update-agent-tools"
+  printf '%s\n' \
+    '{"last_successful_check":"2026-07-15T00:00:00Z","cached_version_result":"Claude Code CLI: 3.4.4 -> 3.4.5","check_status":"failed","activation_failure":null}' \
+    >"$test_dir/home/state/update-agent-tools/state.json"
+
+  TEST_SSH_FETCH_FAIL=1 \
+    TEST_AGENT_FRESHNESS_STATUS=1 \
+    WORKSTATION_UPDATE_NOW="2026-07-16T00:00:00Z" \
+    run_update "$test_dir" --freshness \
+    || fail "partial freshness failure escaped the notice boundary"
+
+  grep -Fqx 'Dotfiles: 1 commit (sanitized below)' "$test_dir/home/stdout" \
+    || fail 'failed dotfiles check erased its cached update result'
+  grep -Fqx \
+    'Dotfiles: freshness check failed; using result from 2026-07-15T00:00:00Z' \
+    "$test_dir/home/stdout" \
+    || fail 'failed dotfiles check did not mark its cached result stale'
+  grep -Fqx '  Claude Code CLI: 3.4.4 -> 3.4.5' "$test_dir/home/stdout" \
+    || fail 'failed agent check erased its cached update result'
+  grep -Fqx \
+    'Agent tools: freshness check failed; using result from 2026-07-15T00:00:00Z' \
+    "$test_dir/home/stdout" \
+    || fail 'failed agent check did not mark its cached result stale'
+  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'partial failures produced multiple recovery actions'
+
+  TEST_SSH_FETCH_FAIL=1 \
+    WORKSTATION_UPDATE_NOW="2026-07-16T00:59:59Z" \
+    run_update "$test_dir" --freshness \
+    || fail 'failed dotfiles source escaped during its retry interval'
+  [[ "$(wc -l <"$test_dir/home/fetch-log")" -eq 2 ]] \
+    || fail 'failed dotfiles source retried before one hour'
+  grep -Fqx \
+    'Agent tools: freshness check failed; using result from 2026-07-15T00:00:00Z' \
+    "$test_dir/home/stdout" \
+    || fail 'cached failed agent status stopped rendering before its retry'
+
+  TEST_SSH_FETCH_FAIL=1 \
+    WORKSTATION_UPDATE_NOW="2026-07-16T01:00:00Z" \
+    run_update "$test_dir" --freshness \
+    || fail 'due failed dotfiles source escaped after its retry interval'
+  [[ "$(wc -l <"$test_dir/home/fetch-log")" -eq 3 ]] \
+    || fail 'failed dotfiles source did not retry after one hour'
+}
+
+test_due_freshness_sources_run_concurrently() {
+  local freshness_pid
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+
+  TEST_AGENT_GATE="$test_dir/agent-gate" \
+    TEST_SSH_GATE="$test_dir/ssh-gate" \
+    run_update "$test_dir" --freshness &
+  freshness_pid=$!
+
+  for _ in {1..200}; do
+    if [[ -e "$test_dir/agent-gate.ready" \
+      && -e "$test_dir/ssh-gate.ready" ]]; then
+      break
+    fi
+    sleep 0.01
+  done
+  if [[ ! -e "$test_dir/agent-gate.ready" \
+    || ! -e "$test_dir/ssh-gate.ready" ]]; then
+    touch "$test_dir/agent-gate.release" "$test_dir/ssh-gate.release"
+    wait "$freshness_pid" || true
+    fail 'due freshness sources did not both start before either completed'
+  fi
+
+  touch "$test_dir/agent-gate.release" "$test_dir/ssh-gate.release"
+  wait "$freshness_pid" \
+    || fail "concurrent freshness failed: $(<"$test_dir/home/stderr")"
+  [[ ! -s "$test_dir/home/stdout" && ! -s "$test_dir/home/stderr" ]] \
+    || fail 'healthy concurrent freshness was not silent'
+}
+
+test_combined_freshness_deadline_bounds_both_sources() {
+  local elapsed_milliseconds
+  local finished_at
+  local started_at
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+
+  started_at="$(date +%s%N)"
+  TEST_AGENT_GATE="$test_dir/agent-gate" \
+    TEST_SSH_GATE="$test_dir/ssh-gate" \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'bounded freshness failure escaped the login boundary'
+  finished_at="$(date +%s%N)"
+  elapsed_milliseconds=$(( (finished_at - started_at) / 1000000 ))
+
+  (( elapsed_milliseconds < 3000 )) \
+    || fail "combined freshness exceeded its controlled deadline: ${elapsed_milliseconds}ms"
+  grep -Fqx \
+    'Dotfiles: freshness check failed; no successful result is available' \
+    "$test_dir/home/stdout" \
+    || fail 'deadline did not isolate the timed-out dotfiles source'
+  grep -Fqx \
+    'Agent tools: freshness check failed; no successful result is available' \
+    "$test_dir/home/stdout" \
+    || fail 'deadline did not isolate the timed-out agent source'
+  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'deadline failures did not share one recovery action'
+}
+
+test_freshness_history_blockers_are_local_when_fetch_fails() {
+  local before_head
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  printf 'unpublished work\n' >"$test_dir/discovered/source/dot_unpublished"
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" add dot_unpublished
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" commit --quiet -m unpublished
+  before_head="$(source_commit "$test_dir")"
+
+  TEST_SSH_FETCH_FAIL=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'local history blocker escaped when fetch failed'
+
+  grep -Fqx 'Dotfiles blocker: main is ahead by 1 commit(s)' \
+    "$test_dir/home/stdout" \
+    || fail 'fetch failure suppressed the always-current local history blocker'
+  [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
+    || fail 'freshness changed an ahead local commit'
 }
 
 run_chezmoi() {
@@ -1122,6 +1421,13 @@ test_dry_run_and_verification_failures_are_safe_to_retry() {
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
 readonly test_cases=(
+  test_freshness_combines_dotfiles_and_agent_updates_without_mutation
+  test_freshness_always_reports_local_blockers_and_incomplete_maintenance
+  test_freshness_sources_age_independently
+  test_freshness_failures_retain_each_source_result
+  test_due_freshness_sources_run_concurrently
+  test_combined_freshness_deadline_bounds_both_sources
+  test_freshness_history_blockers_are_local_when_fetch_fails
   test_setup_must_be_complete_before_source_discovery
   test_first_run_adopts_verified_equal_history
   test_current_agent_tools_are_checked_without_mutation

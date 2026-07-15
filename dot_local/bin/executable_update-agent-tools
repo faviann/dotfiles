@@ -9,6 +9,11 @@ STATE_FILE="$STATE_DIR/state.json"
 LOCK_FILE="$STATE_DIR/lock"
 readonly CHECK_STATUS_UPDATES_AVAILABLE=10
 
+freshness_check_mode=false
+if [[ "${1:-}" == '--freshness-check-if-due' && $# -eq 1 ]]; then
+  freshness_check_mode=true
+fi
+
 fail() {
   printf 'update-agent-tools: %s\n' "$*" >&2
   exit 1
@@ -17,7 +22,12 @@ fail() {
 mkdir -p "$STATE_DIR"
 command -v flock >/dev/null 2>&1 || fail "flock missing from PATH"
 exec 9>"$LOCK_FILE"
-flock 9
+if [[ "$freshness_check_mode" == true ]]; then
+  flock --nonblock 9 \
+    || fail "freshness check unavailable: agent-tool maintenance is already running"
+else
+  flock 9
+fi
 
 command -v npm >/dev/null 2>&1 || fail "npm missing from PATH"
 
@@ -355,7 +365,9 @@ print_cached_result() {
 
   if [[ -n "$cached_result" ]]; then
     printf '%s\n' "$cached_result"
-    printf 'Run: update-agent-tools\n'
+    if [[ "$freshness_check_mode" != true ]]; then
+      printf 'Run: update-agent-tools\n'
+    fi
   fi
 }
 
@@ -445,7 +457,8 @@ if [[ "${1:-}" == "--check" ]]; then
   fi
 fi
 
-if [[ "${1:-}" == "--check-if-due" ]]; then
+if [[ "${1:-}" == "--check-if-due" \
+  || "${1:-}" == "--freshness-check-if-due" ]]; then
   local_last_attempt="$(state_value last_attempt)"
   local_last_successful_check="$(state_value last_successful_check)"
   local_cached_result="$(state_value cached_version_result)"

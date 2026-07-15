@@ -13,6 +13,331 @@ readonly REQUIRED_UPSTREAM='origin/main'
 readonly STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 readonly STATE_DIR="$STATE_HOME/workstation-update"
 readonly APPLIED_COMMIT_FILE="$STATE_DIR/applied-commit"
+readonly DOTFILES_FRESHNESS_FILE="$STATE_DIR/dotfiles-freshness.json"
+
+freshness_state_value() {
+  local field="$1"
+
+  if [[ -f "$DOTFILES_FRESHNESS_FILE" ]]; then
+    jq -er ".$field // empty" "$DOTFILES_FRESHNESS_FILE" 2>/dev/null || true
+  fi
+}
+
+write_dotfiles_freshness_state() {
+  local attempt_status="$1"
+  local cached_remote_commit="$2"
+  local last_successful_check="$3"
+  local temporary_state
+
+  temporary_state="$(mktemp "$STATE_DIR/dotfiles-freshness.json.tmp.XXXXXX")" \
+    || return 1
+  chmod 600 "$temporary_state" || { rm -f "$temporary_state"; return 1; }
+  jq -n \
+    --arg last_attempt "$freshness_now_iso" \
+    --arg last_successful_check "$last_successful_check" \
+    --arg cached_remote_commit "$cached_remote_commit" \
+    --arg attempt_status "$attempt_status" \
+    '{
+      last_attempt: $last_attempt,
+      last_successful_check: (
+        if $last_successful_check == "" then null else $last_successful_check end
+      ),
+      cached_remote_commit: (
+        if $cached_remote_commit == "" then null else $cached_remote_commit end
+      ),
+      attempt_status: $attempt_status
+    }' >"$temporary_state" \
+    || { rm -f "$temporary_state"; return 1; }
+  mv -f "$temporary_state" "$DOTFILES_FRESHNESS_FILE"
+}
+
+freshness_git_in_progress() {
+  local git_path
+  local marker
+
+  for marker in \
+    MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG BISECT_START \
+    NOTES_MERGE_PARTIAL NOTES_MERGE_REF NOTES_MERGE_WORKTREE \
+    rebase-apply rebase-merge sequencer; do
+    git_path="$(git -C "$freshness_source_repository" rev-parse \
+      --path-format=absolute --git-path "$marker" 2>/dev/null)" \
+      || return 0
+    [[ ! -e "$git_path" ]] || return 0
+  done
+  return 1
+}
+
+run_freshness() {
+  local agent_error_file
+  local agent_output_file
+  local agent_pid=''
+  local agent_status=0
+  local agent_tools
+  local applied_commit=''
+  local branch
+  local cached_remote_commit
+  local dotfiles_due=1
+  local dotfiles_error_file
+  local dotfiles_last_attempt
+  local dotfiles_last_successful
+  local dotfiles_pid=''
+  local dotfiles_status=0
+  local effective_origin_urls=()
+  local freshness_deadline
+  local freshness_head=''
+  local freshness_source_path
+  local index_entries
+  local last_attempt_status
+  local next_check_epoch
+  local origin_urls=()
+  local source_status
+  local upstream
+  local agent_cached_result=''
+  local agent_check_status=''
+  local agent_last_successful=''
+  local agent_activation_phase=''
+  local agent_activation_component=''
+  local agent_output=''
+  local commit_count
+  local local_short
+  local local_tracking_commit=''
+  local remote_short
+  local history_counts
+  local ahead_count
+  local behind_count
+  local dotfiles_failed=0
+  local dotfiles_network_allowed=0
+  local agent_failed=0
+  local -a notice_lines=()
+  local -a blocker_lines=()
+
+  mkdir -p "$STATE_DIR" || return 0
+  command -v flock >/dev/null 2>&1 || return 0
+  exec 8>"$STATE_DIR/lock" || return 0
+  flock --nonblock 8 || return 0
+
+  freshness_now_epoch="$(date -u -d "${WORKSTATION_UPDATE_NOW:-now}" +%s 2>/dev/null)" \
+    || return 0
+  freshness_now_iso="$(date -u -d "@$freshness_now_epoch" +%Y-%m-%dT%H:%M:%SZ)" \
+    || return 0
+  freshness_deadline="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}"
+  [[ "$freshness_deadline" =~ ^[1-9][0-9]*$ ]] || freshness_deadline=15
+
+  if [[ ! -e "$HOME/.local/state/workstation-setup/complete" ]]; then
+    blocker_lines+=('Setup: workstation setup is incomplete')
+  elif ! command -v chezmoi >/dev/null 2>&1; then
+    blocker_lines+=('Dotfiles blocker: chezmoi is missing')
+  elif ! freshness_source_path="$(chezmoi source-path 2>/dev/null)" \
+    || [[ -z "$freshness_source_path" || "$freshness_source_path" == *$'\n'* ]]; then
+    blocker_lines+=('Dotfiles blocker: source path is unavailable')
+  elif ! freshness_source_repository="$(git -C "$freshness_source_path" \
+    rev-parse --show-toplevel 2>/dev/null)"; then
+    blocker_lines+=('Dotfiles blocker: source is not a Git repository')
+  else
+    mapfile -t origin_urls < <(
+      git -C "$freshness_source_repository" config --get-all remote.origin.url
+    )
+    mapfile -t effective_origin_urls < <(
+      git -C "$freshness_source_repository" remote get-url --all origin 2>/dev/null
+    )
+    branch="$(git -C "$freshness_source_repository" \
+      symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    upstream="$(git -C "$freshness_source_repository" rev-parse \
+      --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+    if (( ${#origin_urls[@]} != 1 )) \
+      || [[ "${origin_urls[0]:-}" != "$CANONICAL_ORIGIN" ]] \
+      || (( ${#effective_origin_urls[@]} != 1 )) \
+      || [[ "${effective_origin_urls[0]:-}" != "$CANONICAL_ORIGIN" ]]; then
+      blocker_lines+=('Dotfiles blocker: repository origin is not canonical')
+    elif [[ "$branch" != "$REQUIRED_BRANCH" ]]; then
+      blocker_lines+=("Dotfiles blocker: branch must be $REQUIRED_BRANCH")
+    elif [[ "$upstream" != "$REQUIRED_UPSTREAM" ]]; then
+      blocker_lines+=("Dotfiles blocker: upstream must be $REQUIRED_UPSTREAM")
+    elif freshness_git_in_progress; then
+      blocker_lines+=('Dotfiles blocker: unfinished Git operation')
+    else
+      freshness_head="$(git -C "$freshness_source_repository" rev-parse HEAD 2>/dev/null || true)"
+      index_entries="$(git -C "$freshness_source_repository" ls-files -v 2>/dev/null || true)"
+      source_status="$(git -C "$freshness_source_repository" status \
+        --porcelain=v1 --untracked-files=all --ignored \
+        --ignore-submodules=none 2>/dev/null || printf '__inspection_failed__')"
+      if grep -Eq '^[a-zS] ' <<<"$index_entries"; then
+        blocker_lines+=('Dotfiles blocker: non-default index flags hide tracked content')
+      elif [[ -n "$source_status" ]]; then
+        blocker_lines+=('Dotfiles blocker: source repository has local content')
+      else
+        dotfiles_network_allowed=1
+      fi
+    fi
+  fi
+
+  if [[ -n "$freshness_head" ]]; then
+    if [[ -f "$APPLIED_COMMIT_FILE" ]]; then
+      applied_commit="$(<"$APPLIED_COMMIT_FILE")" || true
+    fi
+    if [[ "$applied_commit" != "$freshness_head" ]]; then
+      blocker_lines+=('Dotfiles: fetched source has not been successfully applied')
+    fi
+
+    dotfiles_last_attempt="$(freshness_state_value last_attempt)"
+    dotfiles_last_successful="$(freshness_state_value last_successful_check)"
+    cached_remote_commit="$(freshness_state_value cached_remote_commit)"
+    last_attempt_status="$(freshness_state_value attempt_status)"
+    if [[ -n "$dotfiles_last_attempt" ]]; then
+      if [[ "$last_attempt_status" == failed ]]; then
+        next_check_epoch="$(date -u -d "$dotfiles_last_attempt + 1 hour" +%s 2>/dev/null || printf 0)"
+      else
+        next_check_epoch="$(date -u -d "$dotfiles_last_successful + 24 hours" +%s 2>/dev/null || printf 0)"
+      fi
+      if (( freshness_now_epoch < next_check_epoch )); then
+        dotfiles_due=0
+      fi
+    fi
+  fi
+
+  dotfiles_error_file="$(mktemp "$STATE_DIR/dotfiles-check.stderr.XXXXXX")" || return 0
+  agent_output_file="$(mktemp "$STATE_DIR/agent-check.stdout.XXXXXX")" || return 0
+  agent_error_file="$(mktemp "$STATE_DIR/agent-check.stderr.XXXXXX")" || return 0
+  trap 'rm -f "${dotfiles_error_file:-}" "${agent_output_file:-}" "${agent_error_file:-}"' RETURN
+
+  if [[ -n "$freshness_head" ]] && (( dotfiles_due == 1 )) \
+    && (( dotfiles_network_allowed == 1 )); then
+    timeout --signal=TERM --kill-after=1s "${freshness_deadline}s" \
+      git -C "$freshness_source_repository" fetch --prune origin \
+        '+refs/heads/main:refs/remotes/origin/main' \
+        >/dev/null 2>"$dotfiles_error_file" &
+    dotfiles_pid=$!
+  fi
+
+  agent_tools="$HOME/.local/bin/update-agent-tools"
+  if [[ -x "$agent_tools" ]]; then
+    timeout --signal=TERM --kill-after=1s "${freshness_deadline}s" \
+      "$agent_tools" --freshness-check-if-due \
+      >"$agent_output_file" 2>"$agent_error_file" &
+    agent_pid=$!
+  else
+    agent_failed=1
+  fi
+
+  if [[ -n "$dotfiles_pid" ]]; then
+    wait "$dotfiles_pid" || dotfiles_status=$?
+    if (( dotfiles_status == 0 )); then
+      cached_remote_commit="$(git -C "$freshness_source_repository" \
+        rev-parse refs/remotes/origin/main 2>/dev/null || true)"
+      if [[ -n "$cached_remote_commit" ]]; then
+        dotfiles_last_successful="$freshness_now_iso"
+        write_dotfiles_freshness_state success \
+          "$cached_remote_commit" "$dotfiles_last_successful" || dotfiles_failed=1
+      else
+        dotfiles_failed=1
+      fi
+    else
+      dotfiles_failed=1
+      write_dotfiles_freshness_state failed \
+        "$cached_remote_commit" "$dotfiles_last_successful" || true
+    fi
+  elif [[ -n "$freshness_head" && "$last_attempt_status" == failed ]]; then
+    dotfiles_failed=1
+  fi
+
+  if [[ -n "$agent_pid" ]]; then
+    wait "$agent_pid" || agent_status=$?
+    (( agent_status == 0 )) || agent_failed=1
+  fi
+
+  if [[ -n "$freshness_head" ]]; then
+    local_tracking_commit="$(git -C "$freshness_source_repository" \
+      rev-parse refs/remotes/origin/main 2>/dev/null || true)"
+  fi
+  if [[ -n "$freshness_head" && -n "$local_tracking_commit" ]]; then
+    history_counts="$(git -C "$freshness_source_repository" rev-list \
+      --left-right --count "$freshness_head...$local_tracking_commit" \
+      2>/dev/null || true)"
+    read -r ahead_count behind_count <<<"$history_counts"
+    ahead_count="${ahead_count:-0}"
+    behind_count="${behind_count:-0}"
+    if (( ahead_count > 0 && behind_count > 0 )); then
+      blocker_lines+=("Dotfiles blocker: main has diverged ($ahead_count ahead, $behind_count behind)")
+    elif (( ahead_count > 0 )); then
+      blocker_lines+=("Dotfiles blocker: main is ahead by $ahead_count commit(s)")
+    fi
+  fi
+
+  if [[ -n "$freshness_head" && -n "$cached_remote_commit" ]] \
+    && git -C "$freshness_source_repository" cat-file -e \
+      "$cached_remote_commit^{commit}" 2>/dev/null; then
+    history_counts="$(git -C "$freshness_source_repository" rev-list \
+      --left-right --count "$freshness_head...$cached_remote_commit" 2>/dev/null || true)"
+    read -r ahead_count behind_count <<<"$history_counts"
+    ahead_count="${ahead_count:-0}"
+    behind_count="${behind_count:-0}"
+    if (( ahead_count == 0 && behind_count > 0 )); then
+      commit_count="$behind_count"
+      local_short="$(git -C "$freshness_source_repository" rev-parse --short "$freshness_head")"
+      remote_short="$(git -C "$freshness_source_repository" rev-parse --short "$cached_remote_commit")"
+      notice_lines+=("Dotfiles: $commit_count commit$( (( commit_count == 1 )) || printf s ) (sanitized below)")
+      notice_lines+=("  $local_short..$remote_short")
+    fi
+  fi
+  if (( dotfiles_failed == 1 )); then
+    if [[ -n "$dotfiles_last_successful" ]]; then
+      notice_lines+=("Dotfiles: freshness check failed; using result from $dotfiles_last_successful")
+    else
+      notice_lines+=('Dotfiles: freshness check failed; no successful result is available')
+    fi
+  fi
+
+  if [[ -f "$STATE_HOME/update-agent-tools/state.json" ]]; then
+    agent_cached_result="$(jq -er '.cached_version_result // empty' \
+      "$STATE_HOME/update-agent-tools/state.json" 2>/dev/null || true)"
+    agent_check_status="$(jq -er '.check_status // empty' \
+      "$STATE_HOME/update-agent-tools/state.json" 2>/dev/null || true)"
+    agent_last_successful="$(jq -er '.last_successful_check // empty' \
+      "$STATE_HOME/update-agent-tools/state.json" 2>/dev/null || true)"
+    agent_activation_phase="$(jq -er '.activation_failure.phase // empty' \
+      "$STATE_HOME/update-agent-tools/state.json" 2>/dev/null || true)"
+    agent_activation_component="$(jq -er '.activation_failure.component // empty' \
+      "$STATE_HOME/update-agent-tools/state.json" 2>/dev/null || true)"
+  fi
+  if [[ "$agent_check_status" == failed ]]; then
+    agent_failed=1
+  fi
+  agent_output="$(sed '/^Run: update-agent-tools$/d' "$agent_output_file")"
+  if [[ -z "$agent_output" ]]; then
+    agent_output="$agent_cached_result"
+  fi
+  if [[ -n "$agent_output" ]]; then
+    notice_lines+=('Agent tools:')
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && notice_lines+=("  $line")
+    done <<<"$agent_output"
+  fi
+  if (( agent_failed == 1 )); then
+    if [[ -n "$agent_last_successful" ]]; then
+      notice_lines+=("Agent tools: freshness check failed; using result from $agent_last_successful")
+    else
+      notice_lines+=('Agent tools: freshness check failed; no successful result is available')
+    fi
+  fi
+  if [[ -n "$agent_activation_phase" ]]; then
+    notice_lines+=("Agent tools: unfinished $agent_activation_phase for $agent_activation_component")
+  fi
+
+  notice_lines+=("${blocker_lines[@]}")
+  if (( ${#notice_lines[@]} > 0 )); then
+    printf 'Workstation maintenance available:\n'
+    printf '%s\n' "${notice_lines[@]}"
+    printf 'Run: workstation-update\n'
+  fi
+}
+
+if [[ "${1:-}" == '--freshness' ]]; then
+  if (( $# != 1 )); then
+    exit 0
+  fi
+  run_freshness
+  exit 0
+fi
 
 assume_yes=0
 if (( $# == 1 )) && [[ "$1" == '--yes' ]]; then
