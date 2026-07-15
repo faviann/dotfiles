@@ -98,9 +98,22 @@ git -C "$source_repository" fetch --prune origin \
   '+refs/heads/main:refs/remotes/origin/main' \
   || fail 'fetch phase failed: origin/main unavailable'
 
+git_in_progress \
+  && fail 'source validation failed: unfinished Git operation after fetch'
+reject_hidden_index_entries
+source_status="$(git -C "$source_repository" status \
+  --porcelain=v1 --untracked-files=all --ignored --ignore-submodules=none)" \
+  || fail 'source validation failed: cannot inspect source after fetch'
+[[ -z "$source_status" ]] \
+  || fail 'source validation failed: source gained local content during fetch'
+
+old_head="$(git -C "$source_repository" rev-parse refs/heads/main)" \
+  || fail 'history phase failed: cannot read main'
+new_head="$(git -C "$source_repository" rev-parse refs/remotes/origin/main)" \
+  || fail 'history phase failed: cannot read origin/main'
 read -r ahead_count behind_count < <(
   git -C "$source_repository" rev-list --left-right --count \
-    HEAD...origin/main
+    "$old_head...$new_head"
 ) || fail 'history phase failed: cannot compare HEAD with origin/main'
 
 if (( ahead_count > 0 && behind_count > 0 )); then
@@ -110,21 +123,38 @@ if (( ahead_count > 0 )); then
   fail "history phase failed: main is ahead of origin/main by $ahead_count commit(s)"
 fi
 if (( behind_count > 0 )); then
-  git -C "$source_repository" merge --ff-only --quiet origin/main \
-    || fail 'history phase failed: fast-forward failed'
+  old_tree="$(git -C "$source_repository" rev-parse "$old_head^{tree}")" \
+    || fail 'history phase failed: cannot read the current tree'
+  new_tree="$(git -C "$source_repository" rev-parse "$new_head^{tree}")" \
+    || fail 'history phase failed: cannot read the upstream tree'
+  git -C "$source_repository" read-tree -u -m "$old_tree" "$new_tree" \
+    || fail 'history phase failed: cannot write the upstream tree'
+  written_tree="$(git -C "$source_repository" write-tree)" \
+    || fail 'history phase failed: cannot verify the updated index'
+  [[ "$written_tree" == "$new_tree" ]] \
+    || fail 'history phase failed: updated index does not match origin/main'
+  git -C "$source_repository" diff-files \
+    --quiet --ignore-submodules=none -- \
+    || fail 'history phase failed: updated worktree does not match the index'
+  reject_hidden_index_entries
+  git -C "$source_repository" update-ref \
+    refs/heads/main "$new_head" "$old_head" \
+    || fail 'history phase failed: guarded main update failed'
 fi
 
 git_in_progress \
-  && fail 'source validation failed: unfinished Git operation after fetch'
+  && fail 'source validation failed: unfinished Git operation after update'
 reject_hidden_index_entries
 source_status="$(git -C "$source_repository" status \
   --porcelain=v1 --untracked-files=all --ignored --ignore-submodules=none)" \
-  || fail 'source validation failed: cannot inspect source after fetch'
+  || fail 'source validation failed: cannot inspect source after update'
 [[ -z "$source_status" ]] \
   || fail 'source validation failed: source gained local content during update'
 
 head_commit="$(git -C "$source_repository" rev-parse HEAD)" \
   || fail 'history phase failed: cannot read HEAD'
+[[ "$head_commit" == "$new_head" ]] \
+  || fail 'history phase failed: main does not match origin/main'
 
 apply_required=0
 if [[ ! -e "$APPLIED_COMMIT_FILE" ]]; then

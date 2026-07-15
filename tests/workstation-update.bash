@@ -431,12 +431,24 @@ test_behind_history_fast_forwards_then_applies_in_order() {
   expected_commit="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
     git -C "$test_dir/seed" rev-parse HEAD)"
   marker="$test_dir/home/state/workstation-update/applied-commit"
+  cat >"$test_dir/discovered/source/.git/hooks/post-merge" <<HOOK
+#!/usr/bin/env bash
+printf 'post-merge invoked\n' >'$test_dir/post-merge-ran'
+exit 97
+HOOK
+  chmod +x "$test_dir/discovered/source/.git/hooks/post-merge"
 
   run_update "$test_dir" \
     || fail "behind update failed: $(<"$test_dir/home/stderr")"
 
+  [[ ! -e "$test_dir/post-merge-ran" ]] \
+    || fail 'strictly behind update invoked merge behavior'
   [[ "$(source_commit "$test_dir")" == "$expected_commit" ]] \
     || fail 'strictly behind main was not fast-forwarded to origin/main'
+  [[ -z "$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" status \
+      --porcelain=v1 --untracked-files=all --ignored)" ]] \
+    || fail 'fast-forwarded source did not finish clean'
   [[ "$(<"$test_dir/home/.managed")" == 'managed v2' ]] \
     || fail 'fast-forwarded source was not applied'
   [[ "$(<"$marker")" == "$expected_commit" ]] \
