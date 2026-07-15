@@ -129,22 +129,20 @@ gh auth login --git-protocol ssh --skip-ssh-key
 
 ```bash
 export BW_SESSION=$(bw unlock --raw)
-chezmoi update
+workstation-update
 ```
 
-`chezmoi update` pulls from the SSH origin after the first bootstrap and then
-re-applies templates from Bitwarden.
-
-Maintain the full AoE agent toolchain with one command:
-
-```bash
-update-agent-tools
-```
-
-It updates AoE; the standalone Codex, Claude Code, and Pi CLIs; and the
+`workstation-update` is the only routine maintenance command. It validates the
+chezmoi source as a clean, canonical `main` checkout, fetches and fast-forwards
+it to `origin/main`, previews and applies required dotfile changes, and then
+updates AoE; the standalone Codex, Claude Code, and Pi CLIs; and the
 `codex-acp`, `claude-agent-acp`, and `pi-acp` adapters as one unit. The Codex
-runtime bundled inside `codex-acp` is separate from the standalone Codex CLI;
-updating one does not update the other, so the updater checks both scopes.
+runtime bundled inside `codex-acp` is separate from the standalone Codex CLI,
+so both scopes are checked.
+
+The workflow refuses dirty, non-canonical, ahead, or diverged source state and
+does not reset or discard local work. Dotfile apply is previewed before it runs,
+and locally modified targets are not silently overwritten.
 
 An interactive update asks once when running ACP sessions would be restarted
 and reports only the number affected. Automation must pass `--yes` to authorize
@@ -154,15 +152,25 @@ service, ACP diagnostic, and worker-health checks must pass before success is
 recorded.
 
 Interactive SSH login only checks freshness: it never installs. Successful
-checks are due every 24 hours, failed checks retry after one hour, current state
-is silent, and notices show names and versions plus the `update-agent-tools`
-command rather than release notes. There is no background scheduling or
+dotfiles and agent-tool checks are cached independently for 24 hours, failed
+source checks retry after one hour, and local blockers or incomplete
+maintenance are evaluated every time. Current state is silent. Actionable state
+prints one combined notice and one `Run: workstation-update` action rather than
+release notes. The check has a hard 15-second deadline and never prevents the
+tmux/AoE session from opening. There is no background scheduling or
 per-component update command.
 
 Failed updates do not roll back automatically. Use the reported phase and
 component, inspect `systemctl --user status aoe-serve.service` and
 `journalctl --user-unit aoe-serve.service` when activation is involved, correct
-the underlying problem, and rerun `update-agent-tools`.
+the underlying problem, and rerun `workstation-update`.
+
+Direct `update-agent-tools` use is reserved for initial bootstrap and targeted
+recovery. If a dotfiles/source failure prevents `workstation-update` from
+reaching the agent-tool phase, use the direct updater only to repair the
+agent-tool state, then return to `workstation-update`. For unattended routine
+maintenance, `workstation-update --yes` authorizes replacement of running ACP
+sessions; it does not bypass source or dotfile safety checks.
 
 ## Clone ServerManagementScripts
 

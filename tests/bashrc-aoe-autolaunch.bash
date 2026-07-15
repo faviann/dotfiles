@@ -26,16 +26,19 @@ make_stubs() {
 exit 0
 STUB
 
-  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
-  cat >>"$bin_dir/update-agent-tools" <<'STUB'
+  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/workstation-update"
+  cat >>"$bin_dir/workstation-update" <<'STUB'
 set -euo pipefail
 
-printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
+printf 'workstation-update %s\n' "$*" >>"$COMMAND_LOG"
 "$TEST_REAL_SLEEP" 0.05
 if [[ -n "${CHECK_OUTPUT:-}" ]]; then
   printf '%s\n' "$CHECK_OUTPUT"
 fi
-printf 'update-agent-tools complete\n' >>"$COMMAND_LOG"
+if [[ "${CHECK_EXIT_STATUS:-0}" != 0 ]]; then
+  exit "$CHECK_EXIT_STATUS"
+fi
+printf 'workstation-update complete\n' >>"$COMMAND_LOG"
 STUB
 
   printf '#!%s\n' "$REAL_BASH" >"$bin_dir/tmux"
@@ -49,7 +52,7 @@ if [[ "$*" == "has-session -t main" ]]; then
 fi
 STUB
 
-  chmod +x "$bin_dir/aoe" "$bin_dir/update-agent-tools" "$bin_dir/tmux"
+  chmod +x "$bin_dir/aoe" "$bin_dir/workstation-update" "$bin_dir/tmux"
 }
 
 run_shell() {
@@ -63,6 +66,7 @@ run_shell() {
     "PATH=$home/.local/bin"
     "BASHRC_PATH=$BASHRC_PATH"
     "COMMAND_LOG=$home/command-log"
+    "CHECK_EXIT_STATUS=${CHECK_EXIT_STATUS:-0}"
     "CHECK_OUTPUT=${CHECK_OUTPUT:-}"
     "SSH_TTY=${TEST_SSH_TTY:-}"
     "SSH_ORIGINAL_COMMAND=${TEST_SSH_ORIGINAL_COMMAND:-}"
@@ -71,6 +75,9 @@ run_shell() {
     "TMUX=${TEST_TMUX:-}"
     "TMUX_SESSION_EXISTS=${TMUX_SESSION_EXISTS:-1}"
   )
+  if [[ "${TEST_ERREXIT:-0}" == 1 ]]; then
+    shell_environment+=("SHELLOPTS=errexit")
+  fi
 
   if [[ "$interactive_with_tty" == "1" ]]; then
     # The child shell expands BASHRC_PATH from shell_environment.
@@ -98,22 +105,26 @@ test_due_check_finishes_before_existing_session_attach() {
   make_stubs "$test_dir"
 
   TEST_SSH_TTY=/dev/pts/1 \
-    CHECK_OUTPUT='AoE: 1.2.2 -> 1.2.3' \
+    CHECK_OUTPUT=$'Workstation maintenance available:\nAgent tools:\n  AoE: 1.2.2 -> 1.2.3\nRun: workstation-update' \
     run_shell "$test_dir" "$test_dir/stdout" "$test_dir/stderr" 1 \
     || fail "eligible SSH login failed: $(<"$test_dir/stderr")"
 
   diff -u \
-    <(printf 'AoE: 1.2.2 -> 1.2.3\n') \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Agent tools:' \
+      '  AoE: 1.2.2 -> 1.2.3' \
+      'Run: workstation-update') \
     "$test_dir/stdout" \
-    || fail "due-check notice was not the only login output"
+    || fail "combined freshness notice was not the only login output"
   diff -u \
     <(printf '%s\n' \
-      'update-agent-tools --check-if-due' \
-      'update-agent-tools complete' \
+      'workstation-update --freshness' \
+      'workstation-update complete' \
       'tmux has-session -t main' \
       'tmux attach-session -t main') \
     "$test_dir/command-log" \
-    || fail "due check did not finish before the existing AoE session attached"
+    || fail "combined freshness did not finish before the existing AoE session attached"
 }
 
 test_due_check_finishes_before_new_session_launch() {
@@ -123,23 +134,28 @@ test_due_check_finishes_before_new_session_launch() {
   make_stubs "$test_dir"
 
   TEST_SSH_TTY=/dev/pts/1 \
-    CHECK_OUTPUT='Codex CLI (standalone): 2.3.3 -> 2.3.4' \
+    CHECK_OUTPUT=$'Workstation maintenance available:\nDotfiles: 2 commits\nAgent tools:\n  Codex CLI (standalone): 2.3.3 -> 2.3.4\nRun: workstation-update' \
     TMUX_SESSION_EXISTS=0 \
     run_shell "$test_dir" "$test_dir/stdout" "$test_dir/stderr" 1 \
     || fail "eligible SSH login failed: $(<"$test_dir/stderr")"
 
   diff -u \
-    <(printf 'Codex CLI (standalone): 2.3.3 -> 2.3.4\n') \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Dotfiles: 2 commits' \
+      'Agent tools:' \
+      '  Codex CLI (standalone): 2.3.3 -> 2.3.4' \
+      'Run: workstation-update') \
     "$test_dir/stdout" \
-    || fail "due-check notice was not shown before a new AoE session"
+    || fail "combined freshness notice was not shown before a new AoE session"
   diff -u \
     <(printf '%s\n' \
-      'update-agent-tools --check-if-due' \
-      'update-agent-tools complete' \
+      'workstation-update --freshness' \
+      'workstation-update complete' \
       'tmux has-session -t main' \
       "tmux new-session -s main aoe; exec $REAL_BASH -il") \
     "$test_dir/command-log" \
-    || fail "due check did not finish before the new AoE session launched"
+    || fail "combined freshness did not finish before the new AoE session launched"
 }
 
 test_silent_check_adds_no_login_output() {
@@ -154,6 +170,62 @@ test_silent_check_adds_no_login_output() {
 
   [[ ! -s "$test_dir/stdout" ]] \
     || fail "healthy or not-yet-due check added login output: $(<"$test_dir/stdout")"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "healthy or not-yet-due check added login error output: $(<"$test_dir/stderr")"
+}
+
+test_failed_freshness_check_does_not_prevent_existing_session_attach() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir"
+
+  TEST_SSH_TTY=/dev/pts/1 \
+    CHECK_EXIT_STATUS=17 \
+    TEST_ERREXIT=1 \
+    run_shell "$test_dir" "$test_dir/stdout" "$test_dir/stderr" 1 \
+    || fail "failed freshness check escaped the login boundary: $(<"$test_dir/stderr")"
+
+  diff -u \
+    <(printf '%s\n' \
+      'workstation-update --freshness' \
+      'tmux has-session -t main' \
+      'tmux attach-session -t main') \
+    "$test_dir/command-log" \
+    || fail "failed freshness check prevented the existing AoE session attach"
+  [[ ! -s "$test_dir/stdout" ]] \
+    || fail "failed freshness check added login output: $(<"$test_dir/stdout")"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "failed freshness check added login error output: $(<"$test_dir/stderr")"
+}
+
+test_timed_out_freshness_notice_does_not_prevent_new_session_launch() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir"
+
+  TEST_SSH_TTY=/dev/pts/1 \
+    CHECK_OUTPUT=$'Workstation maintenance available:\nWorkstation freshness check timed out\nRun: workstation-update' \
+    TMUX_SESSION_EXISTS=0 \
+    run_shell "$test_dir" "$test_dir/stdout" "$test_dir/stderr" 1 \
+    || fail "timed-out freshness notice escaped the login boundary: $(<"$test_dir/stderr")"
+
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Workstation freshness check timed out' \
+      'Run: workstation-update') \
+    "$test_dir/stdout" \
+    || fail "timed-out freshness check did not render the combined notice"
+  diff -u \
+    <(printf '%s\n' \
+      'workstation-update --freshness' \
+      'workstation-update complete' \
+      'tmux has-session -t main' \
+      "tmux new-session -s main aoe; exec $REAL_BASH -il") \
+    "$test_dir/command-log" \
+    || fail "timed-out freshness notice prevented the new AoE session launch"
 }
 
 assert_context_skips_autolaunch() {
@@ -214,23 +286,23 @@ test_missing_checker_preserves_existing_autolaunch() {
   test_dir="$(mktemp -d)"
   trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
   make_stubs "$test_dir"
-  rm "$test_dir/.local/bin/update-agent-tools"
+  rm "$test_dir/.local/bin/workstation-update"
 
   TEST_SSH_TTY=/dev/pts/1 \
     CHECK_OUTPUT='this notice must not be shown' \
     run_shell "$test_dir" "$test_dir/stdout" "$test_dir/stderr" 1 \
-    || fail "SSH login without the checker failed: $(<"$test_dir/stderr")"
+    || fail "SSH login without the freshness command failed: $(<"$test_dir/stderr")"
 
   diff -u \
     <(printf '%s\n' \
       'tmux has-session -t main' \
       'tmux attach-session -t main') \
     "$test_dir/command-log" \
-    || fail "missing checker suppressed the existing AoE auto-launch"
+    || fail "missing freshness command suppressed the existing AoE auto-launch"
   [[ ! -s "$test_dir/stdout" ]] \
-    || fail "missing checker added login output: $(<"$test_dir/stdout")"
+    || fail "missing freshness command added login output: $(<"$test_dir/stdout")"
   [[ ! -s "$test_dir/stderr" ]] \
-    || fail "missing checker added login error output: $(<"$test_dir/stderr")"
+    || fail "missing freshness command added login error output: $(<"$test_dir/stderr")"
 }
 
 # shellcheck source=tests/lib/suite-dispatch.bash
@@ -240,6 +312,8 @@ readonly test_cases=(
   test_due_check_finishes_before_existing_session_attach
   test_due_check_finishes_before_new_session_launch
   test_silent_check_adds_no_login_output
+  test_failed_freshness_check_does_not_prevent_existing_session_attach
+  test_timed_out_freshness_notice_does_not_prevent_new_session_launch
   test_excluded_shell_contexts_skip_the_check
   test_missing_checker_preserves_existing_autolaunch
 )
