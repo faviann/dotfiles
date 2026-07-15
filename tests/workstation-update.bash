@@ -267,6 +267,8 @@ run_update() {
     WORKSTATION_UPDATE_NOW="$test_now" \
     UPDATE_AGENT_TOOLS_NOW="$test_now" \
     WORKSTATION_FRESHNESS_DEADLINE_SECONDS="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}" \
+    WORKSTATION_FRESHNESS_SUPERVISOR_CLEANUP_DELAY_SECONDS="${WORKSTATION_FRESHNESS_SUPERVISOR_CLEANUP_DELAY_SECONDS:-0}" \
+    WORKSTATION_FRESHNESS_SUPERVISOR_DELAY_STARTED_MARKER="${WORKSTATION_FRESHNESS_SUPERVISOR_DELAY_STARTED_MARKER:-}" \
     bash "$COMMAND" "$@" </dev/null \
       >"$test_dir/home/stdout" 2>"$test_dir/home/stderr"
 }
@@ -853,6 +855,9 @@ test_agent_timeout_preserves_newly_completed_dotfiles_result() {
 }
 
 test_timeout_notice_preserves_local_blockers_and_incomplete_maintenance() {
+  local elapsed_milliseconds
+  local finished_at
+  local started_at
   local test_dir
 
   test_dir="$(mktemp -d)"
@@ -875,18 +880,25 @@ test_timeout_notice_preserves_local_blockers_and_incomplete_maintenance() {
   printf 'local operator work\n' >>"$test_dir/discovered/source/dot_managed"
   mkdir -p "$test_dir/home/state/update-agent-tools"
   printf '%s\n' \
-    '{"activation_failure":{"phase":"activation","component":"AoE service restart"}}' \
+    '{"last_attempt":"2026-07-14T00:00:00Z","last_successful_check":"2026-07-14T00:00:00Z","cached_version_result":"AoE: 1.2.2 -> 1.2.3","check_status":"success","activation_failure":{"phase":"activation","component":"AoE service restart"}}' \
     >"$test_dir/home/state/update-agent-tools/state.json"
 
+  started_at="$(date +%s%N)"
   TEST_AGENT_GATE="$test_dir/agent-gate" \
     WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    WORKSTATION_FRESHNESS_SUPERVISOR_CLEANUP_DELAY_SECONDS=2 \
+    WORKSTATION_FRESHNESS_SUPERVISOR_DELAY_STARTED_MARKER="$test_dir/supervisor-cleanup-started" \
     run_update "$test_dir" --freshness \
     || fail 'local-state timeout escaped the freshness boundary'
+  finished_at="$(date +%s%N)"
+  elapsed_milliseconds=$(( (finished_at - started_at) / 1000000 ))
 
   diff -u \
     <(printf '%s\n' \
       'Workstation maintenance available:' \
-      'Agent tools: freshness check failed; no successful result is available' \
+      'Agent tools:' \
+      '  AoE: 1.2.2 -> 1.2.3' \
+      'Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z' \
       'Dotfiles blocker: source repository has local content' \
       'Dotfiles: fetched source has not been successfully applied' \
       'Dotfiles blocker: main is ahead by 1 commit(s)' \
@@ -896,6 +908,117 @@ test_timeout_notice_preserves_local_blockers_and_incomplete_maintenance() {
     || fail 'timeout notice dropped local blockers or incomplete maintenance'
   [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
     || fail 'local-state timeout rendered more than one action'
+  [[ -e "$test_dir/supervisor-cleanup-started" ]] \
+    || fail 'controlled supervisor cleanup delay was not exercised'
+  (( elapsed_milliseconds >= 900 && elapsed_milliseconds < 1400 )) \
+    || fail "outer fallback was not bounded around slow cleanup: ${elapsed_milliseconds}ms"
+}
+
+test_timeout_fallback_marks_persisted_dotfiles_failure_stale() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
+    run_update "$test_dir" --freshness \
+    || fail 'persisted dotfiles failure cache setup failed'
+  TEST_SSH_FETCH_FAIL=1 \
+    WORKSTATION_UPDATE_NOW="2026-07-16T00:00:00Z" \
+    run_update "$test_dir" --freshness \
+    || fail 'persisted dotfiles failure setup escaped freshness'
+
+  TEST_AGENT_GATE="$test_dir/agent-gate" \
+    WORKSTATION_UPDATE_NOW="2026-07-16T00:30:00Z" \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'agent timeout escaped persisted dotfiles failure fallback'
+
+  [[ "$(grep -c '^Dotfiles: freshness check failed; using result from 2026-07-15T00:00:00Z$' \
+    "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'timeout fallback omitted or duplicated persisted dotfiles stale status'
+  grep -Fqx 'Dotfiles: 1 commit (sanitized below)' "$test_dir/home/stdout" \
+    || fail 'timeout fallback suppressed retained dotfiles update knowledge'
+  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'persisted dotfiles failure fallback rendered multiple actions'
+}
+
+test_timeout_fallback_marks_persisted_agent_failure_stale() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  mkdir -p "$test_dir/home/state/update-agent-tools"
+  printf '%s\n' \
+    '{"last_attempt":"2026-07-15T00:00:00Z","last_successful_check":"2026-07-14T00:00:00Z","cached_version_result":"AoE: 1.2.2 -> 1.2.3","check_status":"failed","activation_failure":null}' \
+    >"$test_dir/home/state/update-agent-tools/state.json"
+
+  TEST_SSH_GATE="$test_dir/ssh-gate" \
+    WORKSTATION_UPDATE_NOW="2026-07-15T00:30:00Z" \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'dotfiles timeout escaped persisted agent failure fallback'
+
+  [[ "$(grep -c '^Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z$' \
+    "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'timeout fallback omitted or duplicated persisted agent stale status'
+  grep -Fqx '  AoE: 1.2.2 -> 1.2.3' "$test_dir/home/stdout" \
+    || fail 'timeout fallback suppressed retained agent update knowledge'
+  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'persisted agent failure fallback rendered multiple actions'
+}
+
+test_freshness_accumulates_independent_local_blockers() {
+  local before_head
+  local before_index_sha
+  local before_source_content
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  printf 'unpublished work\n' >"$test_dir/discovered/source/dot_unpublished"
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" add dot_unpublished
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" commit --quiet -m unpublished
+  printf 'dirty local work\n' >>"$test_dir/discovered/source/dot_managed"
+  mkdir "$test_dir/discovered/source/.git/rebase-merge"
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" remote set-url origin \
+      'git@github.com:unexpected/dotfiles.git'
+  before_head="$(source_commit "$test_dir")"
+  before_index_sha="$(sha256sum "$test_dir/discovered/source/.git/index")"
+  before_source_content="$(<"$test_dir/discovered/source/dot_managed")"
+
+  run_update "$test_dir" --freshness \
+    || fail 'independent local blocker evaluation escaped freshness'
+
+  for expected in \
+    'Dotfiles blocker: repository origin is not canonical' \
+    'Dotfiles blocker: unfinished Git operation' \
+    'Dotfiles blocker: source repository has local content' \
+    'Dotfiles: fetched source has not been successfully applied' \
+    'Dotfiles blocker: main is ahead by 1 commit(s)'; do
+    grep -Fqx "$expected" "$test_dir/home/stdout" \
+      || fail "freshness omitted independently evaluable local state: $expected"
+  done
+  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'independent local blockers rendered multiple actions'
+  [[ ! -e "$test_dir/home/fetch-log" ]] \
+    || fail 'unsafe local blockers allowed a freshness fetch'
+  [[ "$(source_commit "$test_dir")" == "$before_head" \
+    && "$(sha256sum "$test_dir/discovered/source/.git/index")" == "$before_index_sha" \
+    && "$(<"$test_dir/discovered/source/dot_managed")" == "$before_source_content" ]] \
+    || fail 'independent local blocker evaluation mutated Git state or the worktree'
 }
 
 run_chezmoi() {
@@ -1840,6 +1963,9 @@ readonly test_cases=(
   test_dotfiles_timeout_preserves_completed_agent_and_cached_dotfiles_results
   test_agent_timeout_preserves_newly_completed_dotfiles_result
   test_timeout_notice_preserves_local_blockers_and_incomplete_maintenance
+  test_timeout_fallback_marks_persisted_dotfiles_failure_stale
+  test_timeout_fallback_marks_persisted_agent_failure_stale
+  test_freshness_accumulates_independent_local_blockers
   test_setup_must_be_complete_before_source_discovery
   test_first_run_adopts_verified_equal_history
   test_current_agent_tools_are_checked_without_mutation
