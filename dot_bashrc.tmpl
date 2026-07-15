@@ -24,8 +24,8 @@ _aoe_autolaunch() {
 	command -v aoe >/dev/null 2>&1 || return
 	command -v tmux >/dev/null 2>&1 || return
 
-	if command -v update-agent-tools >/dev/null 2>&1; then
-		update-agent-tools --check-if-due
+	if command -v workstation-update >/dev/null 2>&1; then
+		workstation-update --freshness || true
 	fi
 
 	if tmux has-session -t main 2>/dev/null; then

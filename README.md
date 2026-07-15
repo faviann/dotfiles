@@ -39,11 +39,11 @@ Hermes. Hermes is installed from `github:NousResearch/hermes-agent` as a
 normal non-NixOS package; provider credentials and runtime configuration stay
 in `~/.hermes`.
 
-The complete AoE agent toolchain is intentionally maintained through one
-explicit latest-stable layer instead of pinned Nix packages:
+Dotfiles and the complete AoE agent toolchain are maintained through one
+operator-facing command:
 
 ```bash
-update-agent-tools
+workstation-update
 ```
 
 The managed unit contains:
@@ -82,7 +82,11 @@ Agent of Empires (`aoe`) is managed here as a user-level workstation tool, not i
   `update-agent-tools --yes` when any managed command is missing. The existing
   `workstation-setup` handoff therefore installs the full toolchain without a
   separate package-discovery or Ansible step.
-- SSH launch: `dot_bashrc.tmpl` auto-attaches interactive SSH logins to tmux session `main`, or creates it running `aoe`. The hook only runs for SSH TTY sessions, skips remote commands, skips nested tmux, and waits for the workstation setup marker.
+- SSH launch: `dot_bashrc.tmpl` checks workstation freshness, then
+  auto-attaches eligible interactive SSH logins to tmux session `main`, or
+  creates it running `aoe`. The hook skips local and non-interactive shells,
+  remote commands, nested tmux, and incomplete workstation setup. A missing or
+  failed freshness command never prevents the existing tmux/AoE launch.
 - Shell choice: the workstation LXC is bash-based; `.chezmoiignore` excludes fish config on LXC hosts.
 - Dashboard: `home/workstation.nix` declares the `aoe-serve.service`, `aoe-lan-proxy.service`, and `aoe-lan-proxy.socket` user units. The socket exposes `0.0.0.0:4001` and proxies to the localhost service.
 - Reboot survival: Ansible enables lingering for the workstation user with `loginctl enable-linger <user>`.
@@ -90,17 +94,22 @@ Agent of Empires (`aoe`) is managed here as a user-level workstation tool, not i
 AoE's `acp.allow_agent_install` host-package setting remains off. Dotfiles owns
 package installation; the AoE dashboard does not.
 
-### Toolchain maintenance
+### Workstation maintenance
 
-`update-agent-tools` is the only maintenance command. It refreshes AoE, all
-three standalone CLIs, and all three ACP adapters as one unit; there are no
-per-component update commands. It uses latest stable releases and does not
-retrieve or display release notes.
+`workstation-update` is the only routine maintenance command. It validates the
+chezmoi source as a clean, canonical `main` checkout, fetches and fast-forwards
+it to `origin/main`, previews and applies dotfile changes when required, and
+then refreshes AoE, all three standalone CLIs, and all three ACP adapters as
+one unit. Agent tools use latest stable releases and do not retrieve or display
+release notes.
 
-If ACP sessions are running, an interactive update reports only their count and
-asks once before changing anything. Declining leaves the toolchain and running
-processes alone. Non-interactive use refuses to disrupt running sessions unless
-`update-agent-tools --yes` is used.
+The command refuses unsafe source states such as local content, a non-canonical
+origin, the wrong branch or upstream, and ahead or diverged history. It does
+not reset or discard local work. If ACP sessions are running, an interactive
+update reports only their count and asks once before changing anything.
+Declining leaves the toolchain and running processes alone. For unattended use,
+`workstation-update --yes` authorizes those agent-session restarts; it does not
+authorize overwriting local dotfile changes or bypass any source guard.
 
 All installs, command and package-version checks, and `aoe acp doctor` must
 succeed before activation begins. The updater then restarts the AoE user
@@ -111,19 +120,28 @@ only after those activation checks pass.
 There is no automatic rollback. On failure, use the reported phase and
 component, `systemctl --user status aoe-serve.service`, and
 `journalctl --user-unit aoe-serve.service` to correct the problem, then rerun
-`update-agent-tools`. Installation failures happen before process restarts;
+`workstation-update`. Installation failures happen before process restarts;
 activation failures remain recorded until a successful rerun.
+
+The lower-level `update-agent-tools` command remains available for targeted
+recovery when a dotfiles/source failure prevents `workstation-update` from
+reaching its agent-tool phase. Use it only to repair that agent-tool state, then
+return to `workstation-update` for routine maintenance. Home Manager also uses
+`update-agent-tools --yes` during initial bootstrap when managed commands are
+missing.
 
 ### Login freshness notices
 
 Eligible interactive SSH logins run a synchronous, non-mutating freshness
-check immediately before AoE opens. A successful check is reused for 24 hours;
-a failed check is retried after one hour. Healthy state is silent. When updates
-exist, the notice lists affected component names and current-to-latest versions,
-then shows `update-agent-tools` as the command to run. A failed check retains the
-last known result and prints the last successful check plus the exact next retry
-time.
+check immediately before tmux attaches or creates the AoE session. Dotfiles and
+agent-tool sources cache successful checks for 24 hours and retry failed source
+checks after one hour; their cache ages are independent. Local blockers and
+incomplete maintenance are evaluated on every eligible login. Healthy or
+not-yet-due state is silent. Actionable state produces one combined notice with
+exactly one `Run: workstation-update` action. A hard 15-second deadline bounds
+the check, and failure or timeout never prevents tmux/AoE launch.
 
 Login never installs updates. There is no background timer or scheduler, and
 local shells, nested tmux sessions, remote commands, and non-interactive shells
-do not run the login check.
+do not run the login check. Workstations without the completed setup marker also
+skip it.
