@@ -907,6 +907,42 @@ test_internal_freshness_interface_does_not_wait_for_maintenance() {
     || fail 'internal freshness lock rejection wrote stdout'
 }
 
+test_internal_timeout_record_preserves_last_successful_result() {
+  local state_file
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+  mkdir -p "${state_file%/*}"
+  printf '%s\n' \
+    '{"last_attempt":"2026-07-14T00:00:00Z","last_successful_check":"2026-07-14T00:00:00Z","cached_version_result":"AoE: 1.2.2 -> 1.2.3","check_status":"success","last_successful_activation":"2026-07-01T00:00:00Z","activation_failure":null}' \
+    >"$state_file"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-15T00:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+      --record-freshness-failure \
+    || fail "internal timeout record failed: $(<"$test_dir/stderr")"
+
+  jq -e '
+    .last_attempt == "2026-07-15T00:00:00Z"
+    and .last_successful_check == "2026-07-14T00:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "failed"
+    and .last_successful_activation == "2026-07-01T00:00:00Z"
+    and .activation_failure == null
+  ' "$state_file" >/dev/null \
+    || fail 'internal timeout record did not retain the successful result and activation state'
+  [[ ! -s "$test_dir/stdout" && ! -s "$test_dir/stderr" ]] \
+    || fail 'internal timeout record produced presentation output'
+  if grep -Eq '^(npm|aoe|systemctl) ' "$test_dir/command-log"; then
+    fail 'internal timeout record reached discovery or mutation commands'
+  fi
+  [[ ! -e "$test_dir/query-log" ]] \
+    || fail 'internal timeout record queried a registry'
+}
+
 test_state_uses_local_state_fallback() {
   local test_dir
   local state_file
@@ -2030,6 +2066,7 @@ readonly test_cases=(
   test_due_check_runs_once_per_success_interval
   test_internal_freshness_interface_reuses_cache_without_a_subordinate_action
   test_internal_freshness_interface_does_not_wait_for_maintenance
+  test_internal_timeout_record_preserves_last_successful_result
   test_state_uses_local_state_fallback
   test_state_writes_replace_the_state_file_atomically
   test_concurrent_due_checks_are_serialized

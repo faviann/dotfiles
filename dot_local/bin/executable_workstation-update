@@ -108,8 +108,19 @@ run_freshness() {
   local dotfiles_failed=0
   local dotfiles_network_allowed=0
   local agent_failed=0
+  local operation_deadline_ns
+  local operation_started_ns
+  local remaining_fraction_ns
+  local remaining_ns
+  local remaining_seconds
+  local shared_timeout
   local -a notice_lines=()
   local -a blocker_lines=()
+
+  freshness_deadline="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}"
+  [[ "$freshness_deadline" =~ ^[1-9][0-9]*$ ]] || freshness_deadline=15
+  operation_started_ns="$(date +%s%N 2>/dev/null)" || return 0
+  operation_deadline_ns=$((operation_started_ns + freshness_deadline * 1000000000))
 
   mkdir -p "$STATE_DIR" || return 0
   command -v flock >/dev/null 2>&1 || return 0
@@ -120,8 +131,6 @@ run_freshness() {
     || return 0
   freshness_now_iso="$(date -u -d "@$freshness_now_epoch" +%Y-%m-%dT%H:%M:%SZ)" \
     || return 0
-  freshness_deadline="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}"
-  [[ "$freshness_deadline" =~ ^[1-9][0-9]*$ ]] || freshness_deadline=15
 
   if [[ ! -e "$HOME/.local/state/workstation-setup/complete" ]]; then
     blocker_lines+=('Setup: workstation setup is incomplete')
@@ -200,9 +209,19 @@ run_freshness() {
   agent_error_file="$(mktemp "$STATE_DIR/agent-check.stderr.XXXXXX")" || return 0
   trap 'rm -f "${dotfiles_error_file:-}" "${agent_output_file:-}" "${agent_error_file:-}"' RETURN
 
+  remaining_ns=$((operation_deadline_ns - $(date +%s%N)))
+  if (( remaining_ns > 0 )); then
+    remaining_seconds=$((remaining_ns / 1000000000))
+    remaining_fraction_ns=$((remaining_ns % 1000000000))
+    printf -v shared_timeout '%d.%09d' \
+      "$remaining_seconds" "$remaining_fraction_ns"
+  else
+    shared_timeout=''
+  fi
+
   if [[ -n "$freshness_head" ]] && (( dotfiles_due == 1 )) \
-    && (( dotfiles_network_allowed == 1 )); then
-    timeout --signal=TERM --kill-after=1s "${freshness_deadline}s" \
+    && (( dotfiles_network_allowed == 1 )) && [[ -n "$shared_timeout" ]]; then
+    timeout --signal=KILL "$shared_timeout" \
       git -C "$freshness_source_repository" fetch --prune origin \
         '+refs/heads/main:refs/remotes/origin/main' \
         >/dev/null 2>"$dotfiles_error_file" &
@@ -210,13 +229,20 @@ run_freshness() {
   fi
 
   agent_tools="$HOME/.local/bin/update-agent-tools"
-  if [[ -x "$agent_tools" ]]; then
-    timeout --signal=TERM --kill-after=1s "${freshness_deadline}s" \
+  if [[ -x "$agent_tools" && -n "$shared_timeout" ]]; then
+    timeout --signal=KILL "$shared_timeout" \
       "$agent_tools" --freshness-check-if-due \
       >"$agent_output_file" 2>"$agent_error_file" &
     agent_pid=$!
   else
     agent_failed=1
+  fi
+
+  if [[ -n "$freshness_head" ]] && (( dotfiles_due == 1 )) \
+    && (( dotfiles_network_allowed == 1 )) && [[ -z "$shared_timeout" ]]; then
+    dotfiles_failed=1
+    write_dotfiles_freshness_state failed \
+      "$cached_remote_commit" "$dotfiles_last_successful" || true
   fi
 
   if [[ -n "$dotfiles_pid" ]]; then
@@ -243,6 +269,10 @@ run_freshness() {
   if [[ -n "$agent_pid" ]]; then
     wait "$agent_pid" || agent_status=$?
     (( agent_status == 0 )) || agent_failed=1
+  fi
+  if (( agent_failed == 1 )) && [[ -x "$agent_tools" ]]; then
+    "$agent_tools" --record-freshness-failure \
+      >/dev/null 2>>"$agent_error_file" || true
   fi
 
   if [[ -n "$freshness_head" ]]; then

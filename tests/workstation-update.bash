@@ -50,6 +50,34 @@ printf 'update-agent-tools %s' "$FIXTURE_VERSION" >>"$PHASE_LOG"
 printf ' %q' "$@" >>"$PHASE_LOG"
 printf '\n' >>"$PHASE_LOG"
 
+agent_state_file="$XDG_STATE_HOME/update-agent-tools/state.json"
+if [[ "${1:-}" == '--record-freshness-failure' ]]; then
+  mkdir -p "${agent_state_file%/*}"
+  current_state='{}'
+  [[ ! -f "$agent_state_file" ]] || current_state="$(<"$agent_state_file")"
+  jq -n \
+    --argjson current "$current_state" \
+    --arg now "$UPDATE_AGENT_TOOLS_NOW" \
+    '$current + {last_attempt: $now, check_status: "failed"}' \
+    >"$agent_state_file.next"
+  mv "$agent_state_file.next" "$agent_state_file"
+  exit 0
+fi
+
+if [[ "${1:-}" == '--freshness-check-if-due' ]]; then
+  if [[ -f "$agent_state_file" \
+    && "$(jq -r '.check_status // ""' "$agent_state_file")" == failed ]]; then
+    last_attempt="$(jq -r '.last_attempt // ""' "$agent_state_file")"
+    if [[ -n "$last_attempt" \
+      && "$(date -u -d "$UPDATE_AGENT_TOOLS_NOW" +%s)" \
+        -lt "$(date -u -d "$last_attempt + 1 hour" +%s)" ]]; then
+      jq -r '.cached_version_result // empty' "$agent_state_file"
+      exit 0
+    fi
+  fi
+  printf 'attempt\n' >>"$AGENT_FRESHNESS_ATTEMPT_LOG"
+fi
+
 if [[ -n "${TEST_AGENT_GATE:-}" ]]; then
   : >"$TEST_AGENT_GATE.ready"
   while [[ ! -e "$TEST_AGENT_GATE.release" ]]; do
@@ -60,6 +88,28 @@ fi
 if [[ "${1:-}" == '--freshness-check-if-due' ]]; then
   printf '%s' "${TEST_AGENT_FRESHNESS_STDOUT:-}"
   printf '%s' "${TEST_AGENT_FRESHNESS_STDERR:-}" >&2
+  mkdir -p "${agent_state_file%/*}"
+  current_state='{}'
+  [[ ! -f "$agent_state_file" ]] || current_state="$(<"$agent_state_file")"
+  if [[ "${TEST_AGENT_FRESHNESS_STATUS:-0}" == 0 ]]; then
+    jq -n \
+      --argjson current "$current_state" \
+      --arg now "$UPDATE_AGENT_TOOLS_NOW" \
+      --arg result "${TEST_AGENT_FRESHNESS_STDOUT%$'\n'}" \
+      '$current + {
+        last_attempt: $now,
+        last_successful_check: $now,
+        cached_version_result: $result,
+        check_status: "success"
+      }' >"$agent_state_file.next"
+  else
+    jq -n \
+      --argjson current "$current_state" \
+      --arg now "$UPDATE_AGENT_TOOLS_NOW" \
+      '$current + {last_attempt: $now, check_status: "failed"}' \
+      >"$agent_state_file.next"
+  fi
+  mv "$agent_state_file.next" "$agent_state_file"
   exit "${TEST_AGENT_FRESHNESS_STATUS:-0}"
 fi
 
@@ -134,6 +184,10 @@ printf '\n' >>"$COMMAND_LOG"
 printf 'chezmoi' >>"$PHASE_LOG"
 printf ' %q' "$@" >>"$PHASE_LOG"
 printf '\n' >>"$PHASE_LOG"
+if [[ "$*" == 'source-path' \
+  && "${TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS:-0}" != 0 ]]; then
+  sleep "$TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS"
+fi
 if [[ "${TEST_FAIL_DRY_RUN:-0}" == 1 \
   && "$*" == 'apply --dry-run --verbose' ]]; then
   printf 'injected dry-run failure\n' >&2
@@ -177,6 +231,7 @@ STUB
 
 run_update() {
   local test_dir="$1"
+  local test_now="${WORKSTATION_UPDATE_NOW:-2026-07-15T00:00:00Z}"
   shift
 
   HOME="$test_dir/home" \
@@ -196,7 +251,9 @@ run_update() {
     TEST_FAIL_DRY_RUN="${TEST_FAIL_DRY_RUN:-0}" \
     TEST_FAIL_APPLY="${TEST_FAIL_APPLY:-0}" \
     TEST_DRIFT_AFTER_APPLY="${TEST_DRIFT_AFTER_APPLY:-0}" \
+    TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS="${TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS:-0}" \
     AGENT_TOOLS_LOG="$test_dir/home/agent-tools-log" \
+    AGENT_FRESHNESS_ATTEMPT_LOG="$test_dir/home/agent-freshness-attempt-log" \
     PHASE_LOG="$test_dir/home/phase-log" \
     TEST_AGENT_CHECK_FAIL="${TEST_AGENT_CHECK_FAIL:-0}" \
     TEST_AGENT_ACP_RUNNING="${TEST_AGENT_ACP_RUNNING:-0}" \
@@ -207,7 +264,8 @@ run_update() {
     TEST_AGENT_FRESHNESS_STDERR="${TEST_AGENT_FRESHNESS_STDERR:-}" \
     TEST_AGENT_FRESHNESS_STATUS="${TEST_AGENT_FRESHNESS_STATUS:-0}" \
     TEST_SSH_GATE="${TEST_SSH_GATE:-}" \
-    WORKSTATION_UPDATE_NOW="${WORKSTATION_UPDATE_NOW:-2026-07-15T00:00:00Z}" \
+    WORKSTATION_UPDATE_NOW="$test_now" \
+    UPDATE_AGENT_TOOLS_NOW="$test_now" \
     WORKSTATION_FRESHNESS_DEADLINE_SECONDS="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}" \
     bash "$COMMAND" "$@" </dev/null \
       >"$test_dir/home/stdout" 2>"$test_dir/home/stderr"
@@ -445,13 +503,14 @@ test_combined_freshness_deadline_bounds_both_sources() {
   started_at="$(date +%s%N)"
   TEST_AGENT_GATE="$test_dir/agent-gate" \
     TEST_SSH_GATE="$test_dir/ssh-gate" \
+    TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS=0.6 \
     WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
     run_update "$test_dir" --freshness \
     || fail 'bounded freshness failure escaped the login boundary'
   finished_at="$(date +%s%N)"
   elapsed_milliseconds=$(( (finished_at - started_at) / 1000000 ))
 
-  (( elapsed_milliseconds < 3000 )) \
+  (( elapsed_milliseconds < 1400 )) \
     || fail "combined freshness exceeded its controlled deadline: ${elapsed_milliseconds}ms"
   grep -Fqx \
     'Dotfiles: freshness check failed; no successful result is available' \
@@ -490,6 +549,53 @@ test_freshness_history_blockers_are_local_when_fetch_fails() {
     || fail 'fetch failure suppressed the always-current local history blocker'
   [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
     || fail 'freshness changed an ahead local commit'
+}
+
+test_timed_out_agent_freshness_retries_after_one_hour() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  mkdir -p "$test_dir/home/state/update-agent-tools"
+  printf '%s\n' \
+    '{"last_attempt":"2026-07-14T00:00:00Z","last_successful_check":"2026-07-14T00:00:00Z","cached_version_result":"AoE: 1.2.2 -> 1.2.3","check_status":"success","activation_failure":null}' \
+    >"$test_dir/home/state/update-agent-tools/state.json"
+
+  TEST_AGENT_GATE="$test_dir/agent-gate" \
+    WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'timed-out agent freshness escaped the notice boundary'
+  [[ "$(wc -l <"$test_dir/home/agent-freshness-attempt-log")" -eq 1 ]] \
+    || fail 'initial timed-out agent check did not make one attempt'
+  grep -Fqx '  AoE: 1.2.2 -> 1.2.3' "$test_dir/home/stdout" \
+    || fail 'agent timeout erased the last successful result'
+  grep -Fqx \
+    'Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z' \
+    "$test_dir/home/stdout" \
+    || fail 'agent timeout did not render retained knowledge as stale'
+
+  WORKSTATION_UPDATE_NOW="2026-07-15T00:59:59Z" \
+    run_update "$test_dir" --freshness \
+    || fail 'cached timed-out agent status escaped before retry'
+  [[ "$(wc -l <"$test_dir/home/agent-freshness-attempt-log")" -eq 1 ]] \
+    || fail 'timed-out agent source retried before one hour'
+  grep -Fqx \
+    'Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z' \
+    "$test_dir/home/stdout" \
+    || fail 'timed-out agent failure stopped rendering before retry'
+
+  TEST_AGENT_FRESHNESS_STDOUT=$'Claude Code CLI: 3.4.4 -> 3.4.5\n' \
+    WORKSTATION_UPDATE_NOW="2026-07-15T01:00:00Z" \
+    run_update "$test_dir" --freshness \
+    || fail 'timed-out agent source did not recover at retry time'
+  [[ "$(wc -l <"$test_dir/home/agent-freshness-attempt-log")" -eq 2 ]] \
+    || fail 'timed-out agent source did not retry exactly at one hour'
+  grep -Fqx '  Claude Code CLI: 3.4.4 -> 3.4.5' "$test_dir/home/stdout" \
+    || fail 'agent retry did not replace retained knowledge with fresh success'
 }
 
 run_chezmoi() {
@@ -1428,6 +1534,7 @@ readonly test_cases=(
   test_due_freshness_sources_run_concurrently
   test_combined_freshness_deadline_bounds_both_sources
   test_freshness_history_blockers_are_local_when_fetch_fails
+  test_timed_out_agent_freshness_retries_after_one_hour
   test_setup_must_be_complete_before_source_discovery
   test_first_run_adopts_verified_equal_history
   test_current_agent_tools_are_checked_without_mutation
