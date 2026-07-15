@@ -415,6 +415,35 @@ test_unknown_malformed_and_ambiguous_selectors_fail_clearly() {
     --list
 }
 
+test_missing_dependencies_fail_before_suite_discovery() {
+  local real_bash
+  local real_dirname
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  write_suite "$test_dir" alpha.bash test_alpha_one test_alpha_two
+  mkdir "$test_dir/command-path"
+  real_bash="$(command -v bash)"
+  real_dirname="$(command -v dirname)"
+  ln -s "$real_dirname" "$test_dir/command-path/dirname"
+
+  if INVOCATION_LOG="$test_dir/invocations" \
+    PATH="$test_dir/command-path" \
+    "$real_bash" "$test_dir/scripts/run-tests" --list \
+      >"$test_dir/stdout" 2>"$test_dir/stderr"; then
+    fail 'runner accepted an environment without its required dependencies'
+  fi
+  grep -Fq 'ERROR: required test dependencies not found in PATH:' \
+    "$test_dir/stderr" \
+    || fail "missing dependencies were not explained: $(<"$test_dir/stderr")"
+  grep -Eq '(^|[[:space:]])date($|[[:space:]])' "$test_dir/stderr" \
+    || fail 'the missing date dependency was not named'
+  [[ ! -e "$test_dir/invocations" ]] \
+    || fail 'dependency preflight started a suite'
+}
+
 test_lists_suites_and_globally_unambiguous_cases
 test_exact_suite_selection_runs_only_that_complete_suite
 test_exact_case_selection_runs_only_its_owning_case
@@ -422,5 +451,6 @@ test_no_selector_starts_every_complete_suite_concurrently
 test_full_run_groups_failures_and_reports_every_outcome
 test_interruption_terminates_suites_and_removes_temporary_logs
 test_unknown_malformed_and_ambiguous_selectors_fail_clearly
+test_missing_dependencies_fail_before_suite_discovery
 
 printf 'PASS: parallel test runner\n'

@@ -33,6 +33,19 @@
         overlays = [ openclawOverlay ];
         config.allowUnfree = true;
       };
+      behavioralTestInputs = [
+        pkgs.bash
+        pkgs.chezmoi
+        pkgs.coreutils
+        pkgs.diffutils
+        pkgs.findutils
+        pkgs.git
+        pkgs.gnugrep
+        pkgs.gnused
+        pkgs.jq
+        pkgs.nix
+        pkgs.util-linux
+      ];
       shellcheckSource = nixpkgs.lib.fileset.toSource {
         root = ./.;
         fileset = nixpkgs.lib.fileset.unions [
@@ -73,10 +86,7 @@
       '';
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = [
-          pkgs.chezmoi
-          pkgs.shellcheck
-        ];
+        packages = behavioralTestInputs ++ [ pkgs.shellcheck ];
       };
 
       homeConfigurations.workstation = home-manager.lib.homeManagerConfiguration {
