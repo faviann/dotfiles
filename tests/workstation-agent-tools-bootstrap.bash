@@ -108,8 +108,13 @@ STUB
   fi
 }
 
-test_missing_tools_are_installed_by_the_bootstrap_handoff
-test_complete_toolchain_is_not_refreshed_during_bootstrap
-test_failed_install_fails_the_bootstrap_handoff
+# shellcheck source=tests/lib/suite-dispatch.bash
+source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
-printf 'PASS: workstation agent-tool bootstrap handoff\n'
+readonly test_cases=(
+  test_missing_tools_are_installed_by_the_bootstrap_handoff
+  test_complete_toolchain_is_not_refreshed_during_bootstrap
+  test_failed_install_fails_the_bootstrap_handoff
+)
+
+suite_dispatch 'workstation agent-tool bootstrap handoff' "$@"

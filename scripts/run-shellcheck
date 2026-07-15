@@ -8,6 +8,8 @@ shell_inputs=(
   "$REPO_ROOT/dot_local/bin/executable_workstation-update"
   "$REPO_ROOT/dot_bashrc.tmpl"
   "$REPO_ROOT"/tests/*.bash
+  "$REPO_ROOT"/tests/contracts/*.bash
+  "$REPO_ROOT"/tests/lib/*.bash
   "$REPO_ROOT/scripts/run-shellcheck"
 )
 template_inputs=("$REPO_ROOT"/.chezmoiscripts/*.sh.tmpl)
@@ -34,4 +36,9 @@ for is_lxc in true false; do
   done
 done
 
-shellcheck --shell=bash "${shell_inputs[@]}" "${rendered_inputs[@]}"
+shellcheck \
+  --external-sources \
+  --shell=bash \
+  --source-path="$REPO_ROOT" \
+  "${shell_inputs[@]}" \
+  "${rendered_inputs[@]}"

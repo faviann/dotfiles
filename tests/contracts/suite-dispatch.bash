@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly REPO_ROOT
+
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+expected_cases() {
+  case "$1" in
+    bashrc-aoe-autolaunch.bash)
+      printf '%s\n' \
+        test_due_check_finishes_before_existing_session_attach \
+        test_due_check_finishes_before_new_session_launch \
+        test_silent_check_adds_no_login_output \
+        test_excluded_shell_contexts_skip_the_check \
+        test_missing_checker_preserves_existing_autolaunch
+      ;;
+    chezmoi-target-inventory.bash)
+      printf '%s\n' \
+        test_repository_only_paths_are_ignored \
+        test_fish_is_ignored_only_on_the_configured_workstation \
+        test_dry_run_proposes_only_intentional_targets
+      ;;
+    update-agent-tools-check.bash)
+      printf '%s\n' \
+        test_machine_status_reports_current_by_exit_status_without_output \
+        test_machine_status_reports_outdated_by_exit_status_without_output \
+        test_machine_status_reports_discovery_failure_and_preserves_freshness_state \
+        test_machine_status_reports_unresolved_activation_failure_as_maintenance_needed \
+        test_conditional_update_leaves_current_toolchain_and_acp_workers_alone \
+        test_conditional_update_stops_before_mutation_when_discovery_fails \
+        test_conditional_update_refreshes_the_whole_toolchain_when_outdated \
+        test_conditional_update_requires_yes_for_unattended_acp_disruption \
+        test_conditional_update_yes_authorizes_only_acp_disruption \
+        test_conditional_interactive_update_prompts_once_for_acp_disruption \
+        test_conditional_update_retries_a_current_toolchain_after_activation_failure \
+        test_conditional_update_retries_after_pre_activation_failure_makes_versions_current \
+        test_due_check_runs_once_per_success_interval \
+        test_state_uses_local_state_fallback \
+        test_state_writes_replace_the_state_file_atomically \
+        test_concurrent_due_checks_are_serialized \
+        test_update_and_check_modes_share_the_state_lock \
+        test_failed_check_preserves_cache_and_retries_after_one_hour \
+        test_malformed_aoe_release_is_a_failed_check \
+        test_empty_npm_version_is_a_failed_check \
+        test_npm_registry_failure_preserves_cache_and_retries_after_one_hour \
+        test_current_toolchain_is_silent \
+        test_outdated_components_report_exact_versions \
+        test_missing_components_are_reported \
+        test_nested_codex_runtime_is_a_distinct_scope \
+        test_nested_codex_uses_latest_adapter_compatible_target \
+        test_nested_codex_accepts_a_single_compatible_version \
+        test_nested_codex_ignores_compatible_prereleases \
+        test_default_update_refreshes_and_activates_the_complete_toolchain \
+        test_interactive_update_without_running_workers_does_not_prompt \
+        test_noninteractive_update_with_running_workers_requires_yes \
+        test_yes_authorizes_noninteractive_update_with_running_workers \
+        test_interactive_decline_happens_once_before_mutation \
+        test_workers_are_reconciled_by_identity_after_pre_activation_verification \
+        test_temporarily_unregistered_worker_is_reconciled_without_restart \
+        test_coexisting_old_and_replacement_identities_fail_health_without_restarting_again \
+        test_each_worker_restart_decision_uses_a_fresh_identity_snapshot \
+        test_worker_replacement_health_failure_is_bounded_and_not_successful \
+        test_final_service_health_failure_after_worker_replacement_is_bounded \
+        test_partial_install_does_not_restart_the_service \
+        test_default_update_removes_stale_cli_shims_before_npm_refresh \
+        test_pre_activation_diagnostics_failure_does_not_restart_the_service \
+        test_pre_activation_command_resolution_failure_does_not_restart_the_service \
+        test_pre_activation_version_failure_does_not_restart_the_service \
+        test_pre_activation_empty_package_inventory_names_its_component \
+        test_pre_activation_registry_failure_names_the_managed_component \
+        test_post_activation_failure_retains_failure_without_rollback \
+        test_activation_failure_is_recovered_by_a_full_rerun \
+        test_standalone_and_bundled_codex_remain_separate_on_update
+      ;;
+    workstation-agent-tools-bootstrap.bash)
+      printf '%s\n' \
+        test_missing_tools_are_installed_by_the_bootstrap_handoff \
+        test_complete_toolchain_is_not_refreshed_during_bootstrap \
+        test_failed_install_fails_the_bootstrap_handoff
+      ;;
+    workstation-update.bash)
+      printf '%s\n' \
+        test_setup_must_be_complete_before_source_discovery \
+        test_first_run_adopts_verified_equal_history \
+        test_current_agent_tools_are_checked_without_mutation \
+        test_yes_forwards_only_agent_disruption_consent \
+        test_agent_consent_refusal_names_only_the_unified_retry \
+        test_agent_discovery_failure_preserves_applied_dotfiles_for_retry \
+        test_concurrent_update_is_rejected_without_queueing \
+        test_outdated_agent_tools_use_the_latest_verified_updater \
+        test_agent_update_failure_retries_without_reapplying_dotfiles \
+        test_unsupported_arguments_fail_before_maintenance \
+        test_dotfiles_failure_prevents_agent_tool_checks \
+        test_repository_structure_is_validated_before_fetch \
+        test_all_source_extras_and_unfinished_operations_are_preserved \
+        test_fetch_and_unsafe_history_fail_diagnostically \
+        test_behind_history_fast_forwards_then_applies_in_order \
+        test_failed_ref_transaction_is_safe_to_retry \
+        test_missing_maintenance_executable_enters_the_apply_path \
+        test_drifted_maintenance_executable_enters_the_apply_path \
+        test_matching_marker_does_not_reconcile_unrelated_target_drift \
+        test_first_run_with_drift_enters_the_apply_path \
+        test_unattended_overwrite_and_phase_failures_preserve_the_marker \
+        test_dry_run_and_verification_failures_are_safe_to_retry
+      ;;
+    *) fail "no expected cases for $1" ;;
+  esac
+}
+
+test_every_suite_lists_all_case_names() {
+  local suite
+  local listed_cases
+  local all_cases
+
+  all_cases="$(mktemp)"
+  trap 'rm -f "$all_cases"' RETURN
+  for suite in \
+    bashrc-aoe-autolaunch.bash \
+    chezmoi-target-inventory.bash \
+    update-agent-tools-check.bash \
+    workstation-agent-tools-bootstrap.bash \
+    workstation-update.bash; do
+    listed_cases="$(bash "$REPO_ROOT/tests/$suite" --list)" \
+      || fail "$suite --list exited nonzero"
+    diff -u \
+      <(expected_cases "$suite") \
+      <(printf '%s\n' "$listed_cases") \
+      || fail "$suite --list did not expose its complete case set"
+    printf '%s\n' "$listed_cases" >>"$all_cases"
+  done
+
+  [[ -z "$(sort "$all_cases" | uniq -d)" ]] \
+    || fail 'case names are ambiguous across suites'
+}
+
+test_every_suite_preserves_no_argument_full_run() {
+  local specification
+  local suite
+  local pass_line
+  local output
+
+  for specification in \
+    'bashrc-aoe-autolaunch.bash|PASS: bashrc AoE auto-launch boundary' \
+    'chezmoi-target-inventory.bash|PASS: chezmoi target inventory' \
+    'update-agent-tools-check.bash|PASS: update-agent-tools --check' \
+    'workstation-agent-tools-bootstrap.bash|PASS: workstation agent-tool bootstrap handoff' \
+    'workstation-update.bash|PASS: workstation update'; do
+    IFS='|' read -r suite pass_line <<<"$specification"
+    output="$(bash "$REPO_ROOT/tests/$suite")" \
+      || fail "$suite no-argument full run exited nonzero"
+    [[ "$output" == "$pass_line" ]] \
+      || fail "$suite no-argument full run produced unexpected output: $output"
+  done
+}
+
+test_every_suite_runs_one_exact_named_case() {
+  local specification
+  local suite
+  local test_case
+  local pass_line
+  local output
+
+  for specification in \
+    'bashrc-aoe-autolaunch.bash|test_silent_check_adds_no_login_output|PASS: bashrc AoE auto-launch boundary' \
+    'chezmoi-target-inventory.bash|test_repository_only_paths_are_ignored|PASS: chezmoi target inventory' \
+    'update-agent-tools-check.bash|test_machine_status_reports_current_by_exit_status_without_output|PASS: update-agent-tools --check' \
+    'workstation-agent-tools-bootstrap.bash|test_failed_install_fails_the_bootstrap_handoff|PASS: workstation agent-tool bootstrap handoff' \
+    'workstation-update.bash|test_unsupported_arguments_fail_before_maintenance|PASS: workstation update'; do
+    IFS='|' read -r suite test_case pass_line <<<"$specification"
+    output="$(bash "$REPO_ROOT/tests/$suite" --case "$test_case")" \
+      || fail "$suite did not run exact case $test_case"
+    [[ "$output" == "$pass_line" ]] \
+      || fail "$suite exact case produced unexpected output: $output"
+  done
+}
+
+assert_dispatch_fails_with() {
+  local suite="$1"
+  local expected_error="$2"
+  local test_dir
+  shift 2
+
+  test_dir="$(mktemp -d)"
+  if bash "$REPO_ROOT/tests/$suite" "$@" \
+    >"$test_dir/stdout" 2>"$test_dir/stderr"; then
+    fail "$suite accepted invalid invocation: $*"
+  fi
+  [[ ! -s "$test_dir/stdout" ]] \
+    || fail "$suite produced success output for invalid invocation: $*"
+  grep -Fq "$expected_error" "$test_dir/stderr" \
+    || fail "$suite did not explain invalid invocation: $*"
+  rm -rf "$test_dir"
+}
+
+test_unknown_and_malformed_invocations_fail_clearly() {
+  local suite
+
+  for suite in \
+    bashrc-aoe-autolaunch.bash \
+    chezmoi-target-inventory.bash \
+    update-agent-tools-check.bash \
+    workstation-agent-tools-bootstrap.bash \
+    workstation-update.bash; do
+    assert_dispatch_fails_with \
+      "$suite" 'ERROR: unknown test case:' \
+      --case definitely_not_a_test_case
+    assert_dispatch_fails_with "$suite" 'Usage:' --case
+    assert_dispatch_fails_with "$suite" 'Usage:' --case ''
+    assert_dispatch_fails_with "$suite" 'Usage:' --list unexpected
+    assert_dispatch_fails_with \
+      "$suite" 'Usage:' test_silent_check_adds_no_login_output
+  done
+
+  assert_dispatch_fails_with \
+    update-agent-tools-check.bash 'ERROR: unknown test case:' \
+    --case test_nested_codex
+}
+
+test_every_suite_lists_all_case_names
+test_every_suite_preserves_no_argument_full_run
+test_every_suite_runs_one_exact_named_case
+test_unknown_and_malformed_invocations_fail_clearly
+
+printf 'PASS: universal suite dispatch\n'

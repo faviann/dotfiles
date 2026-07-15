@@ -190,8 +190,13 @@ test_dry_run_proposes_only_intentional_targets() {
     || fail 'dry-run changed the isolated destination'
 }
 
-test_repository_only_paths_are_ignored
-test_fish_is_ignored_only_on_the_configured_workstation
-test_dry_run_proposes_only_intentional_targets
+# shellcheck source=tests/lib/suite-dispatch.bash
+source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
-printf 'PASS: chezmoi target inventory\n'
+readonly test_cases=(
+  test_repository_only_paths_are_ignored
+  test_fish_is_ignored_only_on_the_configured_workstation
+  test_dry_run_proposes_only_intentional_targets
+)
+
+suite_dispatch 'chezmoi target inventory' "$@"
