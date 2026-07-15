@@ -33,7 +33,7 @@ resolved_command_path() {
   done
 }
 
-COMMAND_PATH="$(resolved_command_path bash chmod date flock git grep jq mkdir mktemp mv rm sleep timeout)"
+COMMAND_PATH="$(resolved_command_path bash chmod date flock git grep jq mkdir mktemp mv rm sha256sum sleep stat timeout touch)"
 readonly COMMAND_PATH
 
 write_agent_tools_fixture() {
@@ -503,7 +503,7 @@ test_combined_freshness_deadline_bounds_both_sources() {
   started_at="$(date +%s%N)"
   TEST_AGENT_GATE="$test_dir/agent-gate" \
     TEST_SSH_GATE="$test_dir/ssh-gate" \
-    TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS=0.6 \
+    TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS=0.3 \
     WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
     run_update "$test_dir" --freshness \
     || fail 'bounded freshness failure escaped the login boundary'
@@ -577,6 +577,12 @@ test_timed_out_agent_freshness_retries_after_one_hour() {
     'Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z' \
     "$test_dir/home/stdout" \
     || fail 'agent timeout did not render retained knowledge as stale'
+  jq -e '
+    .last_attempt == "2026-07-15T00:00:00Z"
+    and .check_status == "failed"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+  ' "$test_dir/home/state/update-agent-tools/state.json" >/dev/null \
+    || fail "agent timeout did not persist retry state: $(<"$test_dir/home/state/update-agent-tools/state.json")"
 
   WORKSTATION_UPDATE_NOW="2026-07-15T00:59:59Z" \
     run_update "$test_dir" --freshness \
@@ -586,7 +592,7 @@ test_timed_out_agent_freshness_retries_after_one_hour() {
   grep -Fqx \
     'Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z' \
     "$test_dir/home/stdout" \
-    || fail 'timed-out agent failure stopped rendering before retry'
+    || fail "timed-out agent failure stopped rendering before retry: stdout=$(<"$test_dir/home/stdout"); agent-log=$(<"$test_dir/home/agent-tools-log"); state=$(<"$test_dir/home/state/update-agent-tools/state.json")"
 
   TEST_AGENT_FRESHNESS_STDOUT=$'Claude Code CLI: 3.4.4 -> 3.4.5\n' \
     WORKSTATION_UPDATE_NOW="2026-07-15T01:00:00Z" \
@@ -596,6 +602,163 @@ test_timed_out_agent_freshness_retries_after_one_hour() {
     || fail 'timed-out agent source did not retry exactly at one hour'
   grep -Fqx '  Claude Code CLI: 3.4.4 -> 3.4.5' "$test_dir/home/stdout" \
     || fail 'agent retry did not replace retained knowledge with fresh success'
+}
+
+test_freshness_outer_deadline_bounds_stalled_local_preflight() {
+  local action_count
+  local elapsed_milliseconds
+  local finished_at
+  local started_at
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+
+  started_at="$(date +%s%N)"
+  TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS=2 \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'stalled local preflight escaped the freshness boundary'
+  finished_at="$(date +%s%N)"
+  elapsed_milliseconds=$(( (finished_at - started_at) / 1000000 ))
+
+  (( elapsed_milliseconds < 1400 )) \
+    || fail "local preflight exceeded the overall deadline: ${elapsed_milliseconds}ms"
+  action_count="$(grep -c '^Run: workstation-update$' \
+    "$test_dir/home/stdout" || true)"
+  [[ "$action_count" -eq 1 ]] \
+    || fail 'outer deadline did not emit exactly one recovery action'
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Workstation freshness check timed out' \
+      'Run: workstation-update') \
+    "$test_dir/home/stdout" \
+    || fail 'outer deadline emitted a partial or incoherent fallback notice'
+  [[ ! -s "$test_dir/home/stderr" ]] \
+    || fail 'outer deadline leaked worker diagnostics'
+}
+
+test_freshness_git_reads_do_not_refresh_the_index() {
+  local after_index_identity
+  local after_index_sha
+  local before_head
+  local before_index_identity
+  local before_index_sha
+  local expected_remote_head
+  local index_path
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  before_head="$(source_commit "$test_dir")"
+  publish_managed_version "$test_dir" v2
+  expected_remote_head="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/seed" rev-parse HEAD)"
+  index_path="$test_dir/discovered/source/.git/index"
+  touch -d '2030-01-01T00:00:00Z' \
+    "$test_dir/discovered/source/dot_managed"
+  before_index_sha="$(sha256sum "$index_path")"
+  before_index_identity="$(stat -c '%i:%Y:%s' "$index_path")"
+
+  run_update "$test_dir" --freshness \
+    || fail 'non-refreshing freshness check failed'
+
+  after_index_sha="$(sha256sum "$index_path")"
+  after_index_identity="$(stat -c '%i:%Y:%s' "$index_path")"
+  [[ "$after_index_sha" == "$before_index_sha" \
+    && "$after_index_identity" == "$before_index_identity" ]] \
+    || fail 'freshness Git reads refreshed or rewrote the index'
+  [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
+    || fail 'freshness changed the checked-out commit while checking the index'
+  [[ "$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" rev-parse origin/main)" \
+    == "$expected_remote_head" ]] \
+    || fail 'disabled optional locks prevented the permitted remote-tracking fetch'
+}
+
+test_dotfiles_timeout_preserves_completed_agent_and_cached_dotfiles_results() {
+  local before_head
+  local before_index_identity
+  local before_index_sha
+  local before_source_content
+  local before_target
+  local cached_remote
+  local cached_remote_short
+  local index_path
+  local local_short
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  before_head="$(source_commit "$test_dir")"
+  before_source_content="$(<"$test_dir/discovered/source/dot_managed")"
+  before_target="$(<"$test_dir/home/.managed")"
+  index_path="$test_dir/discovered/source/.git/index"
+  before_index_sha="$(sha256sum "$index_path")"
+  before_index_identity="$(stat -c '%i:%Y:%s' "$index_path")"
+
+  publish_managed_version "$test_dir" v2
+  WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
+    run_update "$test_dir" --freshness \
+    || fail 'cached dotfiles result setup failed'
+  cached_remote="$(jq -r '.cached_remote_commit' \
+    "$test_dir/home/state/workstation-update/dotfiles-freshness.json")"
+  local_short="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" rev-parse --short "$before_head")"
+  cached_remote_short="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" rev-parse --short "$cached_remote")"
+  publish_managed_version "$test_dir" v3
+
+  TEST_SSH_GATE="$test_dir/ssh-gate" \
+    TEST_AGENT_FRESHNESS_STDOUT=$'Claude Code CLI: 3.4.4 -> 3.4.5\n' \
+    WORKSTATION_UPDATE_NOW="2026-07-16T00:00:00Z" \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'dotfiles timeout escaped the freshness boundary'
+
+  jq -e '
+    .last_attempt == "2026-07-16T00:00:00Z"
+    and .last_successful_check == "2026-07-16T00:00:00Z"
+    and .cached_version_result == "Claude Code CLI: 3.4.4 -> 3.4.5"
+    and .check_status == "success"
+  ' "$test_dir/home/state/update-agent-tools/state.json" >/dev/null \
+    || fail 'completed agent source was overwritten as timed out'
+  jq -e '
+    .last_attempt == "2026-07-16T00:00:00Z"
+    and .last_successful_check == "2026-07-15T00:00:00Z"
+    and .attempt_status == "failed"
+  ' "$test_dir/home/state/workstation-update/dotfiles-freshness.json" >/dev/null \
+    || fail "timed-out dotfiles source did not record its one-hour retry state: $(<"$test_dir/home/state/workstation-update/dotfiles-freshness.json")"
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Agent tools:' \
+      '  Claude Code CLI: 3.4.4 -> 3.4.5' \
+      'Dotfiles: 1 commit (sanitized below)' \
+      "  $local_short..$cached_remote_short" \
+      'Dotfiles: freshness check failed; using result from 2026-07-15T00:00:00Z' \
+      'Run: workstation-update') \
+    "$test_dir/home/stdout" \
+    || fail 'dotfiles timeout suppressed or duplicated retained source results'
+  [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
+    || fail 'dotfiles timeout changed the checked-out commit'
+  [[ "$(sha256sum "$index_path")" == "$before_index_sha" \
+    && "$(stat -c '%i:%Y:%s' "$index_path")" == "$before_index_identity" ]] \
+    || fail 'dotfiles timeout changed the index'
+  [[ "$(<"$test_dir/discovered/source/dot_managed")" == "$before_source_content" ]] \
+    || fail 'dotfiles timeout changed the worktree'
+  [[ "$(<"$test_dir/home/.managed")" == "$before_target" ]] \
+    || fail 'dotfiles timeout changed a managed target'
 }
 
 run_chezmoi() {
@@ -1535,6 +1698,9 @@ readonly test_cases=(
   test_combined_freshness_deadline_bounds_both_sources
   test_freshness_history_blockers_are_local_when_fetch_fails
   test_timed_out_agent_freshness_retries_after_one_hour
+  test_freshness_outer_deadline_bounds_stalled_local_preflight
+  test_freshness_git_reads_do_not_refresh_the_index
+  test_dotfiles_timeout_preserves_completed_agent_and_cached_dotfiles_results
   test_setup_must_be_complete_before_source_discovery
   test_first_run_adopts_verified_equal_history
   test_current_agent_tools_are_checked_without_mutation

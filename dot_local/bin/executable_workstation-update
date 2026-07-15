@@ -117,6 +117,8 @@ run_freshness() {
   local -a notice_lines=()
   local -a blocker_lines=()
 
+  export GIT_OPTIONAL_LOCKS=0
+
   freshness_deadline="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}"
   [[ "$freshness_deadline" =~ ^[1-9][0-9]*$ ]] || freshness_deadline=15
   operation_started_ns="$(date +%s%N 2>/dev/null)" || return 0
@@ -204,6 +206,28 @@ run_freshness() {
     fi
   fi
 
+  if [[ -n "${WORKSTATION_FRESHNESS_DOTFILES_CACHED_SUMMARY:-}" \
+    && -n "$freshness_head" && -n "$cached_remote_commit" ]] \
+    && git -C "$freshness_source_repository" cat-file -e \
+      "$cached_remote_commit^{commit}" 2>/dev/null; then
+    history_counts="$(git -C "$freshness_source_repository" rev-list \
+      --left-right --count "$freshness_head...$cached_remote_commit" \
+      2>/dev/null || true)"
+    read -r ahead_count behind_count <<<"$history_counts"
+    ahead_count="${ahead_count:-0}"
+    behind_count="${behind_count:-0}"
+    if (( ahead_count == 0 && behind_count > 0 )); then
+      local_short="$(git -C "$freshness_source_repository" \
+        rev-parse --short "$freshness_head")"
+      remote_short="$(git -C "$freshness_source_repository" \
+        rev-parse --short "$cached_remote_commit")"
+      printf '%s\n' \
+        "Dotfiles: $behind_count commit$( (( behind_count == 1 )) || printf s ) (sanitized below)" \
+        "  $local_short..$remote_short" \
+        >"$WORKSTATION_FRESHNESS_DOTFILES_CACHED_SUMMARY"
+    fi
+  fi
+
   dotfiles_error_file="$(mktemp "$STATE_DIR/dotfiles-check.stderr.XXXXXX")" || return 0
   agent_output_file="$(mktemp "$STATE_DIR/agent-check.stdout.XXXXXX")" || return 0
   agent_error_file="$(mktemp "$STATE_DIR/agent-check.stderr.XXXXXX")" || return 0
@@ -221,18 +245,44 @@ run_freshness() {
 
   if [[ -n "$freshness_head" ]] && (( dotfiles_due == 1 )) \
     && (( dotfiles_network_allowed == 1 )) && [[ -n "$shared_timeout" ]]; then
-    timeout --signal=KILL "$shared_timeout" \
+    if [[ -n "${WORKSTATION_FRESHNESS_DOTFILES_ATTEMPT_MARKER:-}" ]]; then
+      : >"$WORKSTATION_FRESHNESS_DOTFILES_ATTEMPT_MARKER"
+    fi
+    (
+      source_status=0
       git -C "$freshness_source_repository" fetch --prune origin \
         '+refs/heads/main:refs/remotes/origin/main' \
-        >/dev/null 2>"$dotfiles_error_file" &
+        >/dev/null 2>"$dotfiles_error_file" || source_status=$?
+      if [[ -n "${WORKSTATION_FRESHNESS_DOTFILES_STATUS_MARKER:-}" ]]; then
+        printf '%s\n' "$source_status" \
+          >"$WORKSTATION_FRESHNESS_DOTFILES_STATUS_MARKER"
+      fi
+      if [[ -n "${WORKSTATION_FRESHNESS_DOTFILES_DONE_MARKER:-}" ]]; then
+        : >"$WORKSTATION_FRESHNESS_DOTFILES_DONE_MARKER"
+      fi
+      exit "$source_status"
+    ) &
     dotfiles_pid=$!
   fi
 
   agent_tools="$HOME/.local/bin/update-agent-tools"
   if [[ -x "$agent_tools" && -n "$shared_timeout" ]]; then
-    timeout --signal=KILL "$shared_timeout" \
+    if [[ -n "${WORKSTATION_FRESHNESS_AGENT_ATTEMPT_MARKER:-}" ]]; then
+      : >"$WORKSTATION_FRESHNESS_AGENT_ATTEMPT_MARKER"
+    fi
+    (
+      source_status=0
       "$agent_tools" --freshness-check-if-due \
-      >"$agent_output_file" 2>"$agent_error_file" &
+        >"$agent_output_file" 2>"$agent_error_file" || source_status=$?
+      if [[ -n "${WORKSTATION_FRESHNESS_AGENT_STATUS_MARKER:-}" ]]; then
+        printf '%s\n' "$source_status" \
+          >"$WORKSTATION_FRESHNESS_AGENT_STATUS_MARKER"
+      fi
+      if [[ -n "${WORKSTATION_FRESHNESS_AGENT_DONE_MARKER:-}" ]]; then
+        : >"$WORKSTATION_FRESHNESS_AGENT_DONE_MARKER"
+      fi
+      exit "$source_status"
+    ) &
     agent_pid=$!
   else
     agent_failed=1
@@ -361,11 +411,163 @@ run_freshness() {
   fi
 }
 
+freshness_source_failed() {
+  local attempt_marker="$1"
+  local done_marker="$2"
+  local status_marker="$3"
+
+  [[ -e "$attempt_marker" ]] || return 1
+  [[ -e "$done_marker" ]] || return 0
+  [[ -f "$status_marker" ]] || return 0
+  [[ "$(<"$status_marker")" != 0 ]]
+}
+
+render_freshness_timeout() {
+  local agent_cached_result=''
+  local agent_last_successful=''
+  local dotfiles_last_successful=''
+  local -a timeout_lines=()
+
+  if [[ -f "$STATE_HOME/update-agent-tools/state.json" ]]; then
+    agent_cached_result="$(jq -er '.cached_version_result // empty' \
+      "$STATE_HOME/update-agent-tools/state.json" 2>/dev/null || true)"
+    agent_last_successful="$(jq -er '.last_successful_check // empty' \
+      "$STATE_HOME/update-agent-tools/state.json" 2>/dev/null || true)"
+  fi
+  dotfiles_last_successful="$(freshness_state_value last_successful_check)"
+
+  if [[ -n "$agent_cached_result" ]]; then
+    timeout_lines+=('Agent tools:')
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && timeout_lines+=("  $line")
+    done <<<"$agent_cached_result"
+  fi
+  if [[ -s "${WORKSTATION_FRESHNESS_DOTFILES_CACHED_SUMMARY:-/dev/null}" ]]; then
+    while IFS= read -r line; do
+      timeout_lines+=("$line")
+    done <"$WORKSTATION_FRESHNESS_DOTFILES_CACHED_SUMMARY"
+  fi
+  if freshness_source_failed \
+    "${WORKSTATION_FRESHNESS_DOTFILES_ATTEMPT_MARKER:-/dev/null}" \
+    "${WORKSTATION_FRESHNESS_DOTFILES_DONE_MARKER:-/dev/null}" \
+    "${WORKSTATION_FRESHNESS_DOTFILES_STATUS_MARKER:-/dev/null}"; then
+    if [[ -n "$dotfiles_last_successful" ]]; then
+      timeout_lines+=("Dotfiles: freshness check failed; using result from $dotfiles_last_successful")
+    else
+      timeout_lines+=('Dotfiles: freshness check failed; no successful result is available')
+    fi
+  fi
+  if freshness_source_failed \
+    "${WORKSTATION_FRESHNESS_AGENT_ATTEMPT_MARKER:-/dev/null}" \
+    "${WORKSTATION_FRESHNESS_AGENT_DONE_MARKER:-/dev/null}" \
+    "${WORKSTATION_FRESHNESS_AGENT_STATUS_MARKER:-/dev/null}"; then
+    if [[ -n "$agent_last_successful" ]]; then
+      timeout_lines+=("Agent tools: freshness check failed; using result from $agent_last_successful")
+    else
+      timeout_lines+=('Agent tools: freshness check failed; no successful result is available')
+    fi
+  fi
+  if (( ${#timeout_lines[@]} == 0 )); then
+    timeout_lines+=('Workstation freshness check timed out')
+  fi
+
+  printf 'Workstation maintenance available:\n'
+  printf '%s\n' "${timeout_lines[@]}"
+  printf 'Run: workstation-update\n'
+}
+
+run_freshness_supervisor() {
+  local agent_tools="$HOME/.local/bin/update-agent-tools"
+  local cached_remote_commit
+  local dotfiles_last_successful
+  local freshness_deadline="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}"
+  local freshness_workspace
+  local worker_output
+  local worker_timeout
+  local worker_status=0
+
+  [[ "$freshness_deadline" =~ ^[1-9][0-9]*$ ]] || freshness_deadline=15
+  mkdir -p "$STATE_DIR" || { render_freshness_timeout; return 0; }
+  freshness_workspace="$(mktemp -d "$STATE_DIR/freshness-run.XXXXXX")" \
+    || { render_freshness_timeout; return 0; }
+  worker_output="$freshness_workspace/output"
+  export WORKSTATION_FRESHNESS_DOTFILES_ATTEMPT_MARKER="$freshness_workspace/dotfiles-attempted"
+  export WORKSTATION_FRESHNESS_DOTFILES_DONE_MARKER="$freshness_workspace/dotfiles-done"
+  export WORKSTATION_FRESHNESS_DOTFILES_STATUS_MARKER="$freshness_workspace/dotfiles-status"
+  export WORKSTATION_FRESHNESS_DOTFILES_CACHED_SUMMARY="$freshness_workspace/dotfiles-cached-summary"
+  export WORKSTATION_FRESHNESS_AGENT_ATTEMPT_MARKER="$freshness_workspace/agent-attempted"
+  export WORKSTATION_FRESHNESS_AGENT_DONE_MARKER="$freshness_workspace/agent-done"
+  export WORKSTATION_FRESHNESS_AGENT_STATUS_MARKER="$freshness_workspace/agent-status"
+  worker_timeout="$((freshness_deadline - 1)).650000000"
+
+  timeout --signal=KILL "$worker_timeout" \
+    bash "$0" --freshness-worker >"$worker_output" 2>/dev/null \
+    || worker_status=$?
+  if (( worker_status == 0 )); then
+    sed -n '1,$p' "$worker_output"
+    rm -rf "$freshness_workspace"
+    return 0
+  fi
+
+  freshness_now_epoch="$(date -u -d "${WORKSTATION_UPDATE_NOW:-now}" +%s 2>/dev/null || true)"
+  freshness_now_iso="$(date -u -d "@${freshness_now_epoch:-0}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  if freshness_source_failed \
+    "$WORKSTATION_FRESHNESS_DOTFILES_ATTEMPT_MARKER" \
+    "$WORKSTATION_FRESHNESS_DOTFILES_DONE_MARKER" \
+    "$WORKSTATION_FRESHNESS_DOTFILES_STATUS_MARKER" \
+    && [[ -n "$freshness_now_iso" ]]; then
+    cached_remote_commit="$(freshness_state_value cached_remote_commit)"
+    dotfiles_last_successful="$(freshness_state_value last_successful_check)"
+    write_dotfiles_freshness_state failed \
+      "$cached_remote_commit" "$dotfiles_last_successful" || true
+  fi
+  if freshness_source_failed \
+    "$WORKSTATION_FRESHNESS_AGENT_ATTEMPT_MARKER" \
+    "$WORKSTATION_FRESHNESS_AGENT_DONE_MARKER" \
+    "$WORKSTATION_FRESHNESS_AGENT_STATUS_MARKER" \
+    && [[ -x "$agent_tools" ]]; then
+    timeout --signal=KILL 0.250000000 \
+      "$agent_tools" --record-freshness-failure >/dev/null 2>&1 || true
+  fi
+  render_freshness_timeout
+  rm -rf "$freshness_workspace"
+}
+
+run_bounded_freshness() {
+  local bounded_output=''
+  local freshness_deadline="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}"
+  local outer_status=0
+
+  [[ "$freshness_deadline" =~ ^[1-9][0-9]*$ ]] || freshness_deadline=15
+  bounded_output="$(
+    timeout --signal=KILL "${freshness_deadline}s" \
+      bash "$0" --freshness-supervisor 2>/dev/null
+  )" || outer_status=$?
+  if (( outer_status == 0 )); then
+    [[ -z "$bounded_output" ]] || printf '%s\n' "$bounded_output"
+  else
+    printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Workstation freshness check timed out' \
+      'Run: workstation-update'
+  fi
+}
+
+if [[ "${1:-}" == '--freshness-worker' ]]; then
+  run_freshness
+  exit 0
+fi
+
+if [[ "${1:-}" == '--freshness-supervisor' ]]; then
+  run_freshness_supervisor
+  exit 0
+fi
+
 if [[ "${1:-}" == '--freshness' ]]; then
   if (( $# != 1 )); then
     exit 0
   fi
-  run_freshness
+  run_bounded_freshness
   exit 0
 fi
 
