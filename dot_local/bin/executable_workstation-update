@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() {
+  printf 'workstation-update: %s\n' "$*" >&2
+  exit 1
+}
+
+readonly CANONICAL_ORIGIN='git@github.com:faviann/dotfiles.git'
+readonly REQUIRED_BRANCH='main'
+readonly REQUIRED_UPSTREAM='origin/main'
+readonly STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+readonly STATE_DIR="$STATE_HOME/workstation-update"
+readonly APPLIED_COMMIT_FILE="$STATE_DIR/applied-commit"
+
+git_in_progress() {
+  local git_path
+  local marker
+
+  for marker in \
+    MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG BISECT_START \
+    rebase-apply rebase-merge sequencer; do
+    git_path="$(git -C "$source_repository" rev-parse \
+      --path-format=absolute --git-path "$marker")" \
+      || return 0
+    [[ ! -e "$git_path" ]] || return 0
+  done
+  return 1
+}
+
+record_applied_commit() {
+  local temporary_marker
+
+  mkdir -p "$STATE_DIR" || fail 'marker phase failed: state directory'
+  temporary_marker="$(mktemp "$STATE_DIR/applied-commit.tmp.XXXXXX")" \
+    || fail 'marker phase failed: temporary marker'
+  trap 'rm -f "${temporary_marker:-}"' EXIT
+  chmod 600 "$temporary_marker" \
+    || fail 'marker phase failed: marker permissions'
+  printf '%s\n' "$head_commit" >"$temporary_marker" \
+    || fail 'marker phase failed: marker write'
+  mv -f "$temporary_marker" "$APPLIED_COMMIT_FILE" \
+    || fail 'marker phase failed: marker replacement'
+  temporary_marker=''
+  trap - EXIT
+}
+
+[[ -e "$HOME/.local/state/workstation-setup/complete" ]] \
+  || fail 'setup is incomplete'
+
+command -v chezmoi >/dev/null 2>&1 || fail 'source discovery failed: chezmoi missing'
+source_path="$(chezmoi source-path)" \
+  || fail 'source discovery failed: chezmoi source path unavailable'
+[[ -n "$source_path" && "$source_path" != *$'\n'* ]] \
+  || fail 'source discovery failed: unexpected chezmoi source path'
+source_repository="$(git -C "$source_path" rev-parse --show-toplevel 2>/dev/null)" \
+  || fail 'source validation failed: source is not a Git repository'
+
+origin_url="$(git -C "$source_repository" config --get remote.origin.url || true)"
+[[ "$origin_url" == "$CANONICAL_ORIGIN" ]] \
+  || fail "source validation failed: origin must be $CANONICAL_ORIGIN"
+
+branch="$(git -C "$source_repository" symbolic-ref --quiet --short HEAD || true)"
+[[ -n "$branch" ]] || fail 'source validation failed: detached HEAD'
+[[ "$branch" == "$REQUIRED_BRANCH" ]] \
+  || fail "source validation failed: branch must be $REQUIRED_BRANCH"
+
+upstream="$(git -C "$source_repository" \
+  rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+[[ "$upstream" == "$REQUIRED_UPSTREAM" ]] \
+  || fail "source validation failed: upstream must be $REQUIRED_UPSTREAM"
+
+git_in_progress \
+  && fail 'source validation failed: unfinished Git operation'
+source_status="$(git -C "$source_repository" status \
+  --porcelain=v1 --untracked-files=all --ignored --ignore-submodules=none)" \
+  || fail 'source validation failed: cannot inspect source repository'
+[[ -z "$source_status" ]] \
+  || fail 'source validation failed: source repository has local content'
+
+git -C "$source_repository" fetch --prune origin \
+  '+refs/heads/main:refs/remotes/origin/main' \
+  || fail 'fetch phase failed: origin/main unavailable'
+
+read -r ahead_count behind_count < <(
+  git -C "$source_repository" rev-list --left-right --count \
+    HEAD...origin/main
+) || fail 'history phase failed: cannot compare HEAD with origin/main'
+
+if (( ahead_count > 0 && behind_count > 0 )); then
+  fail "history phase failed: main has diverged from origin/main ($ahead_count ahead, $behind_count behind)"
+fi
+if (( ahead_count > 0 )); then
+  fail "history phase failed: main is ahead of origin/main by $ahead_count commit(s)"
+fi
+if (( behind_count > 0 )); then
+  git -C "$source_repository" merge --ff-only --quiet origin/main \
+    || fail 'history phase failed: fast-forward failed'
+fi
+
+git_in_progress \
+  && fail 'source validation failed: unfinished Git operation after fetch'
+source_status="$(git -C "$source_repository" status \
+  --porcelain=v1 --untracked-files=all --ignored --ignore-submodules=none)" \
+  || fail 'source validation failed: cannot inspect source after fetch'
+[[ -z "$source_status" ]] \
+  || fail 'source validation failed: source gained local content during update'
+
+head_commit="$(git -C "$source_repository" rev-parse HEAD)" \
+  || fail 'history phase failed: cannot read HEAD'
+
+apply_required=0
+if [[ ! -e "$APPLIED_COMMIT_FILE" ]]; then
+  if chezmoi verify; then
+    record_applied_commit
+    exit 0
+  fi
+  apply_required=1
+else
+  applied_commit=''
+  if [[ -f "$APPLIED_COMMIT_FILE" ]]; then
+    applied_commit="$(<"$APPLIED_COMMIT_FILE")" || true
+  fi
+  if [[ "$applied_commit" != "$head_commit" ]]; then
+    apply_required=1
+  elif ! chezmoi verify \
+    "$HOME/.local/bin/workstation-update" \
+    "$HOME/.local/bin/update-agent-tools"; then
+    apply_required=1
+  fi
+fi
+
+if (( apply_required == 0 )); then
+  exit 0
+fi
+
+chezmoi apply --dry-run --verbose \
+  || fail 'dry-run phase failed: chezmoi apply preview'
+chezmoi apply \
+  || fail 'apply phase failed: chezmoi apply'
+chezmoi verify \
+  || fail 'verification phase failed: chezmoi targets'
+record_applied_commit
