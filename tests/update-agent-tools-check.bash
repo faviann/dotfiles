@@ -454,6 +454,52 @@ test_machine_status_reports_discovery_failure_and_preserves_freshness_state() {
   fi
 }
 
+test_machine_status_reports_unresolved_activation_failure_as_maintenance_needed() {
+  local state_dir
+  local state_file
+  local status
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_dir="$test_dir/state/update-agent-tools"
+  state_file="$state_dir/state.json"
+  mkdir -p "$state_dir"
+  printf '%s\n' '{
+    "last_successful_activation":"2026-07-13T00:00:00Z",
+    "activation_failure":{
+      "phase":"activation",
+      "component":"AoE service restart",
+      "failed_at":"2026-07-13T01:00:00Z"
+    }
+  }' >"$state_file"
+
+  if run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --check-status; then
+    fail "machine status accepted an unresolved activation failure as current"
+  else
+    status=$?
+  fi
+
+  [[ "$status" -eq "$CHECK_STATUS_UPDATES_AVAILABLE" ]] \
+    || fail "activation-failed machine status exited $status instead of $CHECK_STATUS_UPDATES_AVAILABLE"
+  [[ ! -s "$test_dir/stdout" && ! -s "$test_dir/stderr" ]] \
+    || fail "activation-failed machine status wrote output"
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
+    || fail "activation-failed machine status did not perform fresh discovery"
+  jq -e '
+    .last_successful_check == "2026-07-14T00:00:00Z"
+    and .cached_version_result == ""
+    and .check_status == "success"
+    and .activation_failure.phase == "activation"
+    and .activation_failure.component == "AoE service restart"
+  ' "$state_file" >/dev/null \
+    || fail "activation-failed machine status did not preserve recovery state"
+  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "activation-failed machine status mutated or inspected ACP workers"
+  fi
+}
+
 test_conditional_update_leaves_current_toolchain_and_acp_workers_alone() {
   local state_file
   local test_dir
@@ -1831,6 +1877,7 @@ test_nested_codex_ignores_compatible_prereleases() {
 test_machine_status_reports_current_by_exit_status_without_output
 test_machine_status_reports_outdated_by_exit_status_without_output
 test_machine_status_reports_discovery_failure_and_preserves_freshness_state
+test_machine_status_reports_unresolved_activation_failure_as_maintenance_needed
 test_conditional_update_leaves_current_toolchain_and_acp_workers_alone
 test_conditional_update_stops_before_mutation_when_discovery_fails
 test_conditional_update_refreshes_the_whole_toolchain_when_outdated
