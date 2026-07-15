@@ -2,11 +2,24 @@
 README.md
 BOOTSTRAP.md
 AGENTS.md
+CLAUDE.md
+CONTRIBUTING.md
 CONTEXT.md
 CONTEXT-MAP.md
 docs/
 docs/**
 
+# Repository-only tests
+tests/
+tests/**
+
+# Repository-only Home Manager source
+flake.nix
+flake.lock
+home/
+home/**
+
 {{- if .is_lxc }}
-dot_config/fish
+.config/fish/
+.config/fish/**
 {{- end }}
