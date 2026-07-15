@@ -155,8 +155,9 @@ recorded.
 
 Interactive SSH login only checks freshness: it never installs. Successful
 checks are due every 24 hours, failed checks retry after one hour, current state
-is silent, and notices show names and versions rather than release notes. There
-is no background scheduling or per-component update command.
+is silent, and notices show names and versions plus the `update-agent-tools`
+command rather than release notes. There is no background scheduling or
+per-component update command.
 
 Failed updates do not roll back automatically. Use the reported phase and
 component, inspect `systemctl --user status aoe-serve.service` and
