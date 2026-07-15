@@ -4,6 +4,20 @@ Personal dotfiles managed with [chezmoi](https://chezmoi.io) + Bitwarden CLI.
 
 See `BOOTSTRAP.md` for new machine setup.
 
+## Repository validation
+
+Run the focused shell analysis after changing Bash or shell templates:
+
+```bash
+nix run .#shellcheck
+```
+
+Before closeout, run the complete flake validation:
+
+```bash
+nix flake check
+```
+
 ## Workstation Home Manager
 
 The `workstation` Home Manager flake installs user tooling for the Debian LXC

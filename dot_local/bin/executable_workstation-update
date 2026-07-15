@@ -49,7 +49,7 @@ abort_ref_transaction() {
 
   (( ref_transaction_active == 1 )) || return 0
   if [[ -n "${ref_transaction_input_fd:-}" ]]; then
-    printf 'abort\n' >&"$ref_transaction_input_fd" 2>/dev/null || true
+    { printf 'abort\n' >&"$ref_transaction_input_fd" || true; } 2>/dev/null
     exec {ref_transaction_input_fd}>&- 2>/dev/null || true
   fi
   if [[ -n "${ref_transaction_output_fd:-}" ]]; then
@@ -70,6 +70,8 @@ prepare_guarded_main_update() {
   }
   ref_transaction_output_fd="${REF_TRANSACTION[0]}"
   ref_transaction_input_fd="${REF_TRANSACTION[1]}"
+  # Bash creates this PID variable dynamically from the coprocess name.
+  # shellcheck disable=SC2153
   ref_transaction_pid="$REF_TRANSACTION_PID"
   ref_transaction_active=1
   trap abort_ref_transaction EXIT

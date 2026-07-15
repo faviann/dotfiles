@@ -11,3 +11,8 @@ The canonical triage-label vocabulary is used without overrides. See `docs/agent
 ### Domain docs
 
 This repository uses a single-context layout. See `docs/agents/domain.md`.
+
+### Validation
+
+For Bash or shell-template work, run `nix run .#shellcheck`. Before closeout,
+run the full `nix flake check`.

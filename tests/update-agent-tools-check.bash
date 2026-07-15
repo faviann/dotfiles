@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPO_ROOT
 readonly COMMAND="$REPO_ROOT/dot_local/bin/executable_update-agent-tools"
 readonly CHECK_STATUS_UPDATES_AVAILABLE=10
 

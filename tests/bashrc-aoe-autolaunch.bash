@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPO_ROOT
 readonly BASHRC_PATH="$REPO_ROOT/dot_bashrc.tmpl"
 
 fail() {
@@ -67,6 +68,8 @@ run_shell() {
   )
 
   if [[ "$interactive_with_tty" == "1" ]]; then
+    # The child shell expands BASHRC_PATH from shell_environment.
+    # shellcheck disable=SC2016
     printf -v command_line '%q ' \
       /usr/bin/bash --noprofile --norc -i -c 'source "$BASHRC_PATH"'
     env "${shell_environment[@]}" \
@@ -75,6 +78,8 @@ run_shell() {
     tr -d '\r' <"$stdout_file" >"$stdout_file.normalized"
     mv "$stdout_file.normalized" "$stdout_file"
   else
+    # The child shell expands BASHRC_PATH from shell_environment.
+    # shellcheck disable=SC2016
     env "${shell_environment[@]}" \
       /usr/bin/bash --noprofile --norc -c 'source "$BASHRC_PATH"' \
         >"$stdout_file" 2>"$stderr_file"

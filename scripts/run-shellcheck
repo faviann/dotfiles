@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+shell_inputs=(
+  "$REPO_ROOT/dot_local/bin/executable_update-agent-tools"
+  "$REPO_ROOT/dot_local/bin/executable_workstation-update"
+  "$REPO_ROOT/dot_bashrc.tmpl"
+  "$REPO_ROOT"/tests/*.bash
+  "$REPO_ROOT/scripts/run-shellcheck"
+)
+template_inputs=("$REPO_ROOT"/.chezmoiscripts/*.sh.tmpl)
+
+render_dir="$(mktemp -d)"
+trap 'rm -rf "$render_dir"' EXIT
+
+rendered_inputs=()
+for is_lxc in true false; do
+  variant_dir="$render_dir/is_lxc-$is_lxc"
+  mkdir -p "$variant_dir/destination"
+
+  for template in "${template_inputs[@]}"; do
+    rendered="$variant_dir/$(basename "${template%.tmpl}")"
+    chezmoi \
+      --source "$REPO_ROOT" \
+      --destination "$variant_dir/destination" \
+      --config /dev/null \
+      --config-format toml \
+      --persistent-state "$variant_dir/chezmoistate.boltdb" \
+      --override-data "{\"is_lxc\":$is_lxc}" \
+      execute-template --file "$template" >"$rendered"
+    rendered_inputs+=("$rendered")
+  done
+done
+
+shellcheck --shell=bash "${shell_inputs[@]}" "${rendered_inputs[@]}"
