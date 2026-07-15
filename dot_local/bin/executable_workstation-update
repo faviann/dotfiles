@@ -19,6 +19,7 @@ git_in_progress() {
 
   for marker in \
     MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG BISECT_START \
+    NOTES_MERGE_PARTIAL NOTES_MERGE_REF NOTES_MERGE_WORKTREE \
     rebase-apply rebase-merge sequencer; do
     git_path="$(git -C "$source_repository" rev-parse \
       --path-format=absolute --git-path "$marker")" \
@@ -36,6 +37,75 @@ reject_hidden_index_entries() {
   if grep -Eq '^[a-zS] ' <<<"$index_entries"; then
     fail 'source validation failed: non-default index flags hide tracked content'
   fi
+}
+
+ref_transaction_active=0
+ref_transaction_input_fd=''
+ref_transaction_output_fd=''
+ref_transaction_pid=''
+
+abort_ref_transaction() {
+  local response
+
+  (( ref_transaction_active == 1 )) || return 0
+  if [[ -n "${ref_transaction_input_fd:-}" ]]; then
+    printf 'abort\n' >&"$ref_transaction_input_fd" 2>/dev/null || true
+    exec {ref_transaction_input_fd}>&- 2>/dev/null || true
+  fi
+  if [[ -n "${ref_transaction_output_fd:-}" ]]; then
+    IFS= read -r response <&"$ref_transaction_output_fd" 2>/dev/null || true
+    exec {ref_transaction_output_fd}<&- 2>/dev/null || true
+  fi
+  if [[ -n "${ref_transaction_pid:-}" ]]; then
+    wait "$ref_transaction_pid" 2>/dev/null || true
+  fi
+  ref_transaction_active=0
+}
+
+prepare_guarded_main_update() {
+  local response
+
+  coproc REF_TRANSACTION {
+    git -C "$source_repository" update-ref --stdin
+  }
+  ref_transaction_output_fd="${REF_TRANSACTION[0]}"
+  ref_transaction_input_fd="${REF_TRANSACTION[1]}"
+  ref_transaction_pid="$REF_TRANSACTION_PID"
+  ref_transaction_active=1
+  trap abort_ref_transaction EXIT
+
+  printf 'start\nupdate refs/heads/main %s %s\nprepare\n' \
+    "$new_head" "$old_head" >&"$ref_transaction_input_fd" \
+    || fail 'history phase failed: cannot start guarded main update'
+  IFS= read -r response <&"$ref_transaction_output_fd" \
+    || fail 'history phase failed: cannot prepare guarded main update'
+  [[ "$response" == 'start: ok' ]] \
+    || fail 'history phase failed: cannot start guarded main update'
+  IFS= read -r response <&"$ref_transaction_output_fd" \
+    || fail 'history phase failed: cannot prepare guarded main update'
+  [[ "$response" == 'prepare: ok' ]] \
+    || fail 'history phase failed: cannot prepare guarded main update'
+}
+
+commit_guarded_main_update() {
+  local response
+  local transaction_status=0
+
+  printf 'commit\n' >&"$ref_transaction_input_fd" \
+    || fail 'history phase failed: cannot commit guarded main update'
+  IFS= read -r response <&"$ref_transaction_output_fd" \
+    || fail 'history phase failed: cannot commit guarded main update'
+  [[ "$response" == 'commit: ok' ]] \
+    || fail 'history phase failed: cannot commit guarded main update'
+
+  exec {ref_transaction_input_fd}>&-
+  exec {ref_transaction_output_fd}<&-
+  wait "$ref_transaction_pid" || transaction_status=$?
+  ref_transaction_active=0
+  ref_transaction_pid=''
+  trap - EXIT
+  (( transaction_status == 0 )) \
+    || fail 'history phase failed: guarded main transaction failed'
 }
 
 record_applied_commit() {
@@ -136,6 +206,14 @@ if (( behind_count > 0 )); then
     || fail 'history phase failed: cannot read the current tree'
   new_tree="$(git -C "$source_repository" rev-parse "$new_head^{tree}")" \
     || fail 'history phase failed: cannot read the upstream tree'
+  prepare_guarded_main_update
+  prepared_tree="$(git -C "$source_repository" write-tree)" \
+    || fail 'history phase failed: cannot verify the prepared index'
+  [[ "$prepared_tree" == "$old_tree" ]] \
+    || fail 'history phase failed: paths changed before ref preparation'
+  git -C "$source_repository" diff-files \
+    --quiet --ignore-submodules=none -- \
+    || fail 'history phase failed: worktree changed before ref preparation'
   git -C "$source_repository" read-tree -u -m "$old_tree" "$new_tree" \
     || fail 'history phase failed: cannot write the upstream tree'
   written_tree="$(git -C "$source_repository" write-tree)" \
@@ -146,9 +224,7 @@ if (( behind_count > 0 )); then
     --quiet --ignore-submodules=none -- \
     || fail 'history phase failed: updated worktree does not match the index'
   reject_hidden_index_entries
-  git -C "$source_repository" update-ref \
-    refs/heads/main "$new_head" "$old_head" \
-    || fail 'history phase failed: guarded main update failed'
+  commit_guarded_main_update
 fi
 
 git_in_progress \

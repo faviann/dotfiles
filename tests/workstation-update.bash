@@ -303,10 +303,13 @@ test_all_source_extras_and_unfinished_operations_are_preserved() {
   local after_index_flags
   local hidden_content
   local before_remote_tip
+  local notes_partial
+  local notes_ref
+  local notes_worktree
 
   for scenario in \
     staged modified deleted untracked ignored assume-unchanged \
-    skip-worktree unfinished; do
+    skip-worktree unfinished-notes unfinished; do
     test_dir="$(mktemp -d)"
     make_fixture "$test_dir"
 
@@ -346,6 +349,20 @@ test_all_source_extras_and_unfinished_operations_are_preserved() {
           git -C "$test_dir/discovered/source" update-index \
             --skip-worktree dot_managed
         ;;
+      unfinished-notes)
+        notes_partial="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+          git -C "$test_dir/discovered/source" rev-parse \
+            --path-format=absolute --git-path NOTES_MERGE_PARTIAL)"
+        notes_ref="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+          git -C "$test_dir/discovered/source" rev-parse \
+            --path-format=absolute --git-path NOTES_MERGE_REF)"
+        notes_worktree="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+          git -C "$test_dir/discovered/source" rev-parse \
+            --path-format=absolute --git-path NOTES_MERGE_WORKTREE)"
+        printf 'partial notes merge\n' >"$notes_partial"
+        printf 'refs/notes/commits\n' >"$notes_ref"
+        mkdir "$notes_worktree"
+        ;;
       unfinished)
         mkdir "$test_dir/discovered/source/.git/rebase-merge"
         ;;
@@ -365,7 +382,8 @@ test_all_source_extras_and_unfinished_operations_are_preserved() {
       || "$scenario" == skip-worktree ]]; then
       hidden_content="$(<"$test_dir/discovered/source/dot_managed")"
       assert_update_fails_with "$test_dir" 'non-default index flags'
-    elif [[ "$scenario" == unfinished ]]; then
+    elif [[ "$scenario" == unfinished \
+      || "$scenario" == unfinished-notes ]]; then
       assert_update_fails_with "$test_dir" 'unfinished Git operation'
     else
       assert_update_fails_with "$test_dir" \
@@ -395,6 +413,10 @@ test_all_source_extras_and_unfinished_operations_are_preserved() {
     if [[ "$scenario" == unfinished ]]; then
       [[ -d "$test_dir/discovered/source/.git/rebase-merge" ]] \
         || fail 'unfinished operation metadata was discarded'
+    elif [[ "$scenario" == unfinished-notes ]]; then
+      [[ -f "$notes_partial" && -f "$notes_ref" \
+        && -d "$notes_worktree" ]] \
+        || fail 'unfinished notes-merge metadata was discarded'
     fi
     rm -rf "$test_dir"
   done
@@ -476,6 +498,72 @@ HOOK
       'chezmoi verify') \
     "$test_dir/home/command-log" \
     || fail 'required apply did not run dry-run, apply, verify in order'
+}
+
+test_failed_ref_transaction_is_safe_to_retry() {
+  local test_dir
+  local old_commit
+  local new_commit
+  local old_index_tree
+  local old_source_content
+  local old_marker
+  local marker
+  local ref_path
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  old_commit="$(source_commit "$test_dir")"
+  old_index_tree="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" write-tree)"
+  old_source_content="$(<"$test_dir/discovered/source/dot_managed")"
+  marker="$test_dir/home/state/workstation-update/applied-commit"
+  old_marker="$(<"$marker")"
+  publish_managed_version "$test_dir" v2
+  new_commit="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/seed" rev-parse HEAD)"
+  ref_path="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" rev-parse \
+      --path-format=absolute --git-path refs/heads/main)"
+  : >"$ref_path.lock"
+  rm -f "$test_dir/home/command-log"
+
+  assert_update_fails_with "$test_dir" \
+    'history phase failed: cannot prepare guarded main update'
+
+  [[ "$(source_commit "$test_dir")" == "$old_commit" ]] \
+    || fail 'failed ref preparation changed HEAD'
+  [[ "$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" write-tree)" \
+    == "$old_index_tree" ]] \
+    || fail 'failed ref preparation changed the index'
+  [[ "$(<"$test_dir/discovered/source/dot_managed")" \
+    == "$old_source_content" ]] \
+    || fail 'failed ref preparation changed source content'
+  [[ -z "$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" status \
+      --porcelain=v1 --untracked-files=all --ignored)" ]] \
+    || fail 'failed ref preparation changed the worktree'
+  [[ "$(<"$marker")" == "$old_marker" ]] \
+    || fail 'failed ref preparation changed the applied marker'
+  if [[ -e "$test_dir/home/command-log" ]]; then
+    ! grep -Fq ' apply' "$test_dir/home/command-log" \
+      || fail 'failed ref preparation reached chezmoi apply'
+  fi
+
+  rm "$ref_path.lock"
+  rm -f "$test_dir/home/command-log"
+  run_update "$test_dir" \
+    || fail "safe ref retry failed: $(<"$test_dir/home/stderr")"
+
+  [[ "$(source_commit "$test_dir")" == "$new_commit" ]] \
+    || fail 'safe ref retry did not fast-forward main'
+  [[ "$(<"$test_dir/home/.managed")" == 'managed v2' ]] \
+    || fail 'safe ref retry did not apply the new target state'
+  [[ "$(<"$marker")" == "$new_commit" ]] \
+    || fail 'safe ref retry did not record verified success'
 }
 
 test_missing_maintenance_executable_enters_the_apply_path() {
@@ -663,6 +751,7 @@ test_repository_structure_is_validated_before_fetch
 test_all_source_extras_and_unfinished_operations_are_preserved
 test_fetch_and_unsafe_history_fail_diagnostically
 test_behind_history_fast_forwards_then_applies_in_order
+test_failed_ref_transaction_is_safe_to_retry
 test_missing_maintenance_executable_enters_the_apply_path
 test_drifted_maintenance_executable_enters_the_apply_path
 test_matching_marker_does_not_reconcile_unrelated_target_drift
