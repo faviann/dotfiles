@@ -369,6 +369,7 @@ print_check_failure() {
 }
 
 fresh_check_result=""
+fresh_check_failure_component=""
 run_fresh_check() {
   local output_file
   local error_file
@@ -388,6 +389,9 @@ run_fresh_check() {
     return 0
   fi
 
+  fresh_check_failure_component="$(sed -n \
+    's/^update-agent-tools-check-component: //p' \
+    "$error_file" | tail -n 1)"
   rm -f "$output_file" "$error_file"
   last_successful_check="$(state_value last_successful_check)"
   cached_result="$(state_value cached_version_result)"
@@ -490,7 +494,9 @@ if [[ "$update_if_needed" == true ]]; then
     exit 0
   else
     status=$?
-    [[ "$status" -eq "$CHECK_STATUS_UPDATES_AVAILABLE" ]] || exit 1
+    if [[ "$status" -ne "$CHECK_STATUS_UPDATES_AVAILABLE" ]]; then
+      fail "discovery phase failed: ${fresh_check_failure_component:-agent-tool version discovery}; correct the problem, then rerun workstation-update"
+    fi
   fi
 fi
 
@@ -515,6 +521,9 @@ else
 fi
 if (( captured_worker_count > 0 )) && [[ "$assume_yes" == false ]]; then
   if [[ ! -t 0 ]]; then
+    if [[ "$update_if_needed" == true ]]; then
+      fail "$captured_worker_count running ACP $captured_worker_noun would be disrupted; rerun workstation-update --yes to authorize replacement"
+    fi
     fail "$captured_worker_count running ACP $captured_worker_noun would be disrupted; rerun with --yes to authorize replacement"
   fi
   printf 'update-agent-tools: %s running ACP %s would be disrupted. Continue? [y/N] ' \

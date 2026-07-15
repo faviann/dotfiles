@@ -35,8 +35,13 @@ if [[ -n "${TEST_AGENT_GATE:-}" ]]; then
 fi
 
 if [[ "${TEST_AGENT_CHECK_FAIL:-0}" == 1 ]]; then
-  printf 'injected agent-tool discovery failure\n' >&2
+  printf 'update-agent-tools: discovery phase failed: AoE; correct the problem, then rerun workstation-update\n' >&2
   exit 31
+fi
+
+if [[ "${TEST_AGENT_ACP_RUNNING:-0}" == 1 && "$*" != *'--yes'* ]]; then
+  printf 'update-agent-tools: 1 running ACP session would be disrupted; rerun workstation-update --yes to authorize replacement\n' >&2
+  exit 33
 fi
 
 if [[ "${TEST_AGENT_OUTDATED:-0}" == 1 ]]; then
@@ -156,6 +161,7 @@ run_update() {
     AGENT_TOOLS_LOG="$test_dir/home/agent-tools-log" \
     PHASE_LOG="$test_dir/home/phase-log" \
     TEST_AGENT_CHECK_FAIL="${TEST_AGENT_CHECK_FAIL:-0}" \
+    TEST_AGENT_ACP_RUNNING="${TEST_AGENT_ACP_RUNNING:-0}" \
     TEST_AGENT_OUTDATED="${TEST_AGENT_OUTDATED:-0}" \
     TEST_AGENT_UPDATE_FAIL="${TEST_AGENT_UPDATE_FAIL:-0}" \
     TEST_AGENT_GATE="${TEST_AGENT_GATE:-}" \
@@ -318,6 +324,38 @@ test_yes_forwards_only_agent_disruption_consent() {
     || fail '--yes was forwarded to chezmoi'
 }
 
+test_agent_consent_refusal_names_only_the_unified_retry() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  rm -f "$test_dir/home/command-log"
+
+  if TEST_AGENT_OUTDATED=1 TEST_AGENT_ACP_RUNNING=1 \
+    run_update "$test_dir"; then
+    fail 'agent consent refusal exited zero'
+  fi
+
+  grep -Fq 'rerun workstation-update --yes to authorize replacement' \
+    "$test_dir/home/stderr" \
+    || fail 'agent consent refusal did not name the unified --yes retry'
+  ! grep -Fq 'rerun with --yes' "$test_dir/home/stderr" \
+    || fail 'agent consent refusal named the subordinate retry'
+  ! grep -Fq 'update-agent-tools --yes' "$test_dir/home/stderr" \
+    || fail 'agent consent refusal exposed the subordinate command'
+  [[ ! -e "$test_dir/home/agent-tools-updated" ]] \
+    || fail 'agent consent refusal mutated the toolchain'
+
+  TEST_AGENT_OUTDATED=1 TEST_AGENT_ACP_RUNNING=1 \
+    run_update "$test_dir" --yes \
+    || fail "unified --yes retry failed: $(<"$test_dir/home/stderr")"
+  [[ -e "$test_dir/home/agent-tools-updated" ]] \
+    || fail 'unified --yes retry did not update the toolchain'
+}
+
 test_agent_discovery_failure_preserves_applied_dotfiles_for_retry() {
   local expected_commit
   local marker
@@ -349,6 +387,8 @@ test_agent_discovery_failure_preserves_applied_dotfiles_for_retry() {
   grep -Fq 'agent-tools phase failed: update-agent-tools' \
     "$test_dir/home/stderr" \
     || fail 'agent discovery failure did not identify the pipeline phase'
+  grep -Fq 'discovery phase failed: AoE' "$test_dir/home/stderr" \
+    || fail 'agent discovery failure did not identify its component'
   grep -Fq 'rerun workstation-update' "$test_dir/home/stderr" \
     || fail 'agent discovery failure did not recommend the unified retry'
 }
@@ -492,12 +532,22 @@ test_unsupported_arguments_fail_before_maintenance() {
     fail 'unsupported argument was accepted'
   fi
 
-  grep -Fq 'argument phase failed: unsupported argument: --force' \
+  grep -Fq \
+    'argument phase failed: expected no arguments or --yes; unsupported argument: --force' \
     "$test_dir/home/stderr" \
     || fail 'unsupported argument did not fail clearly'
   [[ ! -e "$test_dir/home/command-log" \
     && ! -e "$test_dir/home/agent-tools-log" ]] \
     || fail 'unsupported argument reached dotfiles or agent maintenance'
+
+  if run_update "$test_dir" --yes --force; then
+    fail 'unsupported multi-argument shape was accepted'
+  fi
+
+  grep -Fq \
+    'argument phase failed: expected no arguments or --yes; unsupported argument: --force' \
+    "$test_dir/home/stderr" \
+    || fail 'multi-argument failure did not identify the offending argument'
 }
 
 test_dotfiles_failure_prevents_agent_tool_checks() {
@@ -1047,6 +1097,7 @@ test_setup_must_be_complete_before_source_discovery
 test_first_run_adopts_verified_equal_history
 test_current_agent_tools_are_checked_without_mutation
 test_yes_forwards_only_agent_disruption_consent
+test_agent_consent_refusal_names_only_the_unified_retry
 test_agent_discovery_failure_preserves_applied_dotfiles_for_retry
 test_concurrent_update_is_rejected_without_queueing
 test_outdated_agent_tools_use_the_latest_verified_updater

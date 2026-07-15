@@ -18,7 +18,17 @@ assume_yes=0
 if (( $# == 1 )) && [[ "$1" == '--yes' ]]; then
   assume_yes=1
 elif (( $# != 0 )); then
-  fail "argument phase failed: unsupported argument: $1"
+  unsupported_argument=''
+  for argument in "$@"; do
+    if [[ "$argument" != '--yes' ]]; then
+      unsupported_argument="$argument"
+      break
+    fi
+  done
+  if [[ -n "$unsupported_argument" ]]; then
+    fail "argument phase failed: expected no arguments or --yes; unsupported argument: $unsupported_argument"
+  fi
+  fail "argument phase failed: expected no arguments or --yes; received $# arguments"
 fi
 
 mkdir -p "$STATE_DIR" \

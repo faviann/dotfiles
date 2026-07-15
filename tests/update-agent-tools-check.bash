@@ -545,8 +545,11 @@ test_conditional_update_stops_before_mutation_when_discovery_fails() {
 
   [[ ! -s "$test_dir/stdout" ]] \
     || fail "failed conditional update wrote stdout"
-  [[ ! -s "$test_dir/stderr" ]] \
-    || fail "failed conditional update wrote stderr"
+  diff -u \
+    <(printf '%s\n' \
+      'update-agent-tools: discovery phase failed: AoE; correct the problem, then rerun workstation-update') \
+    "$test_dir/stderr" \
+    || fail "failed conditional update did not identify its component and unified recovery command"
   jq -e '
     .last_attempt == "2026-07-14T00:00:00Z"
     and .last_successful_check == null
@@ -621,7 +624,7 @@ test_conditional_update_requires_yes_for_unattended_acp_disruption() {
   fi
 
   diff -u \
-    <(printf 'update-agent-tools: 1 running ACP session would be disrupted; rerun with --yes to authorize replacement\n') \
+    <(printf 'update-agent-tools: 1 running ACP session would be disrupted; rerun workstation-update --yes to authorize replacement\n') \
     "$test_dir/stderr" \
     || fail "unattended conditional refusal was not actionable"
   [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
