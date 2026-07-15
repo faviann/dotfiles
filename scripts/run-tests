@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPO_ROOT
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 2
+}
+
+# Invoked indirectly by the signal trap during a full run.
+# shellcheck disable=SC2329
+handle_interruption() {
+  local child_pid
+
+  trap - HUP INT TERM
+  for child_pid in "${pids[@]}"; do
+    kill -TERM "$child_pid" 2>/dev/null || true
+  done
+  for child_pid in "${pids[@]}"; do
+    wait "$child_pid" 2>/dev/null || true
+  done
+  exit 130
+}
+
+shopt -s nullglob
+suites=("$REPO_ROOT"/tests/*.bash)
+(( ${#suites[@]} > 0 )) || fail 'no test suites found'
+
+declare -a cases=()
+declare -A case_owner=()
+declare -A suite_path_by_name=()
+for suite_path in "${suites[@]}"; do
+  suite_name="$(basename "$suite_path")"
+  suite_path_by_name["$suite_name"]="$suite_path"
+  if ! suite_cases="$(bash "$suite_path" --list)"; then
+    fail "could not list cases for suite: $suite_name"
+  fi
+  while IFS= read -r test_case; do
+    [[ -n "$test_case" ]] || continue
+    if [[ -n "${case_owner[$test_case]:-}" ]]; then
+      fail "ambiguous test case: $test_case"
+    fi
+    case_owner["$test_case"]="$suite_path"
+    cases+=("$test_case")
+  done <<<"$suite_cases"
+done
+
+if (( $# == 1 )) && [[ "$1" == --list ]]; then
+  printf 'Suites:\n'
+  for suite_path in "${suites[@]}"; do
+    basename "$suite_path"
+  done
+  printf 'Cases:\n'
+  printf '%s\n' "${cases[@]}"
+  exit 0
+fi
+
+if (( $# == 2 )) && [[ "$1" == --suite && -n "$2" ]]; then
+  selected_suite="${suite_path_by_name[$2]:-}"
+  [[ -n "$selected_suite" ]] || fail "unknown test suite: $2"
+  exec bash "$selected_suite"
+fi
+
+if (( $# == 2 )) && [[ "$1" == --case && -n "$2" ]]; then
+  selected_suite="${case_owner[$2]:-}"
+  [[ -n "$selected_suite" ]] || fail "unknown test case: $2"
+  exec bash "$selected_suite" --case "$2"
+fi
+
+if (( $# == 0 )); then
+  run_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-tests.XXXXXX")" \
+    || fail 'could not create temporary logging directory'
+  trap 'rm -rf "$run_dir"' EXIT
+  pids=()
+  trap handle_interruption HUP INT TERM
+  overall_start_ms="$(date +%s%3N)"
+  starts_ms=()
+  statuses=()
+  durations_ms=()
+  declare -A suite_index_by_pid=()
+  for suite_index in "${!suites[@]}"; do
+    suite_path="${suites[$suite_index]}"
+    starts_ms[suite_index]="$(date +%s%3N)"
+    bash "$suite_path" >"$run_dir/$suite_index.log" 2>&1 &
+    child_pid="$!"
+    pids+=("$child_pid")
+    suite_index_by_pid["$child_pid"]="$suite_index"
+  done
+
+  aggregate_status=0
+  passed_count=0
+  failed_count=0
+  remaining_count="${#pids[@]}"
+  while (( remaining_count > 0 )); do
+    completed_pid=
+    if wait -n -p completed_pid; then
+      completion_status=0
+    else
+      completion_status=$?
+    fi
+    [[ -n "$completed_pid" ]] \
+      || fail 'could not identify a completed test suite'
+    suite_index="${suite_index_by_pid[$completed_pid]}"
+    if (( completion_status == 0 )); then
+      statuses[suite_index]=0
+      passed_count=$((passed_count + 1))
+    else
+      statuses[suite_index]="$completion_status"
+      aggregate_status=1
+      failed_count=$((failed_count + 1))
+    fi
+    end_ms="$(date +%s%3N)"
+    durations_ms[suite_index]=$((end_ms - starts_ms[suite_index]))
+    remaining_count=$((remaining_count - 1))
+  done
+
+  if (( failed_count > 0 )); then
+    printf 'Failures:\n'
+    for suite_index in "${!suites[@]}"; do
+      (( statuses[suite_index] != 0 )) || continue
+      suite_name="$(basename "${suites[$suite_index]}")"
+      printf '===== %s (status %s) =====\n' \
+        "$suite_name" "${statuses[$suite_index]}"
+      cat "$run_dir/$suite_index.log"
+      printf '===== end %s =====\n' "$suite_name"
+    done
+  fi
+
+  printf 'Results:\n'
+  for suite_index in "${!suites[@]}"; do
+    suite_name="$(basename "${suites[$suite_index]}")"
+    if (( statuses[suite_index] == 0 )); then
+      printf 'PASS %s (%sms)\n' \
+        "$suite_name" "${durations_ms[$suite_index]}"
+    else
+      printf 'FAIL %s (%sms, status %s)\n' \
+        "$suite_name" \
+        "${durations_ms[$suite_index]}" \
+        "${statuses[$suite_index]}"
+    fi
+  done
+  overall_end_ms="$(date +%s%3N)"
+  overall_duration_ms=$((overall_end_ms - overall_start_ms))
+  if (( aggregate_status == 0 )); then
+    printf 'Overall: PASS (%s passed, 0 failed, %sms)\n' \
+      "$passed_count" "$overall_duration_ms"
+  else
+    printf 'Overall: FAIL (%s passed, %s failed, %sms)\n' \
+      "$passed_count" "$failed_count" "$overall_duration_ms"
+  fi
+  exit "$aggregate_status"
+fi
+
+fail "Usage: $0 [--list | --suite EXACT_NAME | --case EXACT_NAME]"
