@@ -2,7 +2,8 @@
 set -euo pipefail
 
 fail() {
-  printf 'workstation-update: %s\n' "$*" >&2
+  printf 'workstation-update: %s; correct the problem, then rerun workstation-update\n' \
+    "$*" >&2
   exit 1
 }
 
@@ -12,6 +13,22 @@ readonly REQUIRED_UPSTREAM='origin/main'
 readonly STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 readonly STATE_DIR="$STATE_HOME/workstation-update"
 readonly APPLIED_COMMIT_FILE="$STATE_DIR/applied-commit"
+
+assume_yes=0
+if (( $# == 1 )) && [[ "$1" == '--yes' ]]; then
+  assume_yes=1
+elif (( $# != 0 )); then
+  fail "argument phase failed: unsupported argument: $1"
+fi
+
+mkdir -p "$STATE_DIR" \
+  || fail 'lock phase failed: cannot create workstation-update state directory'
+command -v flock >/dev/null 2>&1 \
+  || fail 'lock phase failed: flock is missing from PATH'
+exec 8>"$STATE_DIR/lock" \
+  || fail 'lock phase failed: cannot open workstation-update lock'
+flock --nonblock 8 \
+  || fail 'lock phase failed: workstation-update is already running'
 
 git_in_progress() {
   local git_path
@@ -128,7 +145,7 @@ record_applied_commit() {
 }
 
 [[ -e "$HOME/.local/state/workstation-setup/complete" ]] \
-  || fail 'setup is incomplete'
+  || fail 'setup phase failed: setup is incomplete'
 
 command -v chezmoi >/dev/null 2>&1 || fail 'source discovery failed: chezmoi missing'
 source_path="$(chezmoi source-path)" \
@@ -247,9 +264,9 @@ apply_required=0
 if [[ ! -e "$APPLIED_COMMIT_FILE" ]]; then
   if chezmoi verify; then
     record_applied_commit
-    exit 0
+  else
+    apply_required=1
   fi
-  apply_required=1
 else
   applied_commit=''
   if [[ -f "$APPLIED_COMMIT_FILE" ]]; then
@@ -264,14 +281,22 @@ else
   fi
 fi
 
-if (( apply_required == 0 )); then
-  exit 0
+if (( apply_required == 1 )); then
+  chezmoi apply --dry-run --verbose \
+    || fail 'dry-run phase failed: chezmoi apply preview'
+  chezmoi apply \
+    || fail 'apply phase failed: chezmoi apply'
+  chezmoi verify \
+    || fail 'verification phase failed: chezmoi targets'
+  record_applied_commit
 fi
 
-chezmoi apply --dry-run --verbose \
-  || fail 'dry-run phase failed: chezmoi apply preview'
-chezmoi apply \
-  || fail 'apply phase failed: chezmoi apply'
-chezmoi verify \
-  || fail 'verification phase failed: chezmoi targets'
-record_applied_commit
+agent_tools="$HOME/.local/bin/update-agent-tools"
+[[ -x "$agent_tools" ]] \
+  || fail 'agent-tools phase failed: managed update-agent-tools is not executable'
+agent_tools_arguments=(--update-if-needed)
+if (( assume_yes == 1 )); then
+  agent_tools_arguments+=(--yes)
+fi
+"$agent_tools" "${agent_tools_arguments[@]}" \
+  || fail 'agent-tools phase failed: update-agent-tools'

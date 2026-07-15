@@ -13,6 +13,44 @@ fail() {
   exit 1
 }
 
+write_agent_tools_fixture() {
+  local path="$1"
+  local version="$2"
+
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nreadonly FIXTURE_VERSION=%q\n' \
+    "$version" >"$path"
+  cat >>"$path" <<'STUB'
+printf 'update-agent-tools %s' "$FIXTURE_VERSION" >>"$AGENT_TOOLS_LOG"
+printf ' %q' "$@" >>"$AGENT_TOOLS_LOG"
+printf '\n' >>"$AGENT_TOOLS_LOG"
+printf 'update-agent-tools %s' "$FIXTURE_VERSION" >>"$PHASE_LOG"
+printf ' %q' "$@" >>"$PHASE_LOG"
+printf '\n' >>"$PHASE_LOG"
+
+if [[ -n "${TEST_AGENT_GATE:-}" ]]; then
+  : >"$TEST_AGENT_GATE.ready"
+  while [[ ! -e "$TEST_AGENT_GATE.release" ]]; do
+    /usr/bin/sleep 0.01
+  done
+fi
+
+if [[ "${TEST_AGENT_CHECK_FAIL:-0}" == 1 ]]; then
+  printf 'injected agent-tool discovery failure\n' >&2
+  exit 31
+fi
+
+if [[ "${TEST_AGENT_OUTDATED:-0}" == 1 ]]; then
+  printf 'agent-tools mutation %s\n' "$FIXTURE_VERSION" >>"$AGENT_TOOLS_LOG"
+  if [[ "${TEST_AGENT_UPDATE_FAIL:-0}" == 1 ]]; then
+    printf 'injected agent-tool update failure\n' >&2
+    exit 32
+  fi
+  : >"$HOME/agent-tools-updated"
+fi
+STUB
+  chmod +x "$path"
+}
+
 make_fixture() {
   local test_dir="$1"
   local home="$test_dir/home"
@@ -35,8 +73,8 @@ make_fixture() {
     git init --quiet --initial-branch=main "$seed"
   mkdir -p "$seed/dot_local/bin"
   printf 'ignored-local\n' >"$seed/.gitignore"
-  printf '#!/usr/bin/env bash\nprintf "agent tools v1\\n"\n' \
-    >"$seed/dot_local/bin/executable_update-agent-tools"
+  write_agent_tools_fixture \
+    "$seed/dot_local/bin/executable_update-agent-tools" v1
   printf '#!/usr/bin/env bash\nprintf "workstation update v1\\n"\n' \
     >"$seed/dot_local/bin/executable_workstation-update"
   printf 'managed v1\n' >"$seed/dot_managed"
@@ -59,6 +97,9 @@ set -euo pipefail
 printf 'chezmoi' >>"$COMMAND_LOG"
 printf ' %q' "$@" >>"$COMMAND_LOG"
 printf '\n' >>"$COMMAND_LOG"
+printf 'chezmoi' >>"$PHASE_LOG"
+printf ' %q' "$@" >>"$PHASE_LOG"
+printf '\n' >>"$PHASE_LOG"
 if [[ "${TEST_FAIL_DRY_RUN:-0}" == 1 \
   && "$*" == 'apply --dry-run --verbose' ]]; then
   printf 'injected dry-run failure\n' >&2
@@ -112,6 +153,12 @@ run_update() {
     TEST_FAIL_DRY_RUN="${TEST_FAIL_DRY_RUN:-0}" \
     TEST_FAIL_APPLY="${TEST_FAIL_APPLY:-0}" \
     TEST_DRIFT_AFTER_APPLY="${TEST_DRIFT_AFTER_APPLY:-0}" \
+    AGENT_TOOLS_LOG="$test_dir/home/agent-tools-log" \
+    PHASE_LOG="$test_dir/home/phase-log" \
+    TEST_AGENT_CHECK_FAIL="${TEST_AGENT_CHECK_FAIL:-0}" \
+    TEST_AGENT_OUTDATED="${TEST_AGENT_OUTDATED:-0}" \
+    TEST_AGENT_UPDATE_FAIL="${TEST_AGENT_UPDATE_FAIL:-0}" \
+    TEST_AGENT_GATE="${TEST_AGENT_GATE:-}" \
     bash "$COMMAND" "$@" </dev/null \
       >"$test_dir/home/stdout" 2>"$test_dir/home/stderr"
 }
@@ -150,8 +197,8 @@ publish_managed_version() {
   local seed="$test_dir/seed"
 
   printf 'managed %s\n' "$version" >"$seed/dot_managed"
-  printf '#!/usr/bin/env bash\nprintf "agent tools %s\\n"\n' "$version" \
-    >"$seed/dot_local/bin/executable_update-agent-tools"
+  write_agent_tools_fixture \
+    "$seed/dot_local/bin/executable_update-agent-tools" "$version"
   printf '#!/usr/bin/env bash\nprintf "workstation update %s\\n"\n' "$version" \
     >"$seed/dot_local/bin/executable_workstation-update"
   GIT_CONFIG_GLOBAL="$test_dir/gitconfig" git -C "$seed" add .
@@ -195,7 +242,7 @@ STUB
       >"$test_dir/home/stdout" 2>"$test_dir/home/stderr" || status=$?
 
   [[ "$status" -ne 0 ]] || fail 'incomplete setup was accepted'
-  grep -Fq 'workstation-update: setup is incomplete' \
+  grep -Fq 'workstation-update: setup phase failed: setup is incomplete' \
     "$test_dir/home/stderr" \
     || fail "missing setup diagnostic: $(<"$test_dir/home/stderr")"
   [[ ! -e "$test_dir/home/command-log" ]] \
@@ -227,6 +274,255 @@ test_first_run_adopts_verified_equal_history() {
     <(printf '%s\n' 'chezmoi source-path' 'chezmoi verify') \
     "$test_dir/home/command-log" \
     || fail 'verified first run invoked apply'
+}
+
+test_current_agent_tools_are_checked_without_mutation() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  rm -f "$test_dir/home/command-log"
+
+  run_update "$test_dir" \
+    || fail "current agent-tool check failed: $(<"$test_dir/home/stderr")"
+
+  diff -u \
+    <(printf '%s\n' 'update-agent-tools v1 --update-if-needed') \
+    "$test_dir/home/agent-tools-log" \
+    || fail 'current agent-tool phase did not use the managed executable'
+  [[ ! -e "$test_dir/home/agent-tools-updated" ]] \
+    || fail 'current agent tools were mutated'
+}
+
+test_yes_forwards_only_agent_disruption_consent() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  rm -f "$test_dir/home/command-log"
+
+  run_update "$test_dir" --yes \
+    || fail "--yes update failed: $(<"$test_dir/home/stderr")"
+
+  diff -u \
+    <(printf '%s\n' 'update-agent-tools v1 --update-if-needed --yes') \
+    "$test_dir/home/agent-tools-log" \
+    || fail '--yes was not forwarded as agent-tool disruption consent'
+  ! grep -F -- '--yes' "$test_dir/home/command-log" >/dev/null \
+    || fail '--yes was forwarded to chezmoi'
+}
+
+test_agent_discovery_failure_preserves_applied_dotfiles_for_retry() {
+  local expected_commit
+  local marker
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  expected_commit="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/seed" rev-parse HEAD)"
+  marker="$test_dir/home/state/workstation-update/applied-commit"
+  rm -f "$test_dir/home/command-log"
+
+  if TEST_AGENT_CHECK_FAIL=1 run_update "$test_dir"; then
+    fail 'agent discovery failure exited zero'
+  fi
+
+  [[ "$(source_commit "$test_dir")" == "$expected_commit" ]] \
+    || fail 'agent discovery failure rolled back dotfiles history'
+  [[ "$(<"$test_dir/home/.managed")" == 'managed v2' ]] \
+    || fail 'agent discovery failure rolled back applied dotfiles'
+  [[ "$(<"$marker")" == "$expected_commit" ]] \
+    || fail 'agent discovery failure discarded dotfiles success'
+  [[ ! -e "$test_dir/home/agent-tools-updated" ]] \
+    || fail 'agent discovery failure mutated the toolchain'
+  grep -Fq 'agent-tools phase failed: update-agent-tools' \
+    "$test_dir/home/stderr" \
+    || fail 'agent discovery failure did not identify the pipeline phase'
+  grep -Fq 'rerun workstation-update' "$test_dir/home/stderr" \
+    || fail 'agent discovery failure did not recommend the unified retry'
+}
+
+test_concurrent_update_is_rejected_without_queueing() {
+  local first_pid
+  local gate
+  local test_dir
+  local wait_attempt
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  rm -f "$test_dir/home/command-log"
+  gate="$test_dir/agent-gate"
+
+  TEST_AGENT_GATE="$gate" run_update "$test_dir" &
+  first_pid=$!
+  wait_attempt=1
+  while [[ ! -e "$gate.ready" && "$wait_attempt" -le 500 ]]; do
+    /usr/bin/sleep 0.01
+    wait_attempt=$((wait_attempt + 1))
+  done
+  if [[ ! -e "$gate.ready" ]]; then
+    : >"$gate.release"
+    wait "$first_pid" || true
+    fail 'first update did not reach the concurrency gate'
+  fi
+
+  if run_update "$test_dir"; then
+    : >"$gate.release"
+    wait "$first_pid" || true
+    fail 'concurrent update was queued or accepted'
+  fi
+  grep -Fq 'lock phase failed: workstation-update is already running' \
+    "$test_dir/home/stderr" \
+    || fail 'concurrent rejection did not identify the lock phase'
+
+  : >"$gate.release"
+  wait "$first_pid" \
+    || fail 'first update failed after releasing the concurrency gate'
+  [[ "$(grep -c '^chezmoi source-path$' \
+    "$test_dir/home/command-log")" -eq 1 ]] \
+    || fail 'concurrent update reached source discovery before rejection'
+}
+
+test_outdated_agent_tools_use_the_latest_verified_updater() {
+  local expected_commit
+  local marker
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  expected_commit="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/seed" rev-parse HEAD)"
+  marker="$test_dir/home/state/workstation-update/applied-commit"
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+
+  TEST_AGENT_OUTDATED=1 run_update "$test_dir" \
+    || fail "outdated agent-tool update failed: $(<"$test_dir/home/stderr")"
+
+  [[ -e "$test_dir/home/agent-tools-updated" ]] \
+    || fail 'outdated agent tools were not updated'
+  [[ "$(<"$marker")" == "$expected_commit" ]] \
+    || fail 'outdated agent-tool update lost the verified dotfiles marker'
+  diff -u \
+    <(printf '%s\n' \
+      'chezmoi source-path' \
+      'chezmoi apply --dry-run --verbose' \
+      'chezmoi apply' \
+      'chezmoi verify' \
+      'update-agent-tools v2 --update-if-needed') \
+    "$test_dir/home/phase-log" \
+    || fail 'agent-tool update did not follow verified dotfiles in order'
+  diff -u \
+    <(printf '%s\n' \
+      'update-agent-tools v2 --update-if-needed' \
+      'agent-tools mutation v2') \
+    "$test_dir/home/agent-tools-log" \
+    || fail 'outdated update did not use the latest managed updater'
+}
+
+test_agent_update_failure_retries_without_reapplying_dotfiles() {
+  local expected_commit
+  local marker
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  expected_commit="$(source_commit "$test_dir")"
+  marker="$test_dir/home/state/workstation-update/applied-commit"
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+
+  if TEST_AGENT_OUTDATED=1 TEST_AGENT_UPDATE_FAIL=1 \
+    run_update "$test_dir"; then
+    fail 'agent-tool update failure exited zero'
+  fi
+
+  [[ "$(source_commit "$test_dir")" == "$expected_commit" ]] \
+    || fail 'agent-tool update failure changed dotfiles history'
+  [[ "$(<"$marker")" == "$expected_commit" ]] \
+    || fail 'agent-tool update failure discarded dotfiles success'
+  [[ ! -e "$test_dir/home/agent-tools-updated" ]] \
+    || fail 'failed agent-tool update was accepted as complete'
+  grep -Fq 'agent-tools phase failed: update-agent-tools' \
+    "$test_dir/home/stderr" \
+    || fail 'agent-tool update failure did not identify its phase'
+  grep -Fq 'rerun workstation-update' "$test_dir/home/stderr" \
+    || fail 'agent-tool update failure did not recommend unified retry'
+
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+  TEST_AGENT_OUTDATED=1 run_update "$test_dir" \
+    || fail "agent-tool retry failed: $(<"$test_dir/home/stderr")"
+
+  [[ -e "$test_dir/home/agent-tools-updated" ]] \
+    || fail 'agent-tool retry did not complete the update'
+  ! grep -Fq 'chezmoi apply' "$test_dir/home/phase-log" \
+    || fail 'agent-tool retry unnecessarily reapplied dotfiles'
+  [[ "$(grep -c '^update-agent-tools v1 --update-if-needed$' \
+    "$test_dir/home/agent-tools-log")" -eq 2 ]] \
+    || fail 'agent-tool work was not retried through workstation-update'
+}
+
+test_unsupported_arguments_fail_before_maintenance() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+
+  if run_update "$test_dir" --force; then
+    fail 'unsupported argument was accepted'
+  fi
+
+  grep -Fq 'argument phase failed: unsupported argument: --force' \
+    "$test_dir/home/stderr" \
+    || fail 'unsupported argument did not fail clearly'
+  [[ ! -e "$test_dir/home/command-log" \
+    && ! -e "$test_dir/home/agent-tools-log" ]] \
+    || fail 'unsupported argument reached dotfiles or agent maintenance'
+}
+
+test_dotfiles_failure_prevents_agent_tool_checks() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  rm -f "$test_dir/home/command-log" "$test_dir/home/agent-tools-log"
+
+  if TEST_FAIL_APPLY=1 TEST_AGENT_OUTDATED=1 run_update "$test_dir"; then
+    fail 'dotfiles apply failure exited zero'
+  fi
+
+  grep -Fq 'apply phase failed: chezmoi apply' "$test_dir/home/stderr" \
+    || fail 'dotfiles failure did not identify the apply phase'
+  grep -Fq 'rerun workstation-update' "$test_dir/home/stderr" \
+    || fail 'dotfiles failure did not recommend unified retry'
+  [[ ! -e "$test_dir/home/agent-tools-log" ]] \
+    || fail 'dotfiles failure reached the agent-tool phase'
+  [[ ! -e "$test_dir/home/agent-tools-updated" ]] \
+    || fail 'dotfiles failure mutated the agent toolchain'
 }
 
 test_repository_structure_is_validated_before_fetch() {
@@ -749,6 +1045,14 @@ test_dry_run_and_verification_failures_are_safe_to_retry() {
 
 test_setup_must_be_complete_before_source_discovery
 test_first_run_adopts_verified_equal_history
+test_current_agent_tools_are_checked_without_mutation
+test_yes_forwards_only_agent_disruption_consent
+test_agent_discovery_failure_preserves_applied_dotfiles_for_retry
+test_concurrent_update_is_rejected_without_queueing
+test_outdated_agent_tools_use_the_latest_verified_updater
+test_agent_update_failure_retries_without_reapplying_dotfiles
+test_unsupported_arguments_fail_before_maintenance
+test_dotfiles_failure_prevents_agent_tool_checks
 test_repository_structure_is_validated_before_fetch
 test_all_source_extras_and_unfinished_operations_are_preserved
 test_fetch_and_unsafe_history_fail_diagnostically
