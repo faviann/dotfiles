@@ -719,6 +719,57 @@ test_conditional_update_retries_a_current_toolchain_after_activation_failure() {
     || fail "conditional recovery did not clear failure and record current state"
 }
 
+test_conditional_update_retries_after_pre_activation_failure_makes_versions_current() {
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  if AOE_CURRENT="1.2.2" \
+    AOE_DOCTOR_FAIL_CALL=1 \
+    run_tool "$test_dir" "$test_dir/failed-stdout" "$test_dir/failed-stderr" --update-if-needed; then
+    fail "conditional pre-activation diagnostics failure exited zero"
+  fi
+  diff -u \
+    <(printf 'update-agent-tools: pre-activation verification failed: AoE ACP diagnostics\n') \
+    "$test_dir/failed-stderr" \
+    || fail "conditional pre-activation failure changed its human error"
+  if grep -q '^systemctl ' "$test_dir/command-log"; then
+    fail "conditional pre-activation failure reached service activation"
+  fi
+  jq -e '
+    .last_successful_activation == null
+    and .activation_failure.phase == "maintenance"
+    and .activation_failure.component == "agent-tool update"
+    and .activation_failure.failed_at == "2026-07-14T00:00:00Z"
+  ' "$state_file" >/dev/null \
+    || fail "conditional pre-activation failure did not preserve incomplete maintenance state"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-14T01:00:00Z" \
+    run_tool "$test_dir" "$test_dir/retry-stdout" "$test_dir/retry-stderr" --update-if-needed \
+    || fail "conditional pre-activation recovery failed: $(<"$test_dir/retry-stderr")"
+
+  [[ "$(grep -c '^aoe update --yes$' "$test_dir/command-log")" -eq 2 ]] \
+    || fail "pre-activation recovery did not rerun the whole AoE update"
+  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 12 ]] \
+    || fail "pre-activation recovery did not rerun the whole npm update"
+  [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
+    "$test_dir/command-log")" -eq 1 ]] \
+    || fail "pre-activation recovery did not activate exactly once after verification passed"
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 28 ]] \
+    || fail "pre-activation recovery did not freshly discover and verify both attempts"
+  jq -e '
+    .last_successful_check == "2026-07-14T01:00:00Z"
+    and .cached_version_result == ""
+    and .check_status == "success"
+    and .last_successful_activation == "2026-07-14T01:00:00Z"
+    and .activation_failure == null
+  ' "$state_file" >/dev/null \
+    || fail "pre-activation recovery did not clear incomplete maintenance state"
+}
+
 assert_complete_npm_refresh() {
   local command_log="$1"
   local actual
@@ -1885,6 +1936,7 @@ test_conditional_update_requires_yes_for_unattended_acp_disruption
 test_conditional_update_yes_authorizes_only_acp_disruption
 test_conditional_interactive_update_prompts_once_for_acp_disruption
 test_conditional_update_retries_a_current_toolchain_after_activation_failure
+test_conditional_update_retries_after_pre_activation_failure_makes_versions_current
 test_due_check_runs_once_per_success_interval
 test_state_uses_local_state_fallback
 test_state_writes_replace_the_state_file_atomically

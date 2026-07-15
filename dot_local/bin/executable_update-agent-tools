@@ -525,6 +525,10 @@ if (( captured_worker_count > 0 )) && [[ "$assume_yes" == false ]]; then
   fi
 fi
 
+if [[ "$update_if_needed" == true ]]; then
+  write_activation_state "" "maintenance" "agent-tool update"
+fi
+
 if ! aoe update --yes; then
   fail "installation failed: AoE"
 fi
