@@ -267,8 +267,6 @@ run_update() {
     WORKSTATION_UPDATE_NOW="$test_now" \
     UPDATE_AGENT_TOOLS_NOW="$test_now" \
     WORKSTATION_FRESHNESS_DEADLINE_SECONDS="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}" \
-    WORKSTATION_FRESHNESS_SUPERVISOR_CLEANUP_DELAY_SECONDS="${WORKSTATION_FRESHNESS_SUPERVISOR_CLEANUP_DELAY_SECONDS:-0}" \
-    WORKSTATION_FRESHNESS_SUPERVISOR_DELAY_STARTED_MARKER="${WORKSTATION_FRESHNESS_SUPERVISOR_DELAY_STARTED_MARKER:-}" \
     bash "$COMMAND" "$@" </dev/null \
       >"$test_dir/home/stdout" 2>"$test_dir/home/stderr"
 }
@@ -490,7 +488,77 @@ test_due_freshness_sources_run_concurrently() {
     || fail 'healthy concurrent freshness was not silent'
 }
 
-test_combined_freshness_deadline_bounds_both_sources() {
+test_hard_freshness_timeout_is_generic_fail_open_and_non_corrupting() {
+  local agent_state_before
+  local before_head
+  local before_index_sha
+  local before_source_content
+  local before_target
+  local dotfiles_state_before
+  local elapsed_milliseconds
+  local finished_at
+  local started_at
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  before_head="$(source_commit "$test_dir")"
+  before_index_sha="$(sha256sum "$test_dir/discovered/source/.git/index")"
+  before_source_content="$(<"$test_dir/discovered/source/dot_managed")"
+  before_target="$(<"$test_dir/home/.managed")"
+  mkdir -p "$test_dir/home/state/workstation-update" \
+    "$test_dir/home/state/update-agent-tools"
+  printf '%s\n' \
+    "{\"last_attempt\":\"2026-07-14T00:00:00Z\",\"last_successful_check\":\"2026-07-14T00:00:00Z\",\"cached_remote_commit\":\"$before_head\",\"attempt_status\":\"success\"}" \
+    >"$test_dir/home/state/workstation-update/dotfiles-freshness.json"
+  printf '%s\n' \
+    '{"last_attempt":"2026-07-14T00:00:00Z","last_successful_check":"2026-07-14T00:00:00Z","cached_version_result":"AoE: 1.2.2 -> 1.2.3","check_status":"success","activation_failure":null}' \
+    >"$test_dir/home/state/update-agent-tools/state.json"
+  dotfiles_state_before="$(sha256sum \
+    "$test_dir/home/state/workstation-update/dotfiles-freshness.json")"
+  agent_state_before="$(sha256sum \
+    "$test_dir/home/state/update-agent-tools/state.json")"
+
+  started_at="$(date +%s%N)"
+  TEST_AGENT_GATE="$test_dir/agent-gate" \
+    TEST_SSH_GATE="$test_dir/ssh-gate" \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'hard freshness timeout escaped the login boundary'
+  finished_at="$(date +%s%N)"
+  elapsed_milliseconds=$(( (finished_at - started_at) / 1000000 ))
+
+  (( elapsed_milliseconds >= 900 && elapsed_milliseconds < 1400 )) \
+    || fail "freshness did not honor its configured deadline: ${elapsed_milliseconds}ms"
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Workstation freshness check timed out' \
+      'Run: workstation-update') \
+    "$test_dir/home/stdout" \
+    || fail 'hard timeout did not emit the exact generic notice'
+  [[ ! -s "$test_dir/home/stderr" ]] \
+    || fail 'hard timeout leaked worker diagnostics'
+  [[ "$(sha256sum \
+    "$test_dir/home/state/workstation-update/dotfiles-freshness.json")" \
+    == "$dotfiles_state_before" ]] \
+    || fail 'hard timeout corrupted prior dotfiles freshness state'
+  [[ "$(sha256sum "$test_dir/home/state/update-agent-tools/state.json")" \
+    == "$agent_state_before" ]] \
+    || fail 'hard timeout corrupted prior agent freshness state'
+  [[ "$(source_commit "$test_dir")" == "$before_head" \
+    && "$(sha256sum "$test_dir/discovered/source/.git/index")" \
+      == "$before_index_sha" \
+    && "$(<"$test_dir/discovered/source/dot_managed")" \
+      == "$before_source_content" \
+    && "$(<"$test_dir/home/.managed")" == "$before_target" ]] \
+    || fail 'hard timeout mutated repository or managed state'
+}
+
+test_hard_freshness_timeout_bounds_stalled_local_preflight() {
   local elapsed_milliseconds
   local finished_at
   local started_at
@@ -503,27 +571,24 @@ test_combined_freshness_deadline_bounds_both_sources() {
   write_applied_marker "$test_dir"
 
   started_at="$(date +%s%N)"
-  TEST_AGENT_GATE="$test_dir/agent-gate" \
-    TEST_SSH_GATE="$test_dir/ssh-gate" \
-    TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS=0.3 \
+  TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS=2 \
     WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
     run_update "$test_dir" --freshness \
-    || fail 'bounded freshness failure escaped the login boundary'
+    || fail 'stalled local preflight escaped the freshness boundary'
   finished_at="$(date +%s%N)"
   elapsed_milliseconds=$(( (finished_at - started_at) / 1000000 ))
 
-  (( elapsed_milliseconds < 1400 )) \
-    || fail "combined freshness exceeded its controlled deadline: ${elapsed_milliseconds}ms"
-  grep -Fqx \
-    'Dotfiles: freshness check failed; no successful result is available' \
+  (( elapsed_milliseconds >= 900 && elapsed_milliseconds < 1400 )) \
+    || fail "local preflight did not honor the configured deadline: ${elapsed_milliseconds}ms"
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Workstation freshness check timed out' \
+      'Run: workstation-update') \
     "$test_dir/home/stdout" \
-    || fail 'deadline did not isolate the timed-out dotfiles source'
-  grep -Fqx \
-    'Agent tools: freshness check failed; no successful result is available' \
-    "$test_dir/home/stdout" \
-    || fail 'deadline did not isolate the timed-out agent source'
-  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
-    || fail 'deadline failures did not share one recovery action'
+    || fail 'stalled local preflight did not emit the exact generic notice'
+  [[ ! -s "$test_dir/home/stderr" ]] \
+    || fail 'stalled local preflight leaked worker diagnostics'
 }
 
 test_freshness_history_blockers_are_local_when_fetch_fails() {
@@ -551,97 +616,6 @@ test_freshness_history_blockers_are_local_when_fetch_fails() {
     || fail 'fetch failure suppressed the always-current local history blocker'
   [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
     || fail 'freshness changed an ahead local commit'
-}
-
-test_timed_out_agent_freshness_retries_after_one_hour() {
-  local test_dir
-
-  test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
-  make_fixture "$test_dir"
-  run_chezmoi "$test_dir" apply
-  write_applied_marker "$test_dir"
-  mkdir -p "$test_dir/home/state/update-agent-tools"
-  printf '%s\n' \
-    '{"last_attempt":"2026-07-14T00:00:00Z","last_successful_check":"2026-07-14T00:00:00Z","cached_version_result":"AoE: 1.2.2 -> 1.2.3","check_status":"success","activation_failure":null}' \
-    >"$test_dir/home/state/update-agent-tools/state.json"
-
-  TEST_AGENT_GATE="$test_dir/agent-gate" \
-    WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
-    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
-    run_update "$test_dir" --freshness \
-    || fail 'timed-out agent freshness escaped the notice boundary'
-  [[ "$(wc -l <"$test_dir/home/agent-freshness-attempt-log")" -eq 1 ]] \
-    || fail 'initial timed-out agent check did not make one attempt'
-  grep -Fqx '  AoE: 1.2.2 -> 1.2.3' "$test_dir/home/stdout" \
-    || fail 'agent timeout erased the last successful result'
-  grep -Fqx \
-    'Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z' \
-    "$test_dir/home/stdout" \
-    || fail 'agent timeout did not render retained knowledge as stale'
-  jq -e '
-    .last_attempt == "2026-07-15T00:00:00Z"
-    and .check_status == "failed"
-    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
-  ' "$test_dir/home/state/update-agent-tools/state.json" >/dev/null \
-    || fail "agent timeout did not persist retry state: $(<"$test_dir/home/state/update-agent-tools/state.json")"
-
-  WORKSTATION_UPDATE_NOW="2026-07-15T00:59:59Z" \
-    run_update "$test_dir" --freshness \
-    || fail 'cached timed-out agent status escaped before retry'
-  [[ "$(wc -l <"$test_dir/home/agent-freshness-attempt-log")" -eq 1 ]] \
-    || fail 'timed-out agent source retried before one hour'
-  grep -Fqx \
-    'Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z' \
-    "$test_dir/home/stdout" \
-    || fail "timed-out agent failure stopped rendering before retry: stdout=$(<"$test_dir/home/stdout"); agent-log=$(<"$test_dir/home/agent-tools-log"); state=$(<"$test_dir/home/state/update-agent-tools/state.json")"
-
-  TEST_AGENT_FRESHNESS_STDOUT=$'Claude Code CLI: 3.4.4 -> 3.4.5\n' \
-    WORKSTATION_UPDATE_NOW="2026-07-15T01:00:00Z" \
-    run_update "$test_dir" --freshness \
-    || fail 'timed-out agent source did not recover at retry time'
-  [[ "$(wc -l <"$test_dir/home/agent-freshness-attempt-log")" -eq 2 ]] \
-    || fail 'timed-out agent source did not retry exactly at one hour'
-  grep -Fqx '  Claude Code CLI: 3.4.4 -> 3.4.5' "$test_dir/home/stdout" \
-    || fail 'agent retry did not replace retained knowledge with fresh success'
-}
-
-test_freshness_outer_deadline_bounds_stalled_local_preflight() {
-  local action_count
-  local elapsed_milliseconds
-  local finished_at
-  local started_at
-  local test_dir
-
-  test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
-  make_fixture "$test_dir"
-  run_chezmoi "$test_dir" apply
-  write_applied_marker "$test_dir"
-
-  started_at="$(date +%s%N)"
-  TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS=2 \
-    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
-    run_update "$test_dir" --freshness \
-    || fail 'stalled local preflight escaped the freshness boundary'
-  finished_at="$(date +%s%N)"
-  elapsed_milliseconds=$(( (finished_at - started_at) / 1000000 ))
-
-  (( elapsed_milliseconds < 1400 )) \
-    || fail "local preflight exceeded the overall deadline: ${elapsed_milliseconds}ms"
-  action_count="$(grep -c '^Run: workstation-update$' \
-    "$test_dir/home/stdout" || true)"
-  [[ "$action_count" -eq 1 ]] \
-    || fail 'outer deadline did not emit exactly one recovery action'
-  diff -u \
-    <(printf '%s\n' \
-      'Workstation maintenance available:' \
-      'Workstation freshness check timed out' \
-      'Run: workstation-update') \
-    "$test_dir/home/stdout" \
-    || fail 'outer deadline emitted a partial or incoherent fallback notice'
-  [[ ! -s "$test_dir/home/stderr" ]] \
-    || fail 'outer deadline leaked worker diagnostics'
 }
 
 test_freshness_git_reads_do_not_refresh_the_index() {
@@ -697,281 +671,6 @@ test_freshness_git_reads_do_not_refresh_the_index() {
     git -C "$test_dir/discovered/source" rev-parse origin/main)" \
     == "$expected_remote_head" ]] \
     || fail 'disabled optional locks prevented the permitted remote-tracking fetch'
-}
-
-test_dotfiles_timeout_preserves_completed_agent_and_cached_dotfiles_results() {
-  local before_head
-  local before_index_identity
-  local before_index_sha
-  local before_source_content
-  local before_target
-  local cached_remote
-  local cached_remote_short
-  local index_path
-  local local_short
-  local test_dir
-
-  test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
-  make_fixture "$test_dir"
-  run_chezmoi "$test_dir" apply
-  write_applied_marker "$test_dir"
-  before_head="$(source_commit "$test_dir")"
-  before_source_content="$(<"$test_dir/discovered/source/dot_managed")"
-  before_target="$(<"$test_dir/home/.managed")"
-  index_path="$test_dir/discovered/source/.git/index"
-  before_index_sha="$(sha256sum "$index_path")"
-  before_index_identity="$(stat -c '%i:%Y:%s' "$index_path")"
-
-  publish_managed_version "$test_dir" v2
-  WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
-    run_update "$test_dir" --freshness \
-    || fail 'cached dotfiles result setup failed'
-  cached_remote="$(jq -r '.cached_remote_commit' \
-    "$test_dir/home/state/workstation-update/dotfiles-freshness.json")"
-  local_short="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$test_dir/discovered/source" rev-parse --short "$before_head")"
-  cached_remote_short="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$test_dir/discovered/source" rev-parse --short "$cached_remote")"
-  publish_managed_version "$test_dir" v3
-
-  TEST_SSH_GATE="$test_dir/ssh-gate" \
-    TEST_AGENT_FRESHNESS_STDOUT=$'Claude Code CLI: 3.4.4 -> 3.4.5\n' \
-    WORKSTATION_UPDATE_NOW="2026-07-16T00:00:00Z" \
-    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
-    run_update "$test_dir" --freshness \
-    || fail 'dotfiles timeout escaped the freshness boundary'
-
-  jq -e '
-    .last_attempt == "2026-07-16T00:00:00Z"
-    and .last_successful_check == "2026-07-16T00:00:00Z"
-    and .cached_version_result == "Claude Code CLI: 3.4.4 -> 3.4.5"
-    and .check_status == "success"
-  ' "$test_dir/home/state/update-agent-tools/state.json" >/dev/null \
-    || fail 'completed agent source was overwritten as timed out'
-  jq -e '
-    .last_attempt == "2026-07-16T00:00:00Z"
-    and .last_successful_check == "2026-07-15T00:00:00Z"
-    and .attempt_status == "failed"
-  ' "$test_dir/home/state/workstation-update/dotfiles-freshness.json" >/dev/null \
-    || fail "timed-out dotfiles source did not record its one-hour retry state: $(<"$test_dir/home/state/workstation-update/dotfiles-freshness.json")"
-  diff -u \
-    <(printf '%s\n' \
-      'Workstation maintenance available:' \
-      'Agent tools:' \
-      '  Claude Code CLI: 3.4.4 -> 3.4.5' \
-      'Dotfiles: 1 commit (sanitized below)' \
-      "  $local_short..$cached_remote_short" \
-      'Dotfiles: freshness check failed; using result from 2026-07-15T00:00:00Z' \
-      'Run: workstation-update') \
-    "$test_dir/home/stdout" \
-    || fail 'dotfiles timeout suppressed or duplicated retained source results'
-  [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
-    || fail 'dotfiles timeout changed the checked-out commit'
-  [[ "$(sha256sum "$index_path")" == "$before_index_sha" \
-    && "$(stat -c '%i:%Y:%s' "$index_path")" == "$before_index_identity" ]] \
-    || fail 'dotfiles timeout changed the index'
-  [[ "$(<"$test_dir/discovered/source/dot_managed")" == "$before_source_content" ]] \
-    || fail 'dotfiles timeout changed the worktree'
-  [[ "$(<"$test_dir/home/.managed")" == "$before_target" ]] \
-    || fail 'dotfiles timeout changed a managed target'
-}
-
-test_agent_timeout_preserves_newly_completed_dotfiles_result() {
-  local before_head
-  local before_index_identity
-  local before_index_sha
-  local before_source_content
-  local before_target
-  local expected_remote
-  local index_path
-  local local_short
-  local remote_short
-  local test_dir
-
-  test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
-  make_fixture "$test_dir"
-  run_chezmoi "$test_dir" apply
-  write_applied_marker "$test_dir"
-  WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
-    TEST_AGENT_FRESHNESS_STDOUT=$'AoE: 1.2.2 -> 1.2.3\n' \
-    run_update "$test_dir" --freshness \
-    || fail 'agent-timeout cache setup failed'
-
-  before_head="$(source_commit "$test_dir")"
-  before_source_content="$(<"$test_dir/discovered/source/dot_managed")"
-  before_target="$(<"$test_dir/home/.managed")"
-  index_path="$test_dir/discovered/source/.git/index"
-  before_index_sha="$(sha256sum "$index_path")"
-  before_index_identity="$(stat -c '%i:%Y:%s' "$index_path")"
-  publish_managed_version "$test_dir" v2
-  expected_remote="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$test_dir/seed" rev-parse HEAD)"
-  local_short="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$test_dir/discovered/source" rev-parse --short "$before_head")"
-  remote_short="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$test_dir/seed" rev-parse --short "$expected_remote")"
-
-  TEST_AGENT_GATE="$test_dir/agent-gate" \
-    WORKSTATION_UPDATE_NOW="2026-07-16T00:00:00Z" \
-    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
-    run_update "$test_dir" --freshness \
-    || fail 'agent timeout escaped the freshness boundary'
-
-  jq -e --arg remote "$expected_remote" '
-    .last_attempt == "2026-07-16T00:00:00Z"
-    and .last_successful_check == "2026-07-16T00:00:00Z"
-    and .cached_remote_commit == $remote
-    and .attempt_status == "success"
-  ' "$test_dir/home/state/workstation-update/dotfiles-freshness.json" >/dev/null \
-    || fail 'completed dotfiles source was overwritten as timed out'
-  jq -e '
-    .last_attempt == "2026-07-16T00:00:00Z"
-    and .last_successful_check == "2026-07-15T00:00:00Z"
-    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
-    and .check_status == "failed"
-  ' "$test_dir/home/state/update-agent-tools/state.json" >/dev/null \
-    || fail 'timed-out agent source did not preserve its retry state and cached result'
-  diff -u \
-    <(printf '%s\n' \
-      'Workstation maintenance available:' \
-      'Agent tools:' \
-      '  AoE: 1.2.2 -> 1.2.3' \
-      'Dotfiles: 1 commit (sanitized below)' \
-      "  $local_short..$remote_short" \
-      'Agent tools: freshness check failed; using result from 2026-07-15T00:00:00Z' \
-      'Run: workstation-update') \
-    "$test_dir/home/stdout" \
-    || fail 'agent timeout suppressed the newly completed dotfiles result'
-  [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
-    || fail 'agent timeout changed the checked-out commit'
-  [[ "$(sha256sum "$index_path")" == "$before_index_sha" \
-    && "$(stat -c '%i:%Y:%s' "$index_path")" == "$before_index_identity" ]] \
-    || fail 'agent timeout changed the index'
-  [[ "$(<"$test_dir/discovered/source/dot_managed")" == "$before_source_content" \
-    && "$(<"$test_dir/home/.managed")" == "$before_target" ]] \
-    || fail 'agent timeout changed the worktree or managed target'
-}
-
-test_timeout_notice_preserves_local_blockers_and_incomplete_maintenance() {
-  local elapsed_milliseconds
-  local finished_at
-  local started_at
-  local test_dir
-
-  test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
-  make_fixture "$test_dir"
-  run_chezmoi "$test_dir" apply
-  write_applied_marker "$test_dir"
-  publish_managed_version "$test_dir" v2
-  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$test_dir/discovered/source" fetch --quiet "$test_dir/remote.git" \
-      '+refs/heads/main:refs/remotes/origin/main'
-  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$test_dir/discovered/source" merge --quiet --ff-only origin/main
-  printf 'unpublished work\n' \
-    >"$test_dir/discovered/source/dot_unpublished"
-  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$test_dir/discovered/source" add dot_unpublished
-  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$test_dir/discovered/source" commit --quiet -m unpublished
-  printf 'local operator work\n' >>"$test_dir/discovered/source/dot_managed"
-  mkdir -p "$test_dir/home/state/update-agent-tools"
-  printf '%s\n' \
-    '{"last_attempt":"2026-07-14T00:00:00Z","last_successful_check":"2026-07-14T00:00:00Z","cached_version_result":"AoE: 1.2.2 -> 1.2.3","check_status":"success","activation_failure":{"phase":"activation","component":"AoE service restart"}}' \
-    >"$test_dir/home/state/update-agent-tools/state.json"
-
-  started_at="$(date +%s%N)"
-  TEST_AGENT_GATE="$test_dir/agent-gate" \
-    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
-    WORKSTATION_FRESHNESS_SUPERVISOR_CLEANUP_DELAY_SECONDS=2 \
-    WORKSTATION_FRESHNESS_SUPERVISOR_DELAY_STARTED_MARKER="$test_dir/supervisor-cleanup-started" \
-    run_update "$test_dir" --freshness \
-    || fail 'local-state timeout escaped the freshness boundary'
-  finished_at="$(date +%s%N)"
-  elapsed_milliseconds=$(( (finished_at - started_at) / 1000000 ))
-
-  diff -u \
-    <(printf '%s\n' \
-      'Workstation maintenance available:' \
-      'Agent tools:' \
-      '  AoE: 1.2.2 -> 1.2.3' \
-      'Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z' \
-      'Dotfiles blocker: source repository has local content' \
-      'Dotfiles: fetched source has not been successfully applied' \
-      'Dotfiles blocker: main is ahead by 1 commit(s)' \
-      'Agent tools: unfinished activation for AoE service restart' \
-      'Run: workstation-update') \
-    "$test_dir/home/stdout" \
-    || fail 'timeout notice dropped local blockers or incomplete maintenance'
-  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
-    || fail 'local-state timeout rendered more than one action'
-  [[ -e "$test_dir/supervisor-cleanup-started" ]] \
-    || fail 'controlled supervisor cleanup delay was not exercised'
-  (( elapsed_milliseconds >= 900 && elapsed_milliseconds < 1400 )) \
-    || fail "outer fallback was not bounded around slow cleanup: ${elapsed_milliseconds}ms"
-}
-
-test_timeout_fallback_marks_persisted_dotfiles_failure_stale() {
-  local test_dir
-
-  test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
-  make_fixture "$test_dir"
-  run_chezmoi "$test_dir" apply
-  write_applied_marker "$test_dir"
-  publish_managed_version "$test_dir" v2
-  WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
-    run_update "$test_dir" --freshness \
-    || fail 'persisted dotfiles failure cache setup failed'
-  TEST_SSH_FETCH_FAIL=1 \
-    WORKSTATION_UPDATE_NOW="2026-07-16T00:00:00Z" \
-    run_update "$test_dir" --freshness \
-    || fail 'persisted dotfiles failure setup escaped freshness'
-
-  TEST_AGENT_GATE="$test_dir/agent-gate" \
-    WORKSTATION_UPDATE_NOW="2026-07-16T00:30:00Z" \
-    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
-    run_update "$test_dir" --freshness \
-    || fail 'agent timeout escaped persisted dotfiles failure fallback'
-
-  [[ "$(grep -c '^Dotfiles: freshness check failed; using result from 2026-07-15T00:00:00Z$' \
-    "$test_dir/home/stdout")" -eq 1 ]] \
-    || fail 'timeout fallback omitted or duplicated persisted dotfiles stale status'
-  grep -Fqx 'Dotfiles: 1 commit (sanitized below)' "$test_dir/home/stdout" \
-    || fail 'timeout fallback suppressed retained dotfiles update knowledge'
-  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
-    || fail 'persisted dotfiles failure fallback rendered multiple actions'
-}
-
-test_timeout_fallback_marks_persisted_agent_failure_stale() {
-  local test_dir
-
-  test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
-  make_fixture "$test_dir"
-  run_chezmoi "$test_dir" apply
-  write_applied_marker "$test_dir"
-  mkdir -p "$test_dir/home/state/update-agent-tools"
-  printf '%s\n' \
-    '{"last_attempt":"2026-07-15T00:00:00Z","last_successful_check":"2026-07-14T00:00:00Z","cached_version_result":"AoE: 1.2.2 -> 1.2.3","check_status":"failed","activation_failure":null}' \
-    >"$test_dir/home/state/update-agent-tools/state.json"
-
-  TEST_SSH_GATE="$test_dir/ssh-gate" \
-    WORKSTATION_UPDATE_NOW="2026-07-15T00:30:00Z" \
-    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
-    run_update "$test_dir" --freshness \
-    || fail 'dotfiles timeout escaped persisted agent failure fallback'
-
-  [[ "$(grep -c '^Agent tools: freshness check failed; using result from 2026-07-14T00:00:00Z$' \
-    "$test_dir/home/stdout")" -eq 1 ]] \
-    || fail 'timeout fallback omitted or duplicated persisted agent stale status'
-  grep -Fqx '  AoE: 1.2.2 -> 1.2.3' "$test_dir/home/stdout" \
-    || fail 'timeout fallback suppressed retained agent update knowledge'
-  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
-    || fail 'persisted agent failure fallback rendered multiple actions'
 }
 
 test_freshness_accumulates_independent_local_blockers() {
@@ -1955,16 +1654,10 @@ readonly test_cases=(
   test_freshness_sources_age_independently
   test_freshness_failures_retain_each_source_result
   test_due_freshness_sources_run_concurrently
-  test_combined_freshness_deadline_bounds_both_sources
+  test_hard_freshness_timeout_is_generic_fail_open_and_non_corrupting
+  test_hard_freshness_timeout_bounds_stalled_local_preflight
   test_freshness_history_blockers_are_local_when_fetch_fails
-  test_timed_out_agent_freshness_retries_after_one_hour
-  test_freshness_outer_deadline_bounds_stalled_local_preflight
   test_freshness_git_reads_do_not_refresh_the_index
-  test_dotfiles_timeout_preserves_completed_agent_and_cached_dotfiles_results
-  test_agent_timeout_preserves_newly_completed_dotfiles_result
-  test_timeout_notice_preserves_local_blockers_and_incomplete_maintenance
-  test_timeout_fallback_marks_persisted_dotfiles_failure_stale
-  test_timeout_fallback_marks_persisted_agent_failure_stale
   test_freshness_accumulates_independent_local_blockers
   test_setup_must_be_complete_before_source_discovery
   test_first_run_adopts_verified_equal_history
