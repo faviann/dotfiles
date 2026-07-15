@@ -398,6 +398,43 @@ run_check() {
   return 1
 }
 
+run_status_check() {
+  local output_file
+  local error_file
+  local result
+  local last_successful_check
+  local cached_result
+
+  output_file="$(mktemp "$STATE_DIR/check.stdout.XXXXXX")"
+  error_file="$(mktemp "$STATE_DIR/check.stderr.XXXXXX")"
+  if (check_toolchain) >"$output_file" 2>"$error_file"; then
+    result="$(<"$output_file")"
+    rm -f "$output_file" "$error_file"
+    write_check_state "$now_iso" "$now_iso" "$result" "success"
+    [[ -z "$result" ]] && return 0
+    return 10
+  fi
+
+  rm -f "$output_file" "$error_file"
+  last_successful_check="$(state_value last_successful_check)"
+  cached_result="$(state_value cached_version_result)"
+  write_check_state \
+    "$now_iso" \
+    "$last_successful_check" \
+    "$cached_result" \
+    "failed"
+  return 1
+}
+
+if [[ "${1:-}" == "--check-status" ]]; then
+  [[ $# -eq 1 ]] || fail "--check-status does not accept arguments"
+  if run_status_check; then
+    exit 0
+  else
+    exit $?
+  fi
+fi
+
 if [[ "${1:-}" == "--check" ]]; then
   [[ $# -eq 1 ]] || fail "--check does not accept arguments"
   if run_check; then
@@ -439,10 +476,25 @@ if [[ "${1:-}" == "--check-if-due" ]]; then
 fi
 
 assume_yes=false
+update_if_needed=false
 if [[ $# -eq 1 && "$1" == "--yes" ]]; then
+  assume_yes=true
+elif [[ $# -eq 1 && "$1" == "--update-if-needed" ]]; then
+  update_if_needed=true
+elif [[ $# -eq 2 && "$1" == "--update-if-needed" && "$2" == "--yes" ]]; then
+  update_if_needed=true
   assume_yes=true
 elif [[ $# -ne 0 ]]; then
   fail "unknown argument: $1"
+fi
+
+if [[ "$update_if_needed" == true ]]; then
+  if run_status_check; then
+    exit 0
+  else
+    status=$?
+    [[ "$status" -eq 10 ]] || exit 1
+  fi
 fi
 
 command -v aoe >/dev/null 2>&1 \

@@ -353,6 +353,275 @@ run_check() {
   run_tool "$1" "$2" "$3" --check
 }
 
+test_machine_status_reports_current_by_exit_status_without_output() {
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --check-status \
+    || fail "current machine status exited nonzero: $(<"$test_dir/stderr")"
+
+  [[ ! -s "$test_dir/stdout" ]] \
+    || fail "current machine status wrote stdout"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "current machine status wrote stderr"
+  jq -e '
+    .last_attempt == "2026-07-14T00:00:00Z"
+    and .last_successful_check == "2026-07-14T00:00:00Z"
+    and .cached_version_result == ""
+    and .check_status == "success"
+  ' "$state_file" >/dev/null \
+    || fail "current machine status did not record fresh success"
+}
+
+test_machine_status_reports_outdated_by_exit_status_without_output() {
+  local state_file
+  local status
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  if AOE_CURRENT="1.2.2" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --check-status; then
+    fail "outdated machine status exited zero"
+  else
+    status=$?
+  fi
+
+  [[ "$status" -eq 10 ]] \
+    || fail "outdated machine status exited $status instead of 10"
+  [[ ! -s "$test_dir/stdout" ]] \
+    || fail "outdated machine status wrote stdout"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "outdated machine status wrote stderr"
+  jq -e '
+    .last_attempt == "2026-07-14T00:00:00Z"
+    and .last_successful_check == "2026-07-14T00:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "success"
+  ' "$state_file" >/dev/null \
+    || fail "outdated machine status did not record fresh success"
+  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "outdated machine status mutated or inspected ACP workers"
+  fi
+}
+
+test_machine_status_reports_discovery_failure_and_preserves_freshness_state() {
+  local state_file
+  local status
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  AOE_CURRENT="1.2.2" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-13T00:00:00Z" \
+    run_tool "$test_dir" "$test_dir/seed-stdout" "$test_dir/seed-stderr" --check \
+    || fail "machine-status cache seed failed"
+
+  if CURL_FAIL=1 \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-14T00:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --check-status; then
+    fail "failed machine status exited zero"
+  else
+    status=$?
+  fi
+
+  [[ "$status" -eq 1 ]] \
+    || fail "failed machine status exited $status instead of 1"
+  [[ ! -s "$test_dir/stdout" ]] \
+    || fail "failed machine status wrote stdout"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "failed machine status wrote stderr"
+  jq -e '
+    .last_attempt == "2026-07-14T00:00:00Z"
+    and .last_successful_check == "2026-07-13T00:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "failed"
+  ' "$state_file" >/dev/null \
+    || fail "failed machine status did not preserve freshness state"
+  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "failed machine status mutated or inspected ACP workers"
+  fi
+}
+
+test_conditional_update_leaves_current_toolchain_and_acp_workers_alone() {
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  ACP_PS_SEQUENCE_JSON='[[{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}]]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed \
+    || fail "current conditional update failed: $(<"$test_dir/stderr")"
+
+  [[ ! -s "$test_dir/stdout" ]] \
+    || fail "current conditional update wrote stdout"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "current conditional update wrote stderr"
+  jq -e '
+    .last_successful_check == "2026-07-14T00:00:00Z"
+    and .cached_version_result == ""
+    and .check_status == "success"
+  ' "$state_file" >/dev/null \
+    || fail "current conditional update did not record fresh discovery"
+  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "current conditional update mutated or inspected ACP workers"
+  fi
+}
+
+test_conditional_update_stops_before_mutation_when_discovery_fails() {
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  if CURL_FAIL=1 \
+    ACP_PS_SEQUENCE_JSON='[[{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}]]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed --yes; then
+    fail "conditional update accepted failed discovery"
+  fi
+
+  [[ ! -s "$test_dir/stdout" ]] \
+    || fail "failed conditional update wrote stdout"
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "failed conditional update wrote stderr"
+  jq -e '
+    .last_attempt == "2026-07-14T00:00:00Z"
+    and .last_successful_check == null
+    and .cached_version_result == ""
+    and .check_status == "failed"
+  ' "$state_file" >/dev/null \
+    || fail "failed conditional update did not record discovery failure"
+  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "failed conditional update mutated or inspected ACP workers"
+  fi
+}
+
+test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
+  local discovery_line
+  local inspection_line
+  local mutation_line
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  AOE_CURRENT="1.2.2" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed \
+    || fail "outdated conditional update failed: $(<"$test_dir/stderr")"
+
+  grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
+    || fail "outdated conditional update did not update AoE"
+  assert_complete_npm_refresh "$test_dir/command-log"
+  grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
+    || fail "outdated conditional update did not activate the whole toolchain"
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 14 ]] \
+    || fail "outdated conditional update did not perform discovery and verification"
+  discovery_line="$(grep -n '^npm view @openai/codex@latest version$' \
+    "$test_dir/command-log" | head -n 1 | cut -d: -f1)"
+  inspection_line="$(grep -n '^aoe acp ps --json$' \
+    "$test_dir/command-log" | head -n 1 | cut -d: -f1)"
+  mutation_line="$(grep -n '^aoe update --yes$' \
+    "$test_dir/command-log" | cut -d: -f1)"
+  [[ "$discovery_line" -lt "$inspection_line" && "$inspection_line" -lt "$mutation_line" ]] \
+    || fail "conditional update did not discover before ACP inspection and mutation"
+  jq -e '
+    .last_successful_check == "2026-07-14T00:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "success"
+    and .last_successful_activation == "2026-07-14T00:00:00Z"
+    and .activation_failure == null
+  ' "$state_file" >/dev/null \
+    || fail "outdated conditional update did not preserve check and activation state"
+}
+
+test_conditional_update_requires_yes_for_unattended_acp_disruption() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if AOE_CURRENT="1.2.2" \
+    ACP_PS_SEQUENCE_JSON='[[{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}]]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed; then
+    fail "unattended conditional update disrupted a worker without --yes"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: 1 running ACP session would be disrupted; rerun with --yes to authorize replacement\n') \
+    "$test_dir/stderr" \
+    || fail "unattended conditional refusal was not actionable"
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
+    || fail "unattended conditional refusal bypassed fresh discovery"
+  if grep -Eq '^(aoe update|aoe acp restart|npm install|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "unattended conditional refusal mutated the toolchain"
+  fi
+}
+
+test_conditional_update_yes_authorizes_only_acp_disruption() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  AOE_CURRENT="1.2.2" \
+    ACP_PS_SEQUENCE_JSON='[
+      [{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}],
+      [{"session_id":"private-session","pid":201,"alive":true,"build_stale":false}]
+    ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed --yes \
+    || fail "--yes conditional update failed: $(<"$test_dir/stderr")"
+
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 14 ]] \
+    || fail "--yes conditional update bypassed discovery or verification"
+  assert_complete_npm_refresh "$test_dir/command-log"
+  grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
+    || fail "--yes conditional update did not complete activation"
+  if grep -F 'running ACP' "$test_dir/stdout" "$test_dir/stderr" >/dev/null; then
+    fail "--yes conditional update prompted for disruption authorization"
+  fi
+}
+
+test_conditional_interactive_update_prompts_once_for_acp_disruption() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  TEST_RUN_IN_TTY=1 \
+    TEST_TTY_INPUT=$'y\n' \
+    AOE_CURRENT="1.2.2" \
+    ACP_PS_SEQUENCE_JSON='[
+      [{"session_id":"private-session","pid":101,"alive":true,"build_stale":false}],
+      [{"session_id":"private-session","pid":201,"alive":true,"build_stale":false}]
+    ]' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed \
+    || fail "interactive conditional update failed: $(<"$test_dir/stderr")"
+
+  [[ "$(grep -c '1 running ACP session would be disrupted' "$test_dir/stdout")" -eq 1 ]] \
+    || fail "interactive conditional update did not prompt exactly once"
+  grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
+    || fail "authorized interactive conditional update did not mutate"
+}
+
 assert_complete_npm_refresh() {
   local command_log="$1"
   local actual
@@ -1508,6 +1777,15 @@ test_nested_codex_ignores_compatible_prereleases() {
     || fail "stable nested Codex check wrote stderr: $(<"$test_dir/stderr")"
 }
 
+test_machine_status_reports_current_by_exit_status_without_output
+test_machine_status_reports_outdated_by_exit_status_without_output
+test_machine_status_reports_discovery_failure_and_preserves_freshness_state
+test_conditional_update_leaves_current_toolchain_and_acp_workers_alone
+test_conditional_update_stops_before_mutation_when_discovery_fails
+test_conditional_update_refreshes_the_whole_toolchain_when_outdated
+test_conditional_update_requires_yes_for_unattended_acp_disruption
+test_conditional_update_yes_authorizes_only_acp_disruption
+test_conditional_interactive_update_prompts_once_for_acp_disruption
 test_due_check_runs_once_per_success_interval
 test_state_uses_local_state_fallback
 test_state_writes_replace_the_state_file_atomically
