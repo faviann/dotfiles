@@ -4,6 +4,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPO_ROOT
 readonly BASHRC_PATH="$REPO_ROOT/dot_bashrc.tmpl"
+REAL_BASH="$(command -v bash)"
+REAL_SCRIPT="$(command -v script)"
+REAL_SLEEP="$(command -v sleep)"
+readonly REAL_BASH REAL_SCRIPT REAL_SLEEP
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -17,25 +21,25 @@ make_stubs() {
   mkdir -p "$bin_dir" "$home/.local/state/workstation-setup"
   : >"$home/.local/state/workstation-setup/complete"
 
-  cat >"$bin_dir/aoe" <<'STUB'
-#!/usr/bin/bash
+  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/aoe"
+  cat >>"$bin_dir/aoe" <<'STUB'
 exit 0
 STUB
 
-  cat >"$bin_dir/update-agent-tools" <<'STUB'
-#!/usr/bin/bash
+  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
+  cat >>"$bin_dir/update-agent-tools" <<'STUB'
 set -euo pipefail
 
 printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
-/usr/bin/sleep 0.05
+"$TEST_REAL_SLEEP" 0.05
 if [[ -n "${CHECK_OUTPUT:-}" ]]; then
   printf '%s\n' "$CHECK_OUTPUT"
 fi
 printf 'update-agent-tools complete\n' >>"$COMMAND_LOG"
 STUB
 
-  cat >"$bin_dir/tmux" <<'STUB'
-#!/usr/bin/bash
+  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/tmux"
+  cat >>"$bin_dir/tmux" <<'STUB'
 set -euo pipefail
 
 printf 'tmux %s\n' "$*" >>"$COMMAND_LOG"
@@ -62,7 +66,8 @@ run_shell() {
     "CHECK_OUTPUT=${CHECK_OUTPUT:-}"
     "SSH_TTY=${TEST_SSH_TTY:-}"
     "SSH_ORIGINAL_COMMAND=${TEST_SSH_ORIGINAL_COMMAND:-}"
-    "SHELL=/bin/bash"
+    "SHELL=$REAL_BASH"
+    "TEST_REAL_SLEEP=$REAL_SLEEP"
     "TMUX=${TEST_TMUX:-}"
     "TMUX_SESSION_EXISTS=${TMUX_SESSION_EXISTS:-1}"
   )
@@ -71,9 +76,9 @@ run_shell() {
     # The child shell expands BASHRC_PATH from shell_environment.
     # shellcheck disable=SC2016
     printf -v command_line '%q ' \
-      /usr/bin/bash --noprofile --norc -i -c 'source "$BASHRC_PATH"'
+      "$REAL_BASH" --noprofile --norc -i -c 'source "$BASHRC_PATH"'
     env "${shell_environment[@]}" \
-      /usr/bin/script -qefc "$command_line" /dev/null \
+      "$REAL_SCRIPT" -qefc "$command_line" /dev/null \
         >"$stdout_file" 2>"$stderr_file"
     tr -d '\r' <"$stdout_file" >"$stdout_file.normalized"
     mv "$stdout_file.normalized" "$stdout_file"
@@ -81,7 +86,7 @@ run_shell() {
     # The child shell expands BASHRC_PATH from shell_environment.
     # shellcheck disable=SC2016
     env "${shell_environment[@]}" \
-      /usr/bin/bash --noprofile --norc -c 'source "$BASHRC_PATH"' \
+      "$REAL_BASH" --noprofile --norc -c 'source "$BASHRC_PATH"' \
         >"$stdout_file" 2>"$stderr_file"
   fi
 }
@@ -132,7 +137,7 @@ test_due_check_finishes_before_new_session_launch() {
       'update-agent-tools --check-if-due' \
       'update-agent-tools complete' \
       'tmux has-session -t main' \
-      'tmux new-session -s main aoe; exec /bin/bash -il') \
+      "tmux new-session -s main aoe; exec $REAL_BASH -il") \
     "$test_dir/command-log" \
     || fail "due check did not finish before the new AoE session launched"
 }

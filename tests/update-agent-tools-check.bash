@@ -5,11 +5,36 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPO_ROOT
 readonly COMMAND="$REPO_ROOT/dot_local/bin/executable_update-agent-tools"
 readonly CHECK_STATUS_UPDATES_AVAILABLE=10
+REAL_BASH="$(command -v bash)"
+REAL_DATE="$(command -v date)"
+readonly REAL_BASH REAL_DATE
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
   exit 1
 }
+
+resolved_command_path() {
+  local command_name
+  local command_path
+  local directory
+  local separator=
+  declare -A seen=()
+
+  for command_name in "$@"; do
+    command_path="$(command -v "$command_name")" \
+      || fail "required test dependency not found: $command_name"
+    directory="${command_path%/*}"
+    [[ -z "${seen[$directory]:-}" ]] || continue
+    printf '%s%s' "$separator" "$directory"
+    separator=:
+    seen["$directory"]=1
+  done
+}
+
+COMMAND_PATH="$(resolved_command_path \
+  bash chmod flock grep jq mkdir mktemp mv rm sed tail)"
+readonly COMMAND_PATH
 
 make_stubs() {
   local stub_dir="$1"
@@ -19,8 +44,8 @@ make_stubs() {
   home="$(dirname "$stub_dir")"
   mkdir -p "$home/.local/bin"
 
-  cat >"$home/.local/bin/aoe" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$home/.local/bin/aoe"
+  cat >>"$home/.local/bin/aoe" <<'STUB'
 set -euo pipefail
 
 if [[ "$*" == "--version" ]]; then
@@ -84,8 +109,8 @@ printf 'unexpected aoe invocation: %s\n' "$*" >&2
 exit 64
 STUB
 
-  cat >"$stub_dir/curl" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$stub_dir/curl"
+  cat >>"$stub_dir/curl" <<'STUB'
 set -euo pipefail
 
 if [[ "$*" == "-fsSL https://api.github.com/repos/njbrake/agent-of-empires/releases/latest" ]]; then
@@ -109,8 +134,8 @@ printf 'unexpected curl invocation: %s\n' "$*" >&2
 exit 64
 STUB
 
-  cat >"$stub_dir/npm" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$stub_dir/npm"
+  cat >>"$stub_dir/npm" <<'STUB'
 set -euo pipefail
 
 printf 'npm %s\n' "$*" >>"$COMMAND_LOG"
@@ -237,7 +262,8 @@ if [[ "$1" == "install" && "$2" == "--global" ]]; then
     *) printf 'unexpected npm install package: %s\n' "$package" >&2; exit 64 ;;
   esac
   if [[ "$binary" != "${NPM_OMIT_BINARY:-}" ]]; then
-    printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME/.local/bin/$binary"
+    printf '#!%s\nexit 0\n' "$TEST_REAL_BASH" \
+      >"$HOME/.local/bin/$binary"
     chmod +x "$HOME/.local/bin/$binary"
   fi
   if [[ "$package" == "pi-acp@latest" ]]; then
@@ -250,8 +276,8 @@ printf 'unexpected npm invocation: %s\n' "$*" >&2
 exit 64
 STUB
 
-  cat >"$stub_dir/systemctl" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$stub_dir/systemctl"
+  cat >>"$stub_dir/systemctl" <<'STUB'
 set -euo pipefail
 
 printf 'systemctl %s\n' "$*" >>"$COMMAND_LOG"
@@ -266,17 +292,17 @@ fi
 exit 64
 STUB
 
-  cat >"$stub_dir/sleep" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$stub_dir/sleep"
+  cat >>"$stub_dir/sleep" <<'STUB'
 set -euo pipefail
 printf 'sleep %s\n' "$*" >>"$COMMAND_LOG"
 STUB
 
-  cat >"$stub_dir/date" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$stub_dir/date"
+  cat >>"$stub_dir/date" <<'STUB'
 set -euo pipefail
 printf 'date %s\n' "$*" >>"$COMMAND_LOG"
-exec /usr/bin/date "$@"
+exec "$TEST_REAL_DATE" "$@"
 STUB
 
   chmod +x "$home/.local/bin/aoe" "$stub_dir/curl" "$stub_dir/npm" \
@@ -307,9 +333,11 @@ run_tool() {
 
   HOME="$home" \
     XDG_STATE_HOME="${TEST_XDG_STATE_HOME-$home/state}" \
-    PATH="$home/.local/bin:$home/stubs:/usr/bin:/bin" \
+    PATH="$home/.local/bin:$home/stubs:$COMMAND_PATH" \
     QUERY_LOG="$home/query-log" \
     COMMAND_LOG="$home/command-log" \
+    TEST_REAL_BASH="$REAL_BASH" \
+    TEST_REAL_DATE="$REAL_DATE" \
     UPDATE_AGENT_TOOLS_NOW="${UPDATE_AGENT_TOOLS_NOW:-2026-07-14T00:00:00Z}" \
     UPDATE_AGENT_TOOLS_ACTIVATION_NOW="${UPDATE_AGENT_TOOLS_ACTIVATION_NOW:-}" \
     CURL_FAIL="${CURL_FAIL:-0}" \
@@ -441,7 +469,7 @@ test_machine_status_reports_discovery_failure_and_preserves_freshness_state() {
   [[ ! -s "$test_dir/stdout" ]] \
     || fail "failed machine status wrote stdout"
   [[ ! -s "$test_dir/stderr" ]] \
-    || fail "failed machine status wrote stderr"
+    || fail "failed machine status wrote stderr: $(<"$test_dir/stderr")"
   jq -e '
     .last_attempt == "2026-07-14T00:00:00Z"
     and .last_successful_check == "2026-07-13T00:00:00Z"
@@ -1637,7 +1665,7 @@ test_default_update_removes_stale_cli_shims_before_npm_refresh() {
 
   assert_complete_npm_refresh "$test_dir/command-log"
   for binary in codex claude pi; do
-    [[ "$(head -n 1 "$test_dir/.local/bin/$binary")" == '#!/usr/bin/env bash' ]] \
+    [[ "$(head -n 1 "$test_dir/.local/bin/$binary")" == "#!$REAL_BASH" ]] \
       || fail "stale $binary shim survived the npm refresh"
   done
 }

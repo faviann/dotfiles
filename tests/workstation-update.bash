@@ -4,8 +4,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPO_ROOT
 readonly COMMAND="$REPO_ROOT/dot_local/bin/executable_workstation-update"
+REAL_BASH="$(command -v bash)"
 REAL_CHEZMOI="$(command -v chezmoi)"
-readonly REAL_CHEZMOI
+REAL_GIT_UPLOAD_PACK="$(command -v git-upload-pack)"
+readonly REAL_BASH REAL_CHEZMOI REAL_GIT_UPLOAD_PACK
 readonly CANONICAL_ORIGIN='git@github.com:faviann/dotfiles.git'
 
 fail() {
@@ -13,12 +15,33 @@ fail() {
   exit 1
 }
 
+resolved_command_path() {
+  local command_name
+  local command_path
+  local directory
+  local separator=
+  declare -A seen=()
+
+  for command_name in "$@"; do
+    command_path="$(command -v "$command_name")" \
+      || fail "required test dependency not found: $command_name"
+    directory="${command_path%/*}"
+    [[ -z "${seen[$directory]:-}" ]] || continue
+    printf '%s%s' "$separator" "$directory"
+    separator=:
+    seen["$directory"]=1
+  done
+}
+
+COMMAND_PATH="$(resolved_command_path bash chmod flock git grep mkdir mv sleep)"
+readonly COMMAND_PATH
+
 write_agent_tools_fixture() {
   local path="$1"
   local version="$2"
 
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nreadonly FIXTURE_VERSION=%q\n' \
-    "$version" >"$path"
+  printf '#!%s\nset -euo pipefail\nreadonly FIXTURE_VERSION=%q\n' \
+    "$REAL_BASH" "$version" >"$path"
   cat >>"$path" <<'STUB'
 printf 'update-agent-tools %s' "$FIXTURE_VERSION" >>"$AGENT_TOOLS_LOG"
 printf ' %q' "$@" >>"$AGENT_TOOLS_LOG"
@@ -30,7 +53,7 @@ printf '\n' >>"$PHASE_LOG"
 if [[ -n "${TEST_AGENT_GATE:-}" ]]; then
   : >"$TEST_AGENT_GATE.ready"
   while [[ ! -e "$TEST_AGENT_GATE.release" ]]; do
-    /usr/bin/sleep 0.01
+    sleep 0.01
   done
 fi
 
@@ -80,7 +103,7 @@ make_fixture() {
   printf 'ignored-local\n' >"$seed/.gitignore"
   write_agent_tools_fixture \
     "$seed/dot_local/bin/executable_update-agent-tools" v1
-  printf '#!/usr/bin/env bash\nprintf "workstation update v1\\n"\n' \
+  printf '#!%s\nprintf "workstation update v1\\n"\n' "$REAL_BASH" \
     >"$seed/dot_local/bin/executable_workstation-update"
   printf 'managed v1\n' >"$seed/dot_managed"
   chmod +x "$seed/dot_local/bin/"executable_*
@@ -96,8 +119,8 @@ make_fixture() {
   GIT_CONFIG_GLOBAL="$global_config" \
     git -C "$source" remote set-url origin "$CANONICAL_ORIGIN"
 
-  cat >"$home/stubs/chezmoi" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$home/stubs/chezmoi"
+  cat >>"$home/stubs/chezmoi" <<'STUB'
 set -euo pipefail
 printf 'chezmoi' >>"$COMMAND_LOG"
 printf ' %q' "$@" >>"$COMMAND_LOG"
@@ -127,14 +150,14 @@ if [[ "${TEST_DRIFT_AFTER_APPLY:-0}" == 1 \
 fi
 STUB
 
-  cat >"$home/stubs/ssh" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$home/stubs/ssh"
+  cat >>"$home/stubs/ssh" <<'STUB'
 set -euo pipefail
 if [[ "${TEST_SSH_FETCH_FAIL:-0}" == 1 ]]; then
   printf 'injected SSH fetch failure\n' >&2
   exit 66
 fi
-exec /usr/bin/git-upload-pack "$TEST_REMOTE_REPO"
+exec "$TEST_REAL_GIT_UPLOAD_PACK" "$TEST_REMOTE_REPO"
 STUB
   chmod +x "$home/stubs/chezmoi" "$home/stubs/ssh"
 }
@@ -145,9 +168,10 @@ run_update() {
 
   HOME="$test_dir/home" \
     XDG_STATE_HOME="$test_dir/home/state" \
-    PATH="$test_dir/home/stubs:/usr/bin:/bin" \
+    PATH="$test_dir/home/stubs:$COMMAND_PATH" \
     COMMAND_LOG="$test_dir/home/command-log" \
     TEST_REAL_CHEZMOI="$REAL_CHEZMOI" \
+    TEST_REAL_GIT_UPLOAD_PACK="$REAL_GIT_UPLOAD_PACK" \
     SOURCE_REPO="$test_dir/discovered/source" \
     TEST_REMOTE_REPO="$test_dir/remote.git" \
     GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
@@ -205,7 +229,8 @@ publish_managed_version() {
   printf 'managed %s\n' "$version" >"$seed/dot_managed"
   write_agent_tools_fixture \
     "$seed/dot_local/bin/executable_update-agent-tools" "$version"
-  printf '#!/usr/bin/env bash\nprintf "workstation update %s\\n"\n' "$version" \
+  printf '#!%s\nprintf "workstation update %s\\n"\n' \
+    "$REAL_BASH" "$version" \
     >"$seed/dot_local/bin/executable_workstation-update"
   GIT_CONFIG_GLOBAL="$test_dir/gitconfig" git -C "$seed" add .
   GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
@@ -233,8 +258,8 @@ test_setup_must_be_complete_before_source_discovery() {
   trap 'rm -rf "$test_dir"' RETURN
   mkdir -p "$test_dir/home/stubs"
 
-  cat >"$test_dir/home/stubs/chezmoi" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$test_dir/home/stubs/chezmoi"
+  cat >>"$test_dir/home/stubs/chezmoi" <<'STUB'
 printf 'chezmoi %s\n' "$*" >>"$COMMAND_LOG"
 exit 64
 STUB
@@ -242,7 +267,7 @@ STUB
 
   HOME="$test_dir/home" \
     XDG_STATE_HOME="$test_dir/home/state" \
-    PATH="$test_dir/home/stubs:/usr/bin:/bin" \
+    PATH="$test_dir/home/stubs:$COMMAND_PATH" \
     COMMAND_LOG="$test_dir/home/command-log" \
     bash "$COMMAND" \
       >"$test_dir/home/stdout" 2>"$test_dir/home/stderr" || status=$?
@@ -411,7 +436,7 @@ test_concurrent_update_is_rejected_without_queueing() {
   first_pid=$!
   wait_attempt=1
   while [[ ! -e "$gate.ready" && "$wait_attempt" -le 500 ]]; do
-    /usr/bin/sleep 0.01
+    sleep 0.01
     wait_attempt=$((wait_attempt + 1))
   done
   if [[ ! -e "$gate.ready" ]]; then
@@ -817,7 +842,7 @@ test_behind_history_fast_forwards_then_applies_in_order() {
     git -C "$test_dir/seed" rev-parse HEAD)"
   marker="$test_dir/home/state/workstation-update/applied-commit"
   cat >"$test_dir/discovered/source/.git/hooks/post-merge" <<HOOK
-#!/usr/bin/env bash
+#!$REAL_BASH
 printf 'post-merge invoked\n' >'$test_dir/post-merge-ran'
 exit 97
 HOOK

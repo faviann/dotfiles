@@ -9,6 +9,50 @@ fail() {
   exit 2
 }
 
+readonly required_commands=(
+  bash
+  basename
+  cat
+  chezmoi
+  chmod
+  cp
+  cut
+  date
+  diff
+  dirname
+  env
+  find
+  flock
+  git
+  git-upload-pack
+  grep
+  head
+  install
+  jq
+  ln
+  mkdir
+  mktemp
+  mv
+  nix
+  rm
+  script
+  sed
+  sleep
+  sort
+  stat
+  tail
+  tr
+  wc
+)
+
+missing_commands=()
+for required_command in "${required_commands[@]}"; do
+  command -v "$required_command" >/dev/null 2>&1 \
+    || missing_commands+=("$required_command")
+done
+(( ${#missing_commands[@]} == 0 )) \
+  || fail "required test dependencies not found in PATH: ${missing_commands[*]}"
+
 # Invoked indirectly by the signal trap during a full run.
 # shellcheck disable=SC2329
 handle_interruption() {

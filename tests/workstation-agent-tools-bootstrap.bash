@@ -3,6 +3,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPO_ROOT
+REAL_BASH="$(command -v bash)"
+readonly REAL_BASH
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -18,7 +20,7 @@ make_stub() {
   local path="$1"
 
   mkdir -p "$(dirname "$path")"
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$path"
+  printf '#!%s\nexit 0\n' "$REAL_BASH" >"$path"
   chmod +x "$path"
 }
 
@@ -30,11 +32,11 @@ run_activation() {
   chmod +x "$script_path"
   env \
     HOME="$home" \
-    PATH="/usr/bin:/bin" \
+    PATH= \
     DRY_RUN_CMD= \
     VERBOSE_ARG= \
     COMMAND_LOG="$home/command-log" \
-    /usr/bin/bash "$script_path"
+    "$REAL_BASH" "$script_path"
 }
 
 test_missing_tools_are_installed_by_the_bootstrap_handoff() {
@@ -45,8 +47,8 @@ test_missing_tools_are_installed_by_the_bootstrap_handoff() {
   bin_dir="$test_dir/.local/bin"
 
   make_stub "$bin_dir/aoe"
-  cat >"$bin_dir/update-agent-tools" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
+  cat >>"$bin_dir/update-agent-tools" <<'STUB'
 set -euo pipefail
 
 printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
@@ -74,8 +76,8 @@ test_complete_toolchain_is_not_refreshed_during_bootstrap() {
     aoe codex claude pi codex-acp claude-agent-acp pi-acp; do
     make_stub "$bin_dir/$command"
   done
-  cat >"$bin_dir/update-agent-tools" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
+  cat >>"$bin_dir/update-agent-tools" <<'STUB'
 set -euo pipefail
 
 printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
@@ -97,8 +99,8 @@ test_failed_install_fails_the_bootstrap_handoff() {
   bin_dir="$test_dir/.local/bin"
 
   make_stub "$bin_dir/aoe"
-  cat >"$bin_dir/update-agent-tools" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
+  cat >>"$bin_dir/update-agent-tools" <<'STUB'
 exit 23
 STUB
   chmod +x "$bin_dir/update-agent-tools"
