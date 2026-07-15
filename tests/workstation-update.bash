@@ -26,8 +26,6 @@ make_fixture() {
   : >"$global_config"
   git config --file "$global_config" user.name 'Test Operator'
   git config --file "$global_config" user.email 'operator@example.test'
-  git config --file "$global_config" \
-    "url.file://$remote.insteadOf" "$CANONICAL_ORIGIN"
 
   GIT_CONFIG_GLOBAL="$global_config" \
     git init --bare --quiet --initial-branch=main "$remote"
@@ -80,7 +78,17 @@ if [[ "${TEST_DRIFT_AFTER_APPLY:-0}" == 1 \
   printf 'post-apply drift\n' >"$HOME/.managed"
 fi
 STUB
-  chmod +x "$home/stubs/chezmoi"
+
+  cat >"$home/stubs/ssh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${TEST_SSH_FETCH_FAIL:-0}" == 1 ]]; then
+  printf 'injected SSH fetch failure\n' >&2
+  exit 66
+fi
+exec /usr/bin/git-upload-pack "$TEST_REMOTE_REPO"
+STUB
+  chmod +x "$home/stubs/chezmoi" "$home/stubs/ssh"
 }
 
 run_update() {
@@ -93,9 +101,12 @@ run_update() {
     COMMAND_LOG="$test_dir/home/command-log" \
     TEST_REAL_CHEZMOI="$REAL_CHEZMOI" \
     SOURCE_REPO="$test_dir/discovered/source" \
+    TEST_REMOTE_REPO="$test_dir/remote.git" \
     GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
     GIT_CONFIG_NOSYSTEM=1 \
+    GIT_SSH_VARIANT=ssh \
     GIT_TERMINAL_PROMPT=0 \
+    TEST_SSH_FETCH_FAIL="${TEST_SSH_FETCH_FAIL:-0}" \
     TEST_FAIL_DRY_RUN="${TEST_FAIL_DRY_RUN:-0}" \
     TEST_FAIL_APPLY="${TEST_FAIL_APPLY:-0}" \
     TEST_DRIFT_AFTER_APPLY="${TEST_DRIFT_AFTER_APPLY:-0}" \
@@ -222,7 +233,8 @@ test_repository_structure_is_validated_before_fetch() {
   local scenario
 
   for scenario in \
-    wrong-origin multiple-origin wrong-branch detached missing-upstream; do
+    wrong-origin multiple-origin rewritten-origin wrong-branch detached \
+    missing-upstream; do
     test_dir="$(mktemp -d)"
     make_fixture "$test_dir"
     old_remote_tip="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
@@ -245,6 +257,12 @@ test_repository_structure_is_validated_before_fetch() {
             remote.origin.url "$CANONICAL_ORIGIN"
         assert_update_fails_with "$test_dir" \
           'origin must have exactly one URL'
+        ;;
+      rewritten-origin)
+        git config --file "$test_dir/gitconfig" \
+          "url.file://$test_dir/remote.git.insteadOf" "$CANONICAL_ORIGIN"
+        assert_update_fails_with "$test_dir" \
+          'effective origin must be canonical'
         ;;
       wrong-branch)
         GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
@@ -387,11 +405,8 @@ test_fetch_and_unsafe_history_fail_diagnostically() {
 
   test_dir="$(mktemp -d)"
   make_fixture "$test_dir"
-  git config --file "$test_dir/gitconfig" --unset-all \
-    "url.file://$test_dir/remote.git.insteadOf"
-  git config --file "$test_dir/gitconfig" \
-    "url.file://$test_dir/missing.git.insteadOf" "$CANONICAL_ORIGIN"
-  assert_update_fails_with "$test_dir" 'fetch phase failed'
+  TEST_SSH_FETCH_FAIL=1 \
+    assert_update_fails_with "$test_dir" 'fetch phase failed'
   rm -rf "$test_dir"
 
   test_dir="$(mktemp -d)"

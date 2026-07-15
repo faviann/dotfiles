@@ -75,6 +75,15 @@ mapfile -t origin_urls < <(
 [[ "${origin_urls[0]}" == "$CANONICAL_ORIGIN" ]] \
   || fail "source validation failed: origin must be $CANONICAL_ORIGIN"
 
+effective_origin_urls=()
+mapfile -t effective_origin_urls < <(
+  git -C "$source_repository" remote get-url --all origin
+)
+(( ${#effective_origin_urls[@]} == 1 )) \
+  || fail 'source validation failed: effective origin must have exactly one URL'
+[[ "${effective_origin_urls[0]}" == "$CANONICAL_ORIGIN" ]] \
+  || fail 'source validation failed: effective origin must be canonical'
+
 branch="$(git -C "$source_repository" symbolic-ref --quiet --short HEAD || true)"
 [[ -n "$branch" ]] || fail 'source validation failed: detached HEAD'
 [[ "$branch" == "$REQUIRED_BRANCH" ]] \
