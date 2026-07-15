@@ -853,6 +853,96 @@ test_due_check_runs_once_per_success_interval() {
     || fail "due-again check did not perform fresh release queries"
 }
 
+test_internal_freshness_interface_reuses_cache_without_a_subordinate_action() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  AOE_CURRENT="1.2.2" \
+    run_tool "$test_dir" "$test_dir/first-stdout" "$test_dir/first-stderr" --check-if-due \
+    || fail "initial cached check failed: $(<"$test_dir/first-stderr")"
+
+  AOE_CURRENT="1.2.2" \
+    UPDATE_AGENT_TOOLS_NOW="2026-07-14T01:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --freshness-check-if-due \
+    || fail "internal freshness check failed: $(<"$test_dir/stderr")"
+
+  diff -u <(printf '%s\n' 'AoE: 1.2.2 -> 1.2.3') "$test_dir/stdout" \
+    || fail 'internal freshness interface exposed a subordinate action'
+  [[ ! -s "$test_dir/stderr" ]] \
+    || fail "internal freshness interface wrote stderr: $(<"$test_dir/stderr")"
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
+    || fail 'internal freshness interface bypassed the successful cache interval'
+}
+
+test_internal_freshness_interface_does_not_wait_for_maintenance() {
+  local elapsed_milliseconds
+  local finished_at
+  local started_at
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'exec 8>&-; rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  mkdir -p "$test_dir/state/update-agent-tools"
+  exec 8>"$test_dir/state/update-agent-tools/lock"
+  flock 8
+
+  started_at="$(date +%s%N)"
+  if run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+    --freshness-check-if-due; then
+    fail 'internal freshness check waited through active maintenance'
+  fi
+  finished_at="$(date +%s%N)"
+  elapsed_milliseconds=$(( (finished_at - started_at) / 1000000 ))
+
+  (( elapsed_milliseconds < 1000 )) \
+    || fail "internal freshness lock rejection was not prompt: ${elapsed_milliseconds}ms"
+  grep -Fqx \
+    'update-agent-tools: freshness check unavailable: agent-tool maintenance is already running' \
+    "$test_dir/stderr" \
+    || fail 'internal freshness lock rejection changed its bounded diagnostic'
+  [[ ! -s "$test_dir/stdout" ]] \
+    || fail 'internal freshness lock rejection wrote stdout'
+}
+
+test_internal_timeout_record_preserves_last_successful_result() {
+  local state_file
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+  mkdir -p "${state_file%/*}"
+  printf '%s\n' \
+    '{"last_attempt":"2026-07-14T00:00:00Z","last_successful_check":"2026-07-14T00:00:00Z","cached_version_result":"AoE: 1.2.2 -> 1.2.3","check_status":"success","last_successful_activation":"2026-07-01T00:00:00Z","activation_failure":null}' \
+    >"$state_file"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-15T00:00:00Z" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+      --record-freshness-failure \
+    || fail "internal timeout record failed: $(<"$test_dir/stderr")"
+
+  jq -e '
+    .last_attempt == "2026-07-15T00:00:00Z"
+    and .last_successful_check == "2026-07-14T00:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "failed"
+    and .last_successful_activation == "2026-07-01T00:00:00Z"
+    and .activation_failure == null
+  ' "$state_file" >/dev/null \
+    || fail 'internal timeout record did not retain the successful result and activation state'
+  [[ ! -s "$test_dir/stdout" && ! -s "$test_dir/stderr" ]] \
+    || fail 'internal timeout record produced presentation output'
+  if grep -Eq '^(npm|aoe|systemctl) ' "$test_dir/command-log"; then
+    fail 'internal timeout record reached discovery or mutation commands'
+  fi
+  [[ ! -e "$test_dir/query-log" ]] \
+    || fail 'internal timeout record queried a registry'
+}
+
 test_state_uses_local_state_fallback() {
   local test_dir
   local state_file
@@ -1974,6 +2064,9 @@ readonly test_cases=(
   test_conditional_update_retries_a_current_toolchain_after_activation_failure
   test_conditional_update_retries_after_pre_activation_failure_makes_versions_current
   test_due_check_runs_once_per_success_interval
+  test_internal_freshness_interface_reuses_cache_without_a_subordinate_action
+  test_internal_freshness_interface_does_not_wait_for_maintenance
+  test_internal_timeout_record_preserves_last_successful_result
   test_state_uses_local_state_fallback
   test_state_writes_replace_the_state_file_atomically
   test_concurrent_due_checks_are_serialized
