@@ -228,10 +228,15 @@ test_missing_checker_preserves_existing_autolaunch() {
     || fail "missing checker added login error output: $(<"$test_dir/stderr")"
 }
 
-test_due_check_finishes_before_existing_session_attach
-test_due_check_finishes_before_new_session_launch
-test_silent_check_adds_no_login_output
-test_excluded_shell_contexts_skip_the_check
-test_missing_checker_preserves_existing_autolaunch
+# shellcheck source=tests/lib/suite-dispatch.bash
+source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
-printf 'PASS: bashrc AoE auto-launch boundary\n'
+readonly test_cases=(
+  test_due_check_finishes_before_existing_session_attach
+  test_due_check_finishes_before_new_session_launch
+  test_silent_check_adds_no_login_output
+  test_excluded_shell_contexts_skip_the_check
+  test_missing_checker_preserves_existing_autolaunch
+)
+
+suite_dispatch 'bashrc AoE auto-launch boundary' "$@"
