@@ -108,6 +108,19 @@ write_interruptible_suite() {
   local suite="$2"
   local test_case="$3"
 
+  cat >"$fixture/tests/$suite.worker" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\\n' "\$BASHPID" >"\$CONTROL_DIR/$suite.descendant.pid"
+trap ': >"\$CONTROL_DIR/$suite.descendant.terminated"; exit 143' TERM
+: >"\$CONTROL_DIR/$suite.descendant.started"
+while :; do
+  sleep 1
+done
+EOF
+  chmod +x "$fixture/tests/$suite.worker"
+
   cat >"$fixture/tests/$suite" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -123,6 +136,7 @@ fi
 
 printf '%s\\n' "\$BASHPID" >"\$CONTROL_DIR/$suite.pid"
 trap ': >"\$CONTROL_DIR/$suite.terminated"; exit 143' TERM
+bash "\$(dirname "\$0")/$suite.worker" &
 : >"\$CONTROL_DIR/$suite.started"
 while :; do
   sleep 1
@@ -142,6 +156,17 @@ cleanup_interrupt_fixture() {
     kill "$child_pid" 2>/dev/null || true
   done
   rm -rf "$test_dir"
+}
+
+assert_process_is_gone() {
+  local pid_file="$1"
+  local description="$2"
+  local process_id
+
+  process_id="$(<"$pid_file")"
+  if kill -0 "$process_id" 2>/dev/null; then
+    fail "$description is still running after interruption (pid $process_id)"
+  fi
 }
 
 assert_runner_fails_with() {
@@ -330,6 +355,10 @@ test_interruption_terminates_suites_and_removes_temporary_logs() {
     || fail 'alpha suite did not start before interruption'
   wait_for_file "$test_dir/control/beta.bash.started" \
     || fail 'beta suite did not start before interruption'
+  wait_for_file "$test_dir/control/alpha.bash.descendant.started" \
+    || fail 'alpha suite descendant did not start before interruption'
+  wait_for_file "$test_dir/control/beta.bash.descendant.started" \
+    || fail 'beta suite descendant did not start before interruption'
 
   kill -TERM "$runner_pid"
   if wait "$runner_pid"; then
@@ -339,6 +368,18 @@ test_interruption_terminates_suites_and_removes_temporary_logs() {
     || fail 'interruption did not terminate alpha suite'
   wait_for_file "$test_dir/control/beta.bash.terminated" \
     || fail 'interruption did not terminate beta suite'
+  wait_for_file "$test_dir/control/alpha.bash.descendant.terminated" \
+    || fail 'interruption did not terminate alpha suite descendant'
+  wait_for_file "$test_dir/control/beta.bash.descendant.terminated" \
+    || fail 'interruption did not terminate beta suite descendant'
+  assert_process_is_gone \
+    "$test_dir/control/alpha.bash.pid" 'alpha suite'
+  assert_process_is_gone \
+    "$test_dir/control/beta.bash.pid" 'beta suite'
+  assert_process_is_gone \
+    "$test_dir/control/alpha.bash.descendant.pid" 'alpha suite descendant'
+  assert_process_is_gone \
+    "$test_dir/control/beta.bash.descendant.pid" 'beta suite descendant'
   [[ -z "$(find "$test_dir/tmp" -mindepth 1 -print -quit)" ]] \
     || fail 'interruption left temporary logging state behind'
 }

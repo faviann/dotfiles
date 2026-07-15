@@ -16,7 +16,7 @@ handle_interruption() {
 
   trap - HUP INT TERM
   for child_pid in "${pids[@]}"; do
-    kill -TERM "$child_pid" 2>/dev/null || true
+    kill -TERM -- "-$child_pid" 2>/dev/null || true
   done
   for child_pid in "${pids[@]}"; do
     wait "$child_pid" 2>/dev/null || true
@@ -80,6 +80,7 @@ if (( $# == 0 )); then
   statuses=()
   durations_ms=()
   declare -A suite_index_by_pid=()
+  set -m
   for suite_index in "${!suites[@]}"; do
     suite_path="${suites[$suite_index]}"
     starts_ms[suite_index]="$(date +%s%3N)"
@@ -88,6 +89,7 @@ if (( $# == 0 )); then
     pids+=("$child_pid")
     suite_index_by_pid["$child_pid"]="$suite_index"
   done
+  set +m
 
   aggregate_status=0
   passed_count=0
