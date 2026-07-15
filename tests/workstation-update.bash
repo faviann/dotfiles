@@ -33,7 +33,7 @@ resolved_command_path() {
   done
 }
 
-COMMAND_PATH="$(resolved_command_path bash chmod date flock git grep jq mkdir mktemp mv rm sha256sum sleep stat timeout touch)"
+COMMAND_PATH="$(resolved_command_path bash chmod date flock git grep jq mkdir mktemp mv rm sed sha256sum sleep stat timeout touch)"
 readonly COMMAND_PATH
 
 write_agent_tools_fixture() {
