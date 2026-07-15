@@ -28,6 +28,16 @@ git_in_progress() {
   return 1
 }
 
+reject_hidden_index_entries() {
+  local index_entries
+
+  index_entries="$(git -C "$source_repository" ls-files -v)" \
+    || fail 'source validation failed: cannot inspect index flags'
+  if grep -Eq '^[a-zS] ' <<<"$index_entries"; then
+    fail 'source validation failed: non-default index flags hide tracked content'
+  fi
+}
+
 record_applied_commit() {
   local temporary_marker
 
@@ -56,8 +66,13 @@ source_path="$(chezmoi source-path)" \
 source_repository="$(git -C "$source_path" rev-parse --show-toplevel 2>/dev/null)" \
   || fail 'source validation failed: source is not a Git repository'
 
-origin_url="$(git -C "$source_repository" config --get remote.origin.url || true)"
-[[ "$origin_url" == "$CANONICAL_ORIGIN" ]] \
+origin_urls=()
+mapfile -t origin_urls < <(
+  git -C "$source_repository" config --get-all remote.origin.url
+)
+(( ${#origin_urls[@]} == 1 )) \
+  || fail 'source validation failed: origin must have exactly one URL'
+[[ "${origin_urls[0]}" == "$CANONICAL_ORIGIN" ]] \
   || fail "source validation failed: origin must be $CANONICAL_ORIGIN"
 
 branch="$(git -C "$source_repository" symbolic-ref --quiet --short HEAD || true)"
@@ -72,6 +87,7 @@ upstream="$(git -C "$source_repository" \
 
 git_in_progress \
   && fail 'source validation failed: unfinished Git operation'
+reject_hidden_index_entries
 source_status="$(git -C "$source_repository" status \
   --porcelain=v1 --untracked-files=all --ignored --ignore-submodules=none)" \
   || fail 'source validation failed: cannot inspect source repository'
@@ -100,6 +116,7 @@ fi
 
 git_in_progress \
   && fail 'source validation failed: unfinished Git operation after fetch'
+reject_hidden_index_entries
 source_status="$(git -C "$source_repository" status \
   --porcelain=v1 --untracked-files=all --ignored --ignore-submodules=none)" \
   || fail 'source validation failed: cannot inspect source after fetch'

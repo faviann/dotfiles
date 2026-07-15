@@ -221,7 +221,8 @@ test_repository_structure_is_validated_before_fetch() {
   local old_remote_tip
   local scenario
 
-  for scenario in wrong-origin wrong-branch detached missing-upstream; do
+  for scenario in \
+    wrong-origin multiple-origin wrong-branch detached missing-upstream; do
     test_dir="$(mktemp -d)"
     make_fixture "$test_dir"
     old_remote_tip="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
@@ -234,6 +235,16 @@ test_repository_structure_is_validated_before_fetch() {
           git -C "$test_dir/discovered/source" remote set-url origin \
             git@github.com:someone-else/dotfiles.git
         assert_update_fails_with "$test_dir" 'origin must be'
+        ;;
+      multiple-origin)
+        GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+          git -C "$test_dir/discovered/source" remote set-url origin \
+            "file://$test_dir/remote.git"
+        GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+          git -C "$test_dir/discovered/source" config --add \
+            remote.origin.url "$CANONICAL_ORIGIN"
+        assert_update_fails_with "$test_dir" \
+          'origin must have exactly one URL'
         ;;
       wrong-branch)
         GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
@@ -270,8 +281,14 @@ test_all_source_extras_and_unfinished_operations_are_preserved() {
   local before_head
   local before_status
   local after_status
+  local before_index_flags
+  local after_index_flags
+  local hidden_content
+  local before_remote_tip
 
-  for scenario in staged modified deleted untracked ignored unfinished; do
+  for scenario in \
+    staged modified deleted untracked ignored assume-unchanged \
+    skip-worktree unfinished; do
     test_dir="$(mktemp -d)"
     make_fixture "$test_dir"
 
@@ -297,16 +314,40 @@ test_all_source_extras_and_unfinished_operations_are_preserved() {
         printf 'ignored local work\n' \
           >"$test_dir/discovered/source/ignored-local"
         ;;
+      assume-unchanged)
+        printf 'hidden assume-unchanged work\n' \
+          >>"$test_dir/discovered/source/dot_managed"
+        GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+          git -C "$test_dir/discovered/source" update-index \
+            --assume-unchanged dot_managed
+        ;;
+      skip-worktree)
+        printf 'hidden skip-worktree work\n' \
+          >>"$test_dir/discovered/source/dot_managed"
+        GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+          git -C "$test_dir/discovered/source" update-index \
+            --skip-worktree dot_managed
+        ;;
       unfinished)
         mkdir "$test_dir/discovered/source/.git/rebase-merge"
         ;;
     esac
 
+    before_remote_tip="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+      git -C "$test_dir/discovered/source" rev-parse origin/main)"
+    publish_managed_version "$test_dir" v2
     before_head="$(source_commit "$test_dir")"
     before_status="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
       git -C "$test_dir/discovered/source" status \
         --porcelain=v1 --untracked-files=all --ignored)"
-    if [[ "$scenario" == unfinished ]]; then
+    before_index_flags="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+      git -C "$test_dir/discovered/source" ls-files -v dot_managed)"
+    hidden_content=''
+    if [[ "$scenario" == assume-unchanged \
+      || "$scenario" == skip-worktree ]]; then
+      hidden_content="$(<"$test_dir/discovered/source/dot_managed")"
+      assert_update_fails_with "$test_dir" 'non-default index flags'
+    elif [[ "$scenario" == unfinished ]]; then
       assert_update_fails_with "$test_dir" 'unfinished Git operation'
     else
       assert_update_fails_with "$test_dir" \
@@ -315,10 +356,24 @@ test_all_source_extras_and_unfinished_operations_are_preserved() {
     after_status="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
       git -C "$test_dir/discovered/source" status \
         --porcelain=v1 --untracked-files=all --ignored)"
+    after_index_flags="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+      git -C "$test_dir/discovered/source" ls-files -v dot_managed)"
     [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
       || fail "$scenario changed the checked-out commit"
+    [[ "$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+      git -C "$test_dir/discovered/source" rev-parse origin/main)" \
+      == "$before_remote_tip" ]] \
+      || fail "$scenario fetched before rejecting local source state"
     [[ "$after_status" == "$before_status" ]] \
       || fail "$scenario changed the index, worktree, or extra content"
+    [[ "$after_index_flags" == "$before_index_flags" ]] \
+      || fail "$scenario changed the index flags"
+    if [[ "$scenario" == assume-unchanged \
+      || "$scenario" == skip-worktree ]]; then
+      [[ "$(<"$test_dir/discovered/source/dot_managed")" \
+        == "$hidden_content" ]] \
+        || fail "$scenario changed the hidden local content"
+    fi
     if [[ "$scenario" == unfinished ]]; then
       [[ -d "$test_dir/discovered/source/.git/rebase-merge" ]] \
         || fail 'unfinished operation metadata was discarded'
