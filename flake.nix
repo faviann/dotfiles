@@ -41,6 +41,7 @@
           ./dot_local/bin/executable_update-agent-tools
           ./dot_local/bin/executable_workstation-update
           ./scripts/run-shellcheck
+          ./scripts/run-tests
           ./tests
         ];
       };

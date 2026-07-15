@@ -11,6 +11,7 @@ shell_inputs=(
   "$REPO_ROOT"/tests/contracts/*.bash
   "$REPO_ROOT"/tests/lib/*.bash
   "$REPO_ROOT/scripts/run-shellcheck"
+  "$REPO_ROOT/scripts/run-tests"
 )
 template_inputs=("$REPO_ROOT"/.chezmoiscripts/*.sh.tmpl)
 
