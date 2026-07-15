@@ -2,10 +2,14 @@
 export PATH="$HOME/.local/bin:$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
 
 if [ -r /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+	# This host-provided profile is intentionally outside the dotfiles source.
+	# shellcheck disable=SC1091
 	. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 fi
 
 if [ -r "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh" ]; then
+	# This Home Manager profile is generated outside the dotfiles source.
+	# shellcheck disable=SC1091
 	. "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
 fi
 

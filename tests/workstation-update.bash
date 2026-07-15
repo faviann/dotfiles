@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPO_ROOT
 readonly COMMAND="$REPO_ROOT/dot_local/bin/executable_workstation-update"
-readonly REAL_CHEZMOI="$(command -v chezmoi)"
+REAL_CHEZMOI="$(command -v chezmoi)"
+readonly REAL_CHEZMOI
 readonly CANONICAL_ORIGIN='git@github.com:faviann/dotfiles.git'
 
 fail() {
