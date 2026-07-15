@@ -46,6 +46,23 @@
         pkgs.nix
         pkgs.util-linux
       ];
+      behavioralTestSource = nixpkgs.lib.fileset.toSource {
+        root = ./.;
+        fileset = ./.;
+      };
+      workstationHomeConfiguration = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        extraSpecialArgs = {
+          hermesPackage = hermes-agent.packages.${system}.default;
+        };
+        modules = [
+          nix-openclaw.homeManagerModules.openclaw
+          ./home/workstation.nix
+        ];
+      };
+      bootstrapAgentToolsActivation = pkgs.writeText "bootstrap-agent-tools" (
+        workstationHomeConfiguration.config.home.activation.bootstrapAgentTools.data
+      );
       shellcheckSource = nixpkgs.lib.fileset.toSource {
         root = ./.;
         fileset = nixpkgs.lib.fileset.unions [
@@ -75,29 +92,53 @@
         program = "${shellcheckCommand}/bin/dotfiles-shellcheck";
       };
 
-      checks.${system}.shellcheck = pkgs.runCommand "dotfiles-shellcheck" {
-        nativeBuildInputs = [
-          pkgs.chezmoi
-          pkgs.shellcheck
-        ];
-      } ''
-        ${pkgs.bash}/bin/bash ${./scripts/run-shellcheck} ${shellcheckSource}
-        touch "$out"
-      '';
+      checks.${system} = {
+        shellcheck = pkgs.runCommand "dotfiles-shellcheck" {
+          nativeBuildInputs = [
+            pkgs.chezmoi
+            pkgs.shellcheck
+          ];
+        } ''
+          ${pkgs.bash}/bin/bash ${./scripts/run-shellcheck} ${shellcheckSource}
+          touch "$out"
+        '';
+
+        test-runner = pkgs.runCommand "dotfiles-test-runner" {
+          nativeBuildInputs = behavioralTestInputs;
+        } ''
+          export HOME="$TMPDIR/home"
+          export XDG_CACHE_HOME="$TMPDIR/cache"
+          export XDG_CONFIG_HOME="$TMPDIR/config"
+          export XDG_STATE_HOME="$TMPDIR/state"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
+
+          ${pkgs.bash}/bin/bash ${behavioralTestSource}/tests/contracts/test-runner.bash
+          touch "$out"
+        '';
+
+        behavioral-tests = pkgs.runCommand "dotfiles-behavioral-tests" {
+          nativeBuildInputs = behavioralTestInputs;
+          NIX_CONFIG = ''
+            experimental-features = nix-command flakes
+            offline = true
+          '';
+          TEST_BOOTSTRAP_ACTIVATION_SCRIPT = bootstrapAgentToolsActivation;
+        } ''
+          export HOME="$TMPDIR/home"
+          export XDG_CACHE_HOME="$TMPDIR/cache"
+          export XDG_CONFIG_HOME="$TMPDIR/config"
+          export XDG_STATE_HOME="$TMPDIR/state"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
+
+          ${pkgs.bash}/bin/bash ${behavioralTestSource}/scripts/run-tests
+          touch "$out"
+        '';
+      };
 
       devShells.${system}.default = pkgs.mkShell {
         packages = behavioralTestInputs ++ [ pkgs.shellcheck ];
       };
 
-      homeConfigurations.workstation = home-manager.lib.homeManagerConfiguration {
-        inherit pkgs;
-        extraSpecialArgs = {
-          hermesPackage = hermes-agent.packages.${system}.default;
-        };
-        modules = [
-          nix-openclaw.homeManagerModules.openclaw
-          ./home/workstation.nix
-        ];
-      };
+      homeConfigurations.workstation = workstationHomeConfiguration;
     };
 }

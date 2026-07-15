@@ -12,6 +12,11 @@ fail() {
 }
 
 activation_script() {
+  if [[ -n "${TEST_BOOTSTRAP_ACTIVATION_SCRIPT:-}" ]]; then
+    cat "$TEST_BOOTSTRAP_ACTIVATION_SCRIPT"
+    return
+  fi
+
   nix eval --raw \
     "$REPO_ROOT#homeConfigurations.workstation.config.home.activation.bootstrapAgentTools.data"
 }

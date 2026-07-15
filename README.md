@@ -6,17 +6,30 @@ See `BOOTSTRAP.md` for new machine setup.
 
 ## Repository validation
 
-Run the focused shell analysis after changing Bash or shell templates:
+Discover exact behavioral selectors, then run one case or suite during
+iteration:
+
+```bash
+bash scripts/run-tests --list
+bash scripts/run-tests --case test_exact_case_name
+bash scripts/run-tests --suite workstation-update.bash
+```
+
+Run focused shell analysis after changing Bash or shell templates:
 
 ```bash
 nix run .#shellcheck
 ```
 
-Before closeout, run the complete flake validation:
+Use the complete flake validation as the sole full closeout gate:
 
 ```bash
 nix flake check
 ```
+
+It includes ShellCheck, the test-runner contract, and every behavioral suite,
+so a standalone full `bash scripts/run-tests` immediately beforehand is
+redundant.
 
 ## Workstation Home Manager
 
