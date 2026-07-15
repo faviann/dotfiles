@@ -138,6 +138,26 @@ test_every_suite_lists_all_case_names() {
     || fail 'case names are ambiguous across suites'
 }
 
+test_every_suite_preserves_no_argument_full_run() {
+  local specification
+  local suite
+  local pass_line
+  local output
+
+  for specification in \
+    'bashrc-aoe-autolaunch.bash|PASS: bashrc AoE auto-launch boundary' \
+    'chezmoi-target-inventory.bash|PASS: chezmoi target inventory' \
+    'update-agent-tools-check.bash|PASS: update-agent-tools --check' \
+    'workstation-agent-tools-bootstrap.bash|PASS: workstation agent-tool bootstrap handoff' \
+    'workstation-update.bash|PASS: workstation update'; do
+    IFS='|' read -r suite pass_line <<<"$specification"
+    output="$(bash "$REPO_ROOT/tests/$suite")" \
+      || fail "$suite no-argument full run exited nonzero"
+    [[ "$output" == "$pass_line" ]] \
+      || fail "$suite no-argument full run produced unexpected output: $output"
+  done
+}
+
 test_every_suite_runs_one_exact_named_case() {
   local specification
   local suite
@@ -202,6 +222,7 @@ test_unknown_and_malformed_invocations_fail_clearly() {
 }
 
 test_every_suite_lists_all_case_names
+test_every_suite_preserves_no_argument_full_run
 test_every_suite_runs_one_exact_named_case
 test_unknown_and_malformed_invocations_fail_clearly
 
