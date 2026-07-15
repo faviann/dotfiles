@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly COMMAND="$REPO_ROOT/dot_local/bin/executable_update-agent-tools"
+readonly CHECK_STATUS_UPDATES_AVAILABLE=10
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -393,8 +394,8 @@ test_machine_status_reports_outdated_by_exit_status_without_output() {
     status=$?
   fi
 
-  [[ "$status" -eq 10 ]] \
-    || fail "outdated machine status exited $status instead of 10"
+  [[ "$status" -eq "$CHECK_STATUS_UPDATES_AVAILABLE" ]] \
+    || fail "outdated machine status exited $status instead of $CHECK_STATUS_UPDATES_AVAILABLE"
   [[ ! -s "$test_dir/stdout" ]] \
     || fail "outdated machine status wrote stdout"
   [[ ! -s "$test_dir/stderr" ]] \
@@ -544,12 +545,20 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
     || fail "conditional update did not discover before ACP inspection and mutation"
   jq -e '
     .last_successful_check == "2026-07-14T00:00:00Z"
-    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .cached_version_result == ""
     and .check_status == "success"
     and .last_successful_activation == "2026-07-14T00:00:00Z"
     and .activation_failure == null
   ' "$state_file" >/dev/null \
-    || fail "outdated conditional update did not preserve check and activation state"
+    || fail "successful conditional update did not record current check and activation state"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-14T01:00:00Z" \
+    run_tool "$test_dir" "$test_dir/after-stdout" "$test_dir/after-stderr" --check-if-due \
+    || fail "post-update cached freshness check failed: $(<"$test_dir/after-stderr")"
+  [[ ! -s "$test_dir/after-stdout" && ! -s "$test_dir/after-stderr" ]] \
+    || fail "post-update cached freshness check replayed a stale update notice"
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 14 ]] \
+    || fail "post-update not-due freshness check queried registries"
 }
 
 test_conditional_update_requires_yes_for_unattended_acp_disruption() {
@@ -620,6 +629,48 @@ test_conditional_interactive_update_prompts_once_for_acp_disruption() {
     || fail "interactive conditional update did not prompt exactly once"
   grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
     || fail "authorized interactive conditional update did not mutate"
+}
+
+test_conditional_update_retries_a_current_toolchain_after_activation_failure() {
+  local state_file
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  state_file="$test_dir/state/update-agent-tools/state.json"
+
+  if AOE_CURRENT="1.2.2" \
+    SYSTEMCTL_RESTART_FAIL=1 \
+    run_tool "$test_dir" "$test_dir/failed-stdout" "$test_dir/failed-stderr" --update-if-needed; then
+    fail "conditional activation failure exited zero"
+  fi
+  jq -e '
+    .activation_failure.phase == "activation"
+    and .activation_failure.component == "AoE service restart"
+  ' "$state_file" >/dev/null \
+    || fail "conditional activation failure was not recorded"
+
+  UPDATE_AGENT_TOOLS_NOW="2026-07-14T01:00:00Z" \
+    run_tool "$test_dir" "$test_dir/retry-stdout" "$test_dir/retry-stderr" --update-if-needed \
+    || fail "conditional activation recovery failed: $(<"$test_dir/retry-stderr")"
+
+  [[ "$(grep -c '^aoe update --yes$' "$test_dir/command-log")" -eq 2 ]] \
+    || fail "conditional recovery did not refresh AoE as a whole-unit retry"
+  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 12 ]] \
+    || fail "conditional recovery skipped the whole npm refresh after versions became current"
+  [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
+    "$test_dir/command-log")" -eq 2 ]] \
+    || fail "conditional recovery did not retry activation"
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 28 ]] \
+    || fail "conditional recovery did not freshly discover and verify both attempts"
+  jq -e '
+    .last_successful_check == "2026-07-14T01:00:00Z"
+    and .cached_version_result == ""
+    and .check_status == "success"
+    and .last_successful_activation == "2026-07-14T01:00:00Z"
+    and .activation_failure == null
+  ' "$state_file" >/dev/null \
+    || fail "conditional recovery did not clear failure and record current state"
 }
 
 assert_complete_npm_refresh() {
@@ -1786,6 +1837,7 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated
 test_conditional_update_requires_yes_for_unattended_acp_disruption
 test_conditional_update_yes_authorizes_only_acp_disruption
 test_conditional_interactive_update_prompts_once_for_acp_disruption
+test_conditional_update_retries_a_current_toolchain_after_activation_failure
 test_due_check_runs_once_per_success_interval
 test_state_uses_local_state_fallback
 test_state_writes_replace_the_state_file_atomically
