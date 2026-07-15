@@ -354,6 +354,7 @@ print_cached_result() {
 
   if [[ -n "$cached_result" ]]; then
     printf '%s\n' "$cached_result"
+    printf 'Run: update-agent-tools\n'
   fi
 }
 

@@ -384,7 +384,7 @@ test_due_check_runs_once_per_success_interval() {
     run_tool "$test_dir" "$test_dir/stdout-1" "$test_dir/stderr-1" --check-if-due; then
     fail "initial due check exited nonzero: $(<"$test_dir/stderr-1")"
   fi
-  [[ "$(<"$test_dir/stdout-1")" == "AoE: 1.2.2 -> 1.2.3" ]] \
+  [[ "$(<"$test_dir/stdout-1")" == $'AoE: 1.2.2 -> 1.2.3\nRun: update-agent-tools' ]] \
     || fail "initial due check did not report the current result"
   [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
     || fail "initial due check did not perform all release queries"
@@ -394,7 +394,7 @@ test_due_check_runs_once_per_success_interval() {
     || fail "not-yet-due check exited nonzero: $(<"$test_dir/stderr-2")"
   [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
     || fail "not-yet-due check queried a registry or release"
-  [[ "$(<"$test_dir/stdout-2")" == "AoE: 1.2.2 -> 1.2.3" ]] \
+  [[ "$(<"$test_dir/stdout-2")" == $'AoE: 1.2.2 -> 1.2.3\nRun: update-agent-tools' ]] \
     || fail "not-yet-due check did not reuse the cached result"
 
   UPDATE_AGENT_TOOLS_NOW="2026-07-15T10:00:00Z" \
@@ -542,7 +542,7 @@ test_failed_check_preserves_cache_and_retries_after_one_hour() {
     UPDATE_AGENT_TOOLS_NOW="2026-07-14T10:00:00Z" \
     run_tool "$test_dir" "$test_dir/stdout-1" "$test_dir/stderr-1" --check-if-due \
     || fail "cache-seeding check exited nonzero: $(<"$test_dir/stderr-1")"
-  [[ "$(<"$test_dir/stdout-1")" == "AoE: 1.2.2 -> 1.2.3" ]] \
+  [[ "$(<"$test_dir/stdout-1")" == $'AoE: 1.2.2 -> 1.2.3\nRun: update-agent-tools' ]] \
     || fail "cache-seeding check wrote unexpected output"
 
   expected_failure='update-agent-tools: agent-tool update check failed; last successful check: 2026-07-14T10:00:00Z; next retry: 2026-07-15T11:00:00Z'
@@ -769,6 +769,7 @@ codex-acp adapter: 5.6.6 -> 5.6.7
 claude-agent-acp adapter: 6.7.7 -> 6.7.8
 pi-acp adapter: 7.8.8 -> 7.8.9
 Codex runtime (codex-acp): 2.3.2 -> 2.3.4
+Run: update-agent-tools
 EOF
 )"
   diff -u <(printf '%s\n' "$expected") "$test_dir/stdout" \
@@ -793,6 +794,7 @@ test_missing_components_are_reported() {
   expected="$(cat <<'EOF'
 AoE: missing -> 1.2.3
 claude-agent-acp adapter: missing -> 6.7.8
+Run: update-agent-tools
 EOF
 )"
   diff -u <(printf '%s\n' "$expected") "$test_dir/stdout" \
@@ -1430,7 +1432,7 @@ test_nested_codex_runtime_is_a_distinct_scope() {
   fi
 
   diff -u \
-    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\n') \
+    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\nRun: update-agent-tools\n') \
     "$test_dir/stdout" \
     || fail "nested Codex output did not match"
   [[ ! -s "$test_dir/stderr" ]] \
@@ -1453,7 +1455,7 @@ test_nested_codex_uses_latest_adapter_compatible_target() {
   fi
 
   diff -u \
-    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\n') \
+    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\nRun: update-agent-tools\n') \
     "$test_dir/stdout" \
     || fail "adapter-compatible Codex output did not match"
   [[ ! -s "$test_dir/stderr" ]] \
@@ -1476,7 +1478,7 @@ test_nested_codex_accepts_a_single_compatible_version() {
   fi
 
   diff -u \
-    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\n') \
+    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\nRun: update-agent-tools\n') \
     "$test_dir/stdout" \
     || fail "single-version Codex output did not match"
   [[ ! -s "$test_dir/stderr" ]] \
@@ -1499,7 +1501,7 @@ test_nested_codex_ignores_compatible_prereleases() {
   fi
 
   diff -u \
-    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\n') \
+    <(printf 'Codex runtime (codex-acp): 2.3.3 -> 2.3.4\nRun: update-agent-tools\n') \
     "$test_dir/stdout" \
     || fail "stable nested Codex output did not match"
   [[ ! -s "$test_dir/stderr" ]] \

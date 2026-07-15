@@ -92,9 +92,10 @@ activation failures remain recorded until a successful rerun.
 Eligible interactive SSH logins run a synchronous, non-mutating freshness
 check immediately before AoE opens. A successful check is reused for 24 hours;
 a failed check is retried after one hour. Healthy state is silent. When updates
-exist, the notice contains only affected component names and current-to-latest
-versions. A failed check retains the last known result and prints the last
-successful check plus the exact next retry time.
+exist, the notice lists affected component names and current-to-latest versions,
+then shows `update-agent-tools` as the command to run. A failed check retains the
+last known result and prints the last successful check plus the exact next retry
+time.
 
 Login never installs updates. There is no background timer or scheduler, and
 local shells, nested tmux sessions, remote commands, and non-interactive shells
