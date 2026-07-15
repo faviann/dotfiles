@@ -649,6 +649,8 @@ test_freshness_git_reads_do_not_refresh_the_index() {
   local before_index_identity
   local before_index_sha
   local expected_remote_head
+  local fetch_head_path
+  local fetch_head_state
   local index_path
   local test_dir
 
@@ -662,10 +664,15 @@ test_freshness_git_reads_do_not_refresh_the_index() {
   expected_remote_head="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
     git -C "$test_dir/seed" rev-parse HEAD)"
   index_path="$test_dir/discovered/source/.git/index"
+  fetch_head_path="$test_dir/discovered/source/.git/FETCH_HEAD"
   touch -d '2030-01-01T00:00:00Z' \
     "$test_dir/discovered/source/dot_managed"
   before_index_sha="$(sha256sum "$index_path")"
   before_index_identity="$(stat -c '%i:%Y:%s' "$index_path")"
+  fetch_head_state=absent
+  if [[ -f "$fetch_head_path" ]]; then
+    fetch_head_state="$(sha256sum "$fetch_head_path")"
+  fi
 
   run_update "$test_dir" --freshness \
     || fail 'non-refreshing freshness check failed'
@@ -677,6 +684,13 @@ test_freshness_git_reads_do_not_refresh_the_index() {
     || fail 'freshness Git reads refreshed or rewrote the index'
   [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
     || fail 'freshness changed the checked-out commit while checking the index'
+  if [[ "$fetch_head_state" == absent ]]; then
+    [[ ! -e "$fetch_head_path" ]] \
+      || fail 'freshness created FETCH_HEAD metadata'
+  else
+    [[ "$(sha256sum "$fetch_head_path")" == "$fetch_head_state" ]] \
+      || fail 'freshness rewrote FETCH_HEAD metadata'
+  fi
   [[ "$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
     git -C "$test_dir/discovered/source" rev-parse origin/main)" \
     == "$expected_remote_head" ]] \
@@ -759,6 +773,129 @@ test_dotfiles_timeout_preserves_completed_agent_and_cached_dotfiles_results() {
     || fail 'dotfiles timeout changed the worktree'
   [[ "$(<"$test_dir/home/.managed")" == "$before_target" ]] \
     || fail 'dotfiles timeout changed a managed target'
+}
+
+test_agent_timeout_preserves_newly_completed_dotfiles_result() {
+  local before_head
+  local before_index_identity
+  local before_index_sha
+  local before_source_content
+  local before_target
+  local expected_remote
+  local index_path
+  local local_short
+  local remote_short
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  WORKSTATION_UPDATE_NOW="2026-07-15T00:00:00Z" \
+    TEST_AGENT_FRESHNESS_STDOUT=$'AoE: 1.2.2 -> 1.2.3\n' \
+    run_update "$test_dir" --freshness \
+    || fail 'agent-timeout cache setup failed'
+
+  before_head="$(source_commit "$test_dir")"
+  before_source_content="$(<"$test_dir/discovered/source/dot_managed")"
+  before_target="$(<"$test_dir/home/.managed")"
+  index_path="$test_dir/discovered/source/.git/index"
+  before_index_sha="$(sha256sum "$index_path")"
+  before_index_identity="$(stat -c '%i:%Y:%s' "$index_path")"
+  publish_managed_version "$test_dir" v2
+  expected_remote="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/seed" rev-parse HEAD)"
+  local_short="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" rev-parse --short "$before_head")"
+  remote_short="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/seed" rev-parse --short "$expected_remote")"
+
+  TEST_AGENT_GATE="$test_dir/agent-gate" \
+    WORKSTATION_UPDATE_NOW="2026-07-16T00:00:00Z" \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'agent timeout escaped the freshness boundary'
+
+  jq -e --arg remote "$expected_remote" '
+    .last_attempt == "2026-07-16T00:00:00Z"
+    and .last_successful_check == "2026-07-16T00:00:00Z"
+    and .cached_remote_commit == $remote
+    and .attempt_status == "success"
+  ' "$test_dir/home/state/workstation-update/dotfiles-freshness.json" >/dev/null \
+    || fail 'completed dotfiles source was overwritten as timed out'
+  jq -e '
+    .last_attempt == "2026-07-16T00:00:00Z"
+    and .last_successful_check == "2026-07-15T00:00:00Z"
+    and .cached_version_result == "AoE: 1.2.2 -> 1.2.3"
+    and .check_status == "failed"
+  ' "$test_dir/home/state/update-agent-tools/state.json" >/dev/null \
+    || fail 'timed-out agent source did not preserve its retry state and cached result'
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Agent tools:' \
+      '  AoE: 1.2.2 -> 1.2.3' \
+      'Dotfiles: 1 commit (sanitized below)' \
+      "  $local_short..$remote_short" \
+      'Agent tools: freshness check failed; using result from 2026-07-15T00:00:00Z' \
+      'Run: workstation-update') \
+    "$test_dir/home/stdout" \
+    || fail 'agent timeout suppressed the newly completed dotfiles result'
+  [[ "$(source_commit "$test_dir")" == "$before_head" ]] \
+    || fail 'agent timeout changed the checked-out commit'
+  [[ "$(sha256sum "$index_path")" == "$before_index_sha" \
+    && "$(stat -c '%i:%Y:%s' "$index_path")" == "$before_index_identity" ]] \
+    || fail 'agent timeout changed the index'
+  [[ "$(<"$test_dir/discovered/source/dot_managed")" == "$before_source_content" \
+    && "$(<"$test_dir/home/.managed")" == "$before_target" ]] \
+    || fail 'agent timeout changed the worktree or managed target'
+}
+
+test_timeout_notice_preserves_local_blockers_and_incomplete_maintenance() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" fetch --quiet "$test_dir/remote.git" \
+      '+refs/heads/main:refs/remotes/origin/main'
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" merge --quiet --ff-only origin/main
+  printf 'unpublished work\n' \
+    >"$test_dir/discovered/source/dot_unpublished"
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" add dot_unpublished
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" commit --quiet -m unpublished
+  printf 'local operator work\n' >>"$test_dir/discovered/source/dot_managed"
+  mkdir -p "$test_dir/home/state/update-agent-tools"
+  printf '%s\n' \
+    '{"activation_failure":{"phase":"activation","component":"AoE service restart"}}' \
+    >"$test_dir/home/state/update-agent-tools/state.json"
+
+  TEST_AGENT_GATE="$test_dir/agent-gate" \
+    WORKSTATION_FRESHNESS_DEADLINE_SECONDS=1 \
+    run_update "$test_dir" --freshness \
+    || fail 'local-state timeout escaped the freshness boundary'
+
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Agent tools: freshness check failed; no successful result is available' \
+      'Dotfiles blocker: source repository has local content' \
+      'Dotfiles: fetched source has not been successfully applied' \
+      'Dotfiles blocker: main is ahead by 1 commit(s)' \
+      'Agent tools: unfinished activation for AoE service restart' \
+      'Run: workstation-update') \
+    "$test_dir/home/stdout" \
+    || fail 'timeout notice dropped local blockers or incomplete maintenance'
+  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'local-state timeout rendered more than one action'
 }
 
 run_chezmoi() {
@@ -1701,6 +1838,8 @@ readonly test_cases=(
   test_freshness_outer_deadline_bounds_stalled_local_preflight
   test_freshness_git_reads_do_not_refresh_the_index
   test_dotfiles_timeout_preserves_completed_agent_and_cached_dotfiles_results
+  test_agent_timeout_preserves_newly_completed_dotfiles_result
+  test_timeout_notice_preserves_local_blockers_and_incomplete_maintenance
   test_setup_must_be_complete_before_source_discovery
   test_first_run_adopts_verified_equal_history
   test_current_agent_tools_are_checked_without_mutation
