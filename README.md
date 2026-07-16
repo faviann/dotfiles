@@ -142,6 +142,9 @@ Agent of Empires (`aoe`) is managed here as a user-level workstation tool, not i
   creates it running `aoe`. The hook skips local and non-interactive shells,
   remote commands, nested tmux, and incomplete workstation setup. A missing or
   failed freshness command never prevents the existing tmux/AoE launch.
+- Opt out: create `~/.config/workstation/no-autolaunch` to land on a plain shell
+  instead. The session keeps running; `tmux attach -t main` still reaches it,
+  and removing the file restores the auto-launch.
 - Shell choice: the workstation LXC is bash-based; `.chezmoiignore` excludes fish config on LXC hosts.
 - Dashboard: `home/workstation.nix` declares the `aoe-serve.service`, `aoe-lan-proxy.service`, and `aoe-lan-proxy.socket` user units. The socket exposes `0.0.0.0:4001` and proxies to the localhost service.
 - Reboot survival: Ansible enables lingering for the workstation user with `loginctl enable-linger <user>`.
@@ -200,7 +203,8 @@ the check, and failure or timeout never prevents tmux/AoE launch.
 Login never installs updates. There is no background timer or scheduler, and
 local shells, nested tmux sessions, remote commands, and non-interactive shells
 do not run the login check. Workstations without the completed setup marker also
-skip it.
+skip it, as do logins that opted out through
+`~/.config/workstation/no-autolaunch`.
 
 ## Workstation herdr
 
