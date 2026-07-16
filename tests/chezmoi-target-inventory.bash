@@ -70,15 +70,19 @@ test_repository_only_paths_are_ignored() {
   managed_file="$test_dir/managed"
   ignored_file="$test_dir/ignored"
   mkdir -p "$source_dir/docs" "$source_dir/tests" "$source_dir/home" \
+    "$source_dir/node_modules/example" "$source_dir/dot_sandcastle/logs" \
     "$source_dir/dot_local/bin" "$destination_dir"
   cp "$REPO_ROOT/.chezmoiignore" "$source_dir/.chezmoiignore"
 
   for path in \
     README.md BOOTSTRAP.md AGENTS.md CLAUDE.md CONTRIBUTING.md \
     CONTEXT.md CONTEXT-MAP.md docs/guide.md tests/inventory.bash \
-    flake.nix flake.lock home/workstation.nix; do
+    flake.nix flake.lock home/workstation.nix package.json package-lock.json \
+    node_modules/example/index.js; do
     printf 'repository only\n' >"$source_dir/$path"
   done
+  printf 'repository only\n' >"$source_dir/dot_sandcastle/main.mts"
+  printf 'repository only\n' >"$source_dir/dot_sandcastle/logs/run.log"
   printf 'intentional dotfile\n' >"$source_dir/dot_bashrc"
   printf '#!/usr/bin/env bash\n' \
     >"$source_dir/dot_local/bin/executable_update-agent-tools"
@@ -92,14 +96,18 @@ test_repository_only_paths_are_ignored() {
 
   for path in \
     README.md BOOTSTRAP.md AGENTS.md CLAUDE.md CONTRIBUTING.md \
-    CONTEXT.md CONTEXT-MAP.md flake.nix flake.lock; do
+    CONTEXT.md CONTEXT-MAP.md flake.nix flake.lock package.json \
+    package-lock.json; do
     assert_lacks_line "$path" "$managed_file"
     assert_has_line "$path" "$ignored_file"
   done
   for path in docs/guide.md tests/inventory.bash home/workstation.nix; do
     assert_lacks_line "$path" "$managed_file"
   done
-  for path in docs tests home; do
+  for path in .sandcastle/main.mts .sandcastle/logs/run.log; do
+    assert_lacks_line "$path" "$managed_file"
+  done
+  for path in docs tests home node_modules .sandcastle; do
     assert_has_line "$path" "$ignored_file"
   done
   assert_has_line '.bashrc' "$managed_file"
