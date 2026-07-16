@@ -234,17 +234,21 @@ assert_context_skips_autolaunch() {
   local ssh_tty="$3"
   local ssh_original_command="$4"
   local tmux_environment="$5"
-  local missing_prerequisite="${6:-}"
+  local prerequisite_change="${6:-}"
   local test_dir
   test_dir="$(mktemp -d)"
   trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
   make_stubs "$test_dir"
 
-  case "$missing_prerequisite" in
+  case "$prerequisite_change" in
     marker) rm "$test_dir/.local/state/workstation-setup/complete" ;;
-    aoe|tmux) rm "$test_dir/.local/bin/$missing_prerequisite" ;;
+    aoe|tmux) rm "$test_dir/.local/bin/$prerequisite_change" ;;
+    optout)
+      mkdir -p "$test_dir/.config/workstation"
+      : >"$test_dir/.config/workstation/no-autolaunch"
+      ;;
     '') ;;
-    *) fail "unknown test prerequisite: $missing_prerequisite" ;;
+    *) fail "unknown test prerequisite: $prerequisite_change" ;;
   esac
 
   TEST_SSH_TTY="$ssh_tty" \
@@ -279,6 +283,8 @@ test_excluded_shell_contexts_skip_the_check() {
     'workstation without AoE' 1 /dev/pts/1 '' '' aoe
   assert_context_skips_autolaunch \
     'workstation without tmux' 1 /dev/pts/1 '' '' tmux
+  assert_context_skips_autolaunch \
+    'autolaunch opted out' 1 /dev/pts/1 '' '' optout
 }
 
 test_missing_checker_preserves_existing_autolaunch() {
