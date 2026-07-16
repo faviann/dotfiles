@@ -1,7 +1,1 @@
 node_modules/
-
-.sandcastle/.env
-.sandcastle/logs/
-.sandcastle/patches/
-.sandcastle/sessions/
-.sandcastle/worktrees/
