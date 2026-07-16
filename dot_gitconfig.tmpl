@@ -20,3 +20,16 @@
 
 [push]
     autoSetupRemote = true
+
+# GitHub CLI credential helpers for HTTPS git operations. `gh auth login`
+# writes these into ~/.gitconfig itself, using an absolute path into the Nix
+# store; chezmoi owns this file, so they are declared here instead and resolve
+# `gh` from PATH to stay portable across machines. The empty `helper` clears
+# any inherited helper, matching what gh writes.
+[credential "https://github.com"]
+    helper =
+    helper = !gh auth git-credential
+
+[credential "https://gist.github.com"]
+    helper =
+    helper = !gh auth git-credential
