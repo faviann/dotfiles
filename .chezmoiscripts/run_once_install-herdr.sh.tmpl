@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v herdr >/dev/null 2>&1; then
+    exit 0
+fi
+
+readonly HERDR_INSTALL_URL="https://herdr.dev/install.sh"
+
+tmp_script="$(mktemp)"
+trap 'rm -f "$tmp_script"' EXIT
+
+curl -fsSL "$HERDR_INSTALL_URL" -o "$tmp_script"
+HERDR_INSTALL_DIR="$HOME/.local/bin" sh "$tmp_script"

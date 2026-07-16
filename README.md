@@ -201,3 +201,20 @@ Login never installs updates. There is no background timer or scheduler, and
 local shells, nested tmux sessions, remote commands, and non-interactive shells
 do not run the login check. Workstations without the completed setup marker also
 skip it.
+
+## Workstation herdr
+
+[herdr](https://herdr.dev) is a terminal agent multiplexer, installed for
+evaluation alongside AoE. It is not an AoE replacement: AoE serves conversations
+over HTTP, while herdr is a TUI.
+
+- Install: `.chezmoiscripts/run_once_install-herdr.sh.tmpl` uses the upstream
+  installer until there is a clean Nix package path. herdr is packaged in
+  nixpkgs, but not in the pinned nixpkgs revision.
+- Updates: herdr is deliberately outside the `workstation-update` managed unit.
+  It self-updates through `herdr update`, run by hand. That command refuses to
+  run from inside a herdr pane; detach from the session first.
+- Configuration: `~/.config/herdr/config.toml` is optional and unmanaged. herdr
+  writes to it itself, so chezmoi does not own it.
+- No services: herdr listens on a Unix socket only. It has no dashboard and no
+  LAN port, so it declares no user units.
