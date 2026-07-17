@@ -187,7 +187,7 @@ run_freshness() {
       applied_commit="$(<"$APPLIED_COMMIT_FILE")" || true
     fi
     if [[ "$applied_commit" != "$freshness_head" ]]; then
-      blocker_lines+=('Dotfiles: fetched source has not been successfully applied')
+      notice_lines+=('Dotfiles: fetched source has not been successfully applied')
     fi
 
     dotfiles_last_attempt="$(freshness_state_value last_attempt)"
@@ -353,9 +353,17 @@ run_freshness() {
 
   notice_lines+=("${blocker_lines[@]}")
   if (( ${#notice_lines[@]} > 0 )); then
-    printf 'Workstation maintenance available:\n'
+    if (( ${#blocker_lines[@]} > 0 )); then
+      printf 'Workstation maintenance blocked:\n'
+    else
+      printf 'Workstation maintenance available:\n'
+    fi
     printf '%s\n' "${notice_lines[@]}"
-    printf 'Run: workstation-update\n'
+    if (( ${#blocker_lines[@]} > 0 )); then
+      printf 'Resolve the blockers above before running workstation-update.\n'
+    else
+      printf 'Run: workstation-update\n'
+    fi
   fi
 }
 
@@ -417,6 +425,9 @@ exec 8>"$STATE_DIR/lock" \
   || fail 'lock phase failed: cannot open workstation-update lock'
 flock --nonblock 8 \
   || fail 'lock phase failed: workstation-update is already running'
+
+printf 'Dotfiles: checking...\n'
+dotfiles_changed=0
 
 git_in_progress() {
   local git_path
@@ -609,6 +620,7 @@ if (( ahead_count > 0 )); then
   fail "history phase failed: main is ahead of origin/main by $ahead_count commit(s)"
 fi
 if (( behind_count > 0 )); then
+  dotfiles_changed=1
   old_tree="$(git -C "$source_repository" rev-parse "$old_head^{tree}")" \
     || fail 'history phase failed: cannot read the current tree'
   new_tree="$(git -C "$source_repository" rev-parse "$new_head^{tree}")" \
@@ -670,6 +682,7 @@ else
 fi
 
 if (( apply_required == 1 )); then
+  dotfiles_changed=1
   chezmoi apply --dry-run --verbose \
     || fail 'dry-run phase failed: chezmoi apply preview'
   chezmoi apply \
@@ -679,12 +692,22 @@ if (( apply_required == 1 )); then
   record_applied_commit
 fi
 
+if (( dotfiles_changed == 1 )); then
+  printf 'Dotfiles: updated\n'
+else
+  printf 'Dotfiles: current\n'
+fi
+
 agent_tools="$HOME/.local/bin/update-agent-tools"
 [[ -x "$agent_tools" ]] \
   || fail 'agent-tools phase failed: managed update-agent-tools is not executable'
+printf 'Agent tools: checking...\n'
 agent_tools_arguments=(--update-if-needed)
 if (( assume_yes == 1 )); then
   agent_tools_arguments+=(--yes)
 fi
 "$agent_tools" "${agent_tools_arguments[@]}" \
   || fail 'agent-tools phase failed: update-agent-tools'
+printf '%s\n' \
+  'Agent tools: ready' \
+  'Workstation update complete'

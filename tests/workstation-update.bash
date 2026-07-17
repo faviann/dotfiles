@@ -346,8 +346,41 @@ test_freshness_always_reports_local_blockers_and_incomplete_maintenance() {
   grep -Fqx 'Agent tools: unfinished activation for AoE service restart' \
     "$test_dir/home/stdout" \
     || fail 'freshness omitted unresolved activation failure state'
-  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
-    || fail 'local/incomplete notice did not contain one action'
+  grep -Fqx 'Workstation maintenance blocked:' "$test_dir/home/stdout" \
+    || fail 'local blocker notice did not identify maintenance as blocked'
+  grep -Fqx \
+    'Resolve the blockers above before running workstation-update.' \
+    "$test_dir/home/stdout" \
+    || fail 'local blocker notice did not explain the recovery order'
+  ! grep -Fqx 'Run: workstation-update' "$test_dir/home/stdout" \
+    || fail 'local blocker notice recommended an update that must fail'
+}
+
+test_freshness_treats_unapplied_dotfiles_as_retryable_maintenance() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" fetch --quiet "$test_dir/remote.git" \
+      '+refs/heads/main:refs/remotes/origin/main'
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/discovered/source" merge --quiet --ff-only origin/main
+
+  run_update "$test_dir" --freshness \
+    || fail "unapplied freshness failed: $(<"$test_dir/home/stderr")"
+
+  grep -Fqx 'Workstation maintenance available:' "$test_dir/home/stdout" \
+    || fail 'unapplied dotfiles were misclassified as a manual blocker'
+  grep -Fqx 'Dotfiles: fetched source has not been successfully applied' \
+    "$test_dir/home/stdout" \
+    || fail 'freshness omitted the unapplied dotfiles state'
+  grep -Fqx 'Run: workstation-update' "$test_dir/home/stdout" \
+    || fail 'unapplied dotfiles did not recommend the supported recovery'
 }
 
 test_freshness_sources_age_independently() {
@@ -710,8 +743,11 @@ test_freshness_accumulates_independent_local_blockers() {
     grep -Fqx "$expected" "$test_dir/home/stdout" \
       || fail "freshness omitted independently evaluable local state: $expected"
   done
-  [[ "$(grep -c '^Run: workstation-update$' "$test_dir/home/stdout")" -eq 1 ]] \
-    || fail 'independent local blockers rendered multiple actions'
+  ! grep -Fqx 'Run: workstation-update' "$test_dir/home/stdout" \
+    || fail 'independent local blockers recommended an update that must fail'
+  [[ "$(grep -c '^Resolve the blockers above before running workstation-update\.$' \
+    "$test_dir/home/stdout")" -eq 1 ]] \
+    || fail 'independent local blockers did not render one recovery instruction'
   [[ ! -e "$test_dir/home/fetch-log" ]] \
     || fail 'unsafe local blockers allowed a freshness fetch'
   [[ "$(source_commit "$test_dir")" == "$before_head" \
@@ -853,6 +889,29 @@ test_current_agent_tools_are_checked_without_mutation() {
     || fail 'current agent-tool phase did not use the managed executable'
   [[ ! -e "$test_dir/home/agent-tools-updated" ]] \
     || fail 'current agent tools were mutated'
+}
+
+test_successful_update_reports_progress_and_completion() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+
+  run_update "$test_dir" \
+    || fail "current update failed: $(<"$test_dir/home/stderr")"
+
+  diff -u \
+    <(printf '%s\n' \
+      'Dotfiles: checking...' \
+      'Dotfiles: current' \
+      'Agent tools: checking...' \
+      'Agent tools: ready' \
+      'Workstation update complete') \
+    "$test_dir/home/stdout" \
+    || fail 'successful update did not report clear progress and completion'
 }
 
 test_yes_forwards_only_agent_disruption_consent() {
@@ -1651,6 +1710,7 @@ source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 readonly test_cases=(
   test_freshness_combines_dotfiles_and_agent_updates_without_mutation
   test_freshness_always_reports_local_blockers_and_incomplete_maintenance
+  test_freshness_treats_unapplied_dotfiles_as_retryable_maintenance
   test_freshness_sources_age_independently
   test_freshness_failures_retain_each_source_result
   test_due_freshness_sources_run_concurrently
@@ -1662,6 +1722,7 @@ readonly test_cases=(
   test_setup_must_be_complete_before_source_discovery
   test_first_run_adopts_verified_equal_history
   test_current_agent_tools_are_checked_without_mutation
+  test_successful_update_reports_progress_and_completion
   test_yes_forwards_only_agent_disruption_consent
   test_agent_consent_refusal_names_only_the_unified_retry
   test_agent_discovery_failure_preserves_applied_dotfiles_for_retry

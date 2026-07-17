@@ -197,9 +197,11 @@ check immediately before tmux attaches or creates the AoE session. Dotfiles and
 agent-tool sources cache successful checks for 24 hours and retry failed source
 checks after one hour; their cache ages are independent. Local blockers and
 incomplete maintenance are evaluated on every eligible login. Healthy or
-not-yet-due state is silent. Actionable state produces one combined notice with
-exactly one `Run: workstation-update` action. A hard 15-second deadline bounds
-the check, and failure or timeout never prevents tmux/AoE launch.
+not-yet-due state is silent. Available updates and retryable maintenance produce
+one combined notice with exactly one `Run: workstation-update` action. A local
+blocker instead says that maintenance is blocked and must be resolved before
+the command is run. A hard 15-second deadline bounds the check, and failure or
+timeout never prevents tmux/AoE launch.
 
 Login never installs updates. There is no background timer or scheduler, and
 local shells, nested tmux sessions, remote commands, and non-interactive shells

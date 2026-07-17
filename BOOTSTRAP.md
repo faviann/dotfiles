@@ -155,10 +155,11 @@ Interactive SSH login only checks freshness: it never installs. Successful
 dotfiles and agent-tool checks are cached independently for 24 hours, failed
 source checks retry after one hour, and local blockers or incomplete
 maintenance are evaluated every time. Current state is silent. Actionable state
-prints one combined notice and one `Run: workstation-update` action rather than
-release notes. The check has a hard 15-second deadline and never prevents the
-tmux/AoE session from opening. There is no background scheduling or
-per-component update command.
+prints one combined notice rather than release notes. Available updates and
+retryable maintenance show one `Run: workstation-update` action; local blockers
+say that they must be resolved before running the command. The check has a hard
+15-second deadline and never prevents the tmux/AoE session from opening. There
+is no background scheduling or per-component update command.
 
 Failed updates do not roll back automatically. Use the reported phase and
 component, inspect `systemctl --user status aoe-serve.service` and
