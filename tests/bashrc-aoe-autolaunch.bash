@@ -234,21 +234,17 @@ assert_context_skips_autolaunch() {
   local ssh_tty="$3"
   local ssh_original_command="$4"
   local tmux_environment="$5"
-  local prerequisite_change="${6:-}"
+  local missing_prerequisite="${6:-}"
   local test_dir
   test_dir="$(mktemp -d)"
   trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
   make_stubs "$test_dir"
 
-  case "$prerequisite_change" in
+  case "$missing_prerequisite" in
     marker) rm "$test_dir/.local/state/workstation-setup/complete" ;;
-    aoe|tmux) rm "$test_dir/.local/bin/$prerequisite_change" ;;
-    optout)
-      mkdir -p "$test_dir/.config/workstation"
-      : >"$test_dir/.config/workstation/no-autolaunch"
-      ;;
+    aoe|tmux) rm "$test_dir/.local/bin/$missing_prerequisite" ;;
     '') ;;
-    *) fail "unknown test prerequisite: $prerequisite_change" ;;
+    *) fail "unknown test prerequisite: $missing_prerequisite" ;;
   esac
 
   TEST_SSH_TTY="$ssh_tty" \
@@ -283,8 +279,34 @@ test_excluded_shell_contexts_skip_the_check() {
     'workstation without AoE' 1 /dev/pts/1 '' '' aoe
   assert_context_skips_autolaunch \
     'workstation without tmux' 1 /dev/pts/1 '' '' tmux
-  assert_context_skips_autolaunch \
-    'autolaunch opted out' 1 /dev/pts/1 '' '' optout
+}
+
+test_optout_keeps_freshness_notice_without_attaching() {
+  local test_dir
+  test_dir="$(mktemp -d)"
+  trap '[[ -z "${test_dir:-}" ]] || rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir"
+  mkdir -p "$test_dir/.config/workstation"
+  : >"$test_dir/.config/workstation/no-autolaunch"
+
+  TEST_SSH_TTY=/dev/pts/1 \
+    CHECK_OUTPUT=$'Workstation maintenance available:\nDotfiles: 2 commits\nRun: workstation-update' \
+    run_shell "$test_dir" "$test_dir/stdout" "$test_dir/stderr" 1 \
+    || fail "opted-out SSH login failed: $(<"$test_dir/stderr")"
+
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Dotfiles: 2 commits' \
+      'Run: workstation-update') \
+    "$test_dir/stdout" \
+    || fail "opted-out login lost the combined freshness notice"
+  diff -u \
+    <(printf '%s\n' \
+      'workstation-update --freshness' \
+      'workstation-update complete') \
+    "$test_dir/command-log" \
+    || fail "opted-out login skipped the freshness check or still attached tmux"
 }
 
 test_missing_checker_preserves_existing_autolaunch() {
@@ -321,6 +343,7 @@ readonly test_cases=(
   test_failed_freshness_check_does_not_prevent_existing_session_attach
   test_timed_out_freshness_notice_does_not_prevent_new_session_launch
   test_excluded_shell_contexts_skip_the_check
+  test_optout_keeps_freshness_notice_without_attaching
   test_missing_checker_preserves_existing_autolaunch
 )
 
