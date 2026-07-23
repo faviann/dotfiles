@@ -128,7 +128,6 @@ gh auth login --git-protocol ssh --skip-ssh-key
 ## Day-to-Day Updates
 
 ```bash
-export BW_SESSION=$(bw unlock --raw)
 workstation-update
 ```
 
@@ -139,6 +138,11 @@ updates AoE; the standalone Codex, Claude Code, and Pi CLIs; and the
 `codex-acp`, `claude-agent-acp`, and `pi-acp` adapters as one unit. The Codex
 runtime bundled inside `codex-acp` is separate from the standalone Codex CLI,
 so both scopes are checked.
+
+When a dotfile apply must render Bitwarden-backed templates, an interactive
+update reuses a valid `BW_SESSION` or prompts once to unlock the vault for the
+duration of the command. Unattended use cannot prompt; export a valid session
+first with `export BW_SESSION="$(bw unlock --raw)"`.
 
 The workflow refuses dirty, non-canonical, ahead, or diverged source state and
 does not reset or discard local work. Dotfile apply is previewed before it runs,

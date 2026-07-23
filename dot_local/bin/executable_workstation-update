@@ -7,6 +7,27 @@ fail() {
   exit 1
 }
 
+ensure_bitwarden_session() {
+  local unlocked_session
+
+  command -v bw >/dev/null 2>&1 \
+    || fail 'credential phase failed: Bitwarden CLI is missing'
+  if bw unlock --check >/dev/null 2>&1; then
+    return
+  fi
+  [[ -t 0 && -t 2 ]] \
+    || fail 'credential phase failed: Bitwarden is locked; run bw unlock --raw and export its output as BW_SESSION before unattended use'
+
+  unset BW_SESSION
+  unlocked_session="$(bw unlock --raw)" \
+    || fail 'credential phase failed: Bitwarden unlock failed'
+  [[ -n "$unlocked_session" && "$unlocked_session" != *$'\n'* ]] \
+    || fail 'credential phase failed: Bitwarden returned an invalid session'
+  export BW_SESSION="$unlocked_session"
+  bw unlock --check >/dev/null 2>&1 \
+    || fail 'credential phase failed: Bitwarden returned an invalid session'
+}
+
 readonly CANONICAL_ORIGIN='git@github.com:faviann/dotfiles.git'
 readonly REQUIRED_BRANCH='main'
 readonly REQUIRED_UPSTREAM='origin/main'
@@ -668,6 +689,7 @@ head_commit="$(git -C "$source_repository" rev-parse HEAD)" \
 
 apply_required=0
 if [[ ! -e "$APPLIED_COMMIT_FILE" ]]; then
+  ensure_bitwarden_session
   if chezmoi verify; then
     record_applied_commit
   else
@@ -689,6 +711,7 @@ fi
 
 if (( apply_required == 1 )); then
   dotfiles_changed=1
+  ensure_bitwarden_session
   chezmoi apply --dry-run --verbose \
     || fail 'dry-run phase failed: chezmoi apply preview'
   chezmoi apply \
