@@ -110,6 +110,7 @@ expected_cases() {
         test_successful_update_reports_progress_and_completion \
         test_required_apply_unlocks_bitwarden_once_for_all_chezmoi_phases \
         test_required_apply_reuses_an_existing_bitwarden_session_without_prompting \
+        test_post_apply_verification_does_not_rerun_lifecycle_scripts \
         test_noninteractive_apply_requires_a_pre_unlocked_bitwarden_session \
         test_yes_forwards_only_agent_disruption_consent \
         test_agent_consent_refusal_names_only_the_unified_retry \

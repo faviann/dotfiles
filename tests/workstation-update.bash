@@ -1072,6 +1072,44 @@ test_required_apply_reuses_an_existing_bitwarden_session_without_prompting() {
     || fail 'valid Bitwarden session triggered a redundant unlock'
 }
 
+test_post_apply_verification_does_not_rerun_lifecycle_scripts() {
+  local seed
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  seed="$test_dir/seed"
+  mkdir -p "$seed/.chezmoiscripts"
+  printf '#!%s\n' "$REAL_BASH" \
+    >"$seed/.chezmoiscripts/run_after_verify-once.sh"
+  cat >>"$seed/.chezmoiscripts/run_after_verify-once.sh" <<'SCRIPT'
+set -euo pipefail
+
+count_file="$HOME/lifecycle-script-count"
+count=0
+[[ ! -f "$count_file" ]] || count="$(<"$count_file")"
+count=$(( count + 1 ))
+printf '%s\n' "$count" >"$count_file"
+(( count == 1 ))
+SCRIPT
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$seed" add .chezmoiscripts/run_after_verify-once.sh
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$seed" commit --quiet -m 'add lifecycle verification fixture'
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$seed" push --quiet origin main
+
+  run_update "$test_dir" \
+    || fail "post-apply target verification reran a lifecycle script: $(<"$test_dir/home/stderr")"
+
+  [[ "$(<"$test_dir/home/lifecycle-script-count")" == 1 ]] \
+    || fail 'post-apply target verification executed the lifecycle script twice'
+}
+
 test_noninteractive_apply_requires_a_pre_unlocked_bitwarden_session() {
   local test_dir
 
@@ -1262,7 +1300,7 @@ test_outdated_agent_tools_use_the_latest_verified_updater() {
       'chezmoi source-path' \
       'chezmoi apply --dry-run --verbose' \
       'chezmoi apply' \
-      'chezmoi verify' \
+      'chezmoi verify --exclude scripts' \
       'update-agent-tools v2 --update-if-needed') \
     "$test_dir/home/phase-log" \
     || fail 'agent-tool update did not follow verified dotfiles in order'
@@ -1640,7 +1678,7 @@ HOOK
       'chezmoi source-path' \
       'chezmoi apply --dry-run --verbose' \
       'chezmoi apply' \
-      'chezmoi verify') \
+      'chezmoi verify --exclude scripts') \
     "$test_dir/home/command-log" \
     || fail 'required apply did not run dry-run, apply, verify in order'
 }
@@ -1803,7 +1841,7 @@ test_first_run_with_drift_enters_the_apply_path() {
       'chezmoi verify' \
       'chezmoi apply --dry-run --verbose' \
       'chezmoi apply' \
-      'chezmoi verify') \
+      'chezmoi verify --exclude scripts') \
     "$test_dir/home/command-log" \
     || fail 'failed first-run verification did not enter the apply path'
 }
@@ -1913,6 +1951,7 @@ readonly test_cases=(
   test_successful_update_reports_progress_and_completion
   test_required_apply_unlocks_bitwarden_once_for_all_chezmoi_phases
   test_required_apply_reuses_an_existing_bitwarden_session_without_prompting
+  test_post_apply_verification_does_not_rerun_lifecycle_scripts
   test_noninteractive_apply_requires_a_pre_unlocked_bitwarden_session
   test_yes_forwards_only_agent_disruption_consent
   test_agent_consent_refusal_names_only_the_unified_retry
