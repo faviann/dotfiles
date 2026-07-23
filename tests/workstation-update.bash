@@ -624,6 +624,57 @@ test_hard_freshness_timeout_bounds_stalled_local_preflight() {
     || fail 'stalled local preflight leaked worker diagnostics'
 }
 
+test_freshness_infrastructure_failure_is_not_reported_as_timeout() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+
+  WORKSTATION_UPDATE_NOW=not-a-valid-date \
+    run_update "$test_dir" --freshness \
+    || fail 'freshness infrastructure failure escaped the login boundary'
+
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Workstation freshness check failed' \
+      'Run: workstation-update') \
+    "$test_dir/home/stdout" \
+    || fail 'freshness infrastructure failure did not emit its generic notice'
+  [[ ! -s "$test_dir/home/stderr" ]] \
+    || fail 'freshness infrastructure failure leaked worker diagnostics'
+}
+
+test_freshness_lock_contention_warns_instead_of_claiming_healthy() {
+  local lock_fd
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  mkdir -p "$test_dir/home/state/workstation-update"
+  exec {lock_fd}>"$test_dir/home/state/workstation-update/lock"
+  flock --nonblock "$lock_fd" \
+    || fail 'test could not acquire the freshness lock'
+
+  run_update "$test_dir" --freshness \
+    || fail 'freshness lock contention escaped the login boundary'
+  exec {lock_fd}>&-
+
+  diff -u \
+    <(printf '%s\n' \
+      'Workstation maintenance available:' \
+      'Workstation freshness check failed' \
+      'Run: workstation-update') \
+    "$test_dir/home/stdout" \
+    || fail 'freshness lock contention was silently treated as healthy'
+  [[ ! -s "$test_dir/home/stderr" ]] \
+    || fail 'freshness lock contention leaked worker diagnostics'
+}
+
 test_freshness_history_blockers_are_local_when_fetch_fails() {
   local before_head
   local test_dir
@@ -1716,6 +1767,8 @@ readonly test_cases=(
   test_due_freshness_sources_run_concurrently
   test_hard_freshness_timeout_is_generic_fail_open_and_non_corrupting
   test_hard_freshness_timeout_bounds_stalled_local_preflight
+  test_freshness_infrastructure_failure_is_not_reported_as_timeout
+  test_freshness_lock_contention_warns_instead_of_claiming_healthy
   test_freshness_history_blockers_are_local_when_fetch_fails
   test_freshness_git_reads_do_not_refresh_the_index
   test_freshness_accumulates_independent_local_blockers

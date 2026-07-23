@@ -71,7 +71,7 @@ restart solve a larger problem than this ticket asks for.
 
 | Option | Disconnect survival | Status and logs | Recovery and failure semantics | Fit and cost |
 | --- | --- | --- | --- | --- |
-| Dedicated tmux window | Native fit. A window belongs to the persistent `main` session, which survives accidental SSH disconnects and intentional detach and is automatically reattached by the existing login hook. | Best live inspection: select the exact PTY window; `capture-pane` retrieves retained history. Pane history is bounded and terminal-shaped, so Sandcastle's file logs remain authoritative. `remain-on-exit failed` can preserve a dead pane after launcher failure. | Keeps the original Sandcastle process alive; it does not restart or resume one that exits. Operator cleanup is an explicit `kill-window`. | **Recommended pilot default.** tmux and `main` are already installed and operational. One named window is the smallest added lifecycle surface; a separate named session remains available if later experience shows the run should not share `main`'s lifetime. |
+| Dedicated tmux window | Native fit. A window belongs to the persistent `main` session, which survives accidental SSH disconnects and intentional detach and can be reattached explicitly with `tmux attach -t main`. | Best live inspection: select the exact PTY window; `capture-pane` retrieves retained history. Pane history is bounded and terminal-shaped, so Sandcastle's file logs remain authoritative. `remain-on-exit failed` can preserve a dead pane after launcher failure. | Keeps the original Sandcastle process alive; it does not restart or resume one that exits. Operator cleanup is an explicit `kill-window`. | **Recommended pilot default.** tmux and `main` are already installed and operational. One named window is the smallest added lifecycle surface; a separate named session remains available if later experience shows the run should not share `main`'s lifetime. |
 | Named transient `systemd-run --user` service | A transient service starts in a clean, detached environment with the user service manager as parent, independent of the SSH shell. Existing lingering keeps that user manager around after logout. | `systemctl --user status/show <name>.service` exposes process/unit state; stdout/stderr default to the journal and are queryable with `journalctl --user-unit <name>.service`. `--remain-after-exit` can retain runtime information until explicit stop. | Strongest noninteractive exit accounting. Use `Type=exec` so successful submission means the executable was actually invoked. Do not set `Restart=` for the pilot. The clean manager environment requires an explicit working directory and controlled `PATH`; pass only required environment rather than copying the whole login environment. | **Best second option** if journal/status queries matter more than reattachment. One launch command and no committed unit, but more launch parameters and no live PTY unless `--pty` is used—which makes `systemd-run` wait and weakens the detached shape. |
 | Permanent Home Manager user service | Same disconnect survival, and it can be enabled at user-manager startup. | Same systemd status/journal facilities; configuration is declarative and reviewable. | Restart and boot policies can be encoded, but a one-shot issue workflow is not a stable daemon and has no safe automatic-resume contract. A templated service would also need an instance-to-repository/run mapping and cleanup policy. | **Defer.** The repo already declares long-running AoE services this way, but a permanent unit is unnecessary for one run and host-reboot recovery is out of scope. Reconsider only after repeated pilots establish a reusable launch contract. |
 | Agent of Empires session | AoE sessions already run inside tmux and outlive the TUI/SSH client. | Excellent agent-aware UI for supported interactive agents, with tmux terminal access and status detection; it also supports custom launch overrides. | Sandcastle is an orchestrator that launches Codex, not an interactive Codex CLI session. AoE would see the outer command and cannot derive Sandcastle iteration, branch, or completion semantics from its supported-agent hooks/ACP stream. Removal also adds AoE-owned session/worktree lifecycle around Sandcastle's own lifecycle. | **Do not use as the process owner.** Keep AoE as the workstation dashboard and use ordinary tmux beside it. Integrating Sandcastle as an AoE custom agent would be additional product integration, not the smallest detached runner. |
@@ -106,19 +106,20 @@ It supplies none of the session/service ownership features above.
 
 ## Existing workstation fit
 
-The repository's SSH hook already auto-attaches eligible interactive logins to
-tmux session `main`, creating it with `aoe` when absent. The workstation also
-declares AoE's web dashboard and LAN proxy as systemd user units with explicit
-`PATH`, restart, and socket policies; the documented Ansible setup enables user
-lingering. These are useful precedents for both options, but neither should be
-conflated with the Sandcastle run itself.
-[SSH/tmux hook](../../dot_bashrc.tmpl),
+The repository keeps SSH login freshness separate from process ownership:
+eligible interactive logins run a bounded check and return to a plain shell.
+The workstation declares AoE's web dashboard and LAN proxy as systemd user
+units with explicit `PATH`, restart, and socket policies; the documented
+Ansible setup enables user lingering. These are useful precedents for both
+options, but neither should be conflated with the Sandcastle run itself.
+[SSH login contract](../../README.md#login-freshness-notices),
 [workstation user units](../../home/workstation.nix),
 [workstation operating contract](../../README.md#workstation-agent-of-empires)
 
 The separation should be:
 
-- `main` tmux session: the existing login target, with one AoE dashboard window;
+- `main` tmux session: an explicit operator-managed target, with one AoE
+  dashboard window;
 - `main:sandcastle-<repo>-<run>` tmux window: one foreground Sandcastle process;
 - `.sandcastle/logs/`: authoritative run-event history produced by Sandcastle;
 - `.sandcastle/worktrees/`, branches, patches, and captured Codex sessions:

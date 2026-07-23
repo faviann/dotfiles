@@ -83,9 +83,12 @@ test_repository_only_paths_are_ignored() {
   done
   printf 'repository only\n' >"$source_dir/dot_sandcastle/main.mts"
   printf 'repository only\n' >"$source_dir/dot_sandcastle/logs/run.log"
+  printf 'intentional login profile\n' >"$source_dir/dot_bash_profile"
   printf 'intentional dotfile\n' >"$source_dir/dot_bashrc"
   printf '#!/usr/bin/env bash\n' \
     >"$source_dir/dot_local/bin/executable_update-agent-tools"
+  printf '#!/usr/bin/env bash\n' \
+    >"$source_dir/dot_local/bin/executable_workstation-login"
 
   run_chezmoi "$source_dir" "$destination_dir" \
     --override-data '{"is_lxc":false}' \
@@ -110,8 +113,10 @@ test_repository_only_paths_are_ignored() {
   for path in docs tests home node_modules .sandcastle; do
     assert_has_line "$path" "$ignored_file"
   done
+  assert_has_line '.bash_profile' "$managed_file"
   assert_has_line '.bashrc' "$managed_file"
   assert_has_line '.local/bin/update-agent-tools' "$managed_file"
+  assert_has_line '.local/bin/workstation-login' "$managed_file"
 }
 
 test_fish_is_ignored_only_on_the_configured_workstation() {
@@ -177,20 +182,29 @@ test_dry_run_proposes_only_intentional_targets() {
     flake.nix home/workstation.nix; do
     printf 'repository only\n' >"$source_dir/$path"
   done
+  printf 'intentional login profile\n' >"$source_dir/dot_bash_profile"
   printf 'intentional dotfile\n' >"$source_dir/dot_bashrc"
   printf '#!/usr/bin/env bash\n' \
     >"$source_dir/dot_local/bin/executable_update-agent-tools"
+  printf '#!/usr/bin/env bash\n' \
+    >"$source_dir/dot_local/bin/executable_workstation-login"
 
   run_chezmoi "$source_dir" "$destination_dir" \
     --override-data '{"is_lxc":false}' \
     apply --dry-run --verbose >"$dry_run_file"
 
+  grep -Fq 'diff --git a/.bash_profile b/.bash_profile' "$dry_run_file" \
+    || fail 'dry-run did not propose the intentional login profile'
   grep -Fq 'diff --git a/.bashrc b/.bashrc' "$dry_run_file" \
     || fail 'dry-run did not propose the intentional bashrc target'
   grep -Fq \
     'diff --git a/.local/bin/update-agent-tools b/.local/bin/update-agent-tools' \
     "$dry_run_file" \
     || fail 'dry-run did not propose the intentional maintenance executable'
+  grep -Fq \
+    'diff --git a/.local/bin/workstation-login b/.local/bin/workstation-login' \
+    "$dry_run_file" \
+    || fail 'dry-run did not propose the intentional login executable'
   for path in README.md docs/guide.md tests/inventory.bash flake.nix home/workstation.nix; do
     assert_lacks_text "$path" "$dry_run_file"
   done

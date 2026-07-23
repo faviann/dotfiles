@@ -11,13 +11,16 @@ fail() {
 
 expected_cases() {
   case "$1" in
-    bashrc-aoe-autolaunch.bash)
+    workstation-login.bash)
       printf '%s\n' \
-        test_due_check_finishes_before_existing_session_attach \
-        test_due_check_finishes_before_new_session_launch \
-        test_silent_check_adds_no_login_output \
-        test_excluded_shell_contexts_skip_the_check \
-        test_missing_checker_preserves_existing_autolaunch
+        test_regular_ssh_login_reports_actionable_freshness_before_shell_ready \
+        test_healthy_ssh_login_is_silent \
+        test_login_profile_loads_required_shell_environment_without_bashrc \
+        test_missing_login_command_warns_without_blocking_shell \
+        test_missing_freshness_checker_warns_without_blocking_shell \
+        test_failed_freshness_checker_warns_on_every_login \
+        test_ineligible_login_contexts_skip_freshness \
+        test_kitty_ssh_injection_loads_the_managed_login_profile_once
       ;;
     chezmoi-target-inventory.bash)
       printf '%s\n' \
@@ -40,6 +43,9 @@ expected_cases() {
         test_conditional_update_retries_a_current_toolchain_after_activation_failure \
         test_conditional_update_retries_after_pre_activation_failure_makes_versions_current \
         test_due_check_runs_once_per_success_interval \
+        test_internal_freshness_interface_reuses_cache_without_a_subordinate_action \
+        test_internal_freshness_interface_does_not_wait_for_maintenance \
+        test_internal_timeout_record_preserves_last_successful_result \
         test_state_uses_local_state_fallback \
         test_state_writes_replace_the_state_file_atomically \
         test_concurrent_due_checks_are_serialized \
@@ -85,9 +91,23 @@ expected_cases() {
       ;;
     workstation-update.bash)
       printf '%s\n' \
+        test_freshness_combines_dotfiles_and_agent_updates_without_mutation \
+        test_freshness_always_reports_local_blockers_and_incomplete_maintenance \
+        test_freshness_treats_unapplied_dotfiles_as_retryable_maintenance \
+        test_freshness_sources_age_independently \
+        test_freshness_failures_retain_each_source_result \
+        test_due_freshness_sources_run_concurrently \
+        test_hard_freshness_timeout_is_generic_fail_open_and_non_corrupting \
+        test_hard_freshness_timeout_bounds_stalled_local_preflight \
+        test_freshness_infrastructure_failure_is_not_reported_as_timeout \
+        test_freshness_lock_contention_warns_instead_of_claiming_healthy \
+        test_freshness_history_blockers_are_local_when_fetch_fails \
+        test_freshness_git_reads_do_not_refresh_the_index \
+        test_freshness_accumulates_independent_local_blockers \
         test_setup_must_be_complete_before_source_discovery \
         test_first_run_adopts_verified_equal_history \
         test_current_agent_tools_are_checked_without_mutation \
+        test_successful_update_reports_progress_and_completion \
         test_yes_forwards_only_agent_disruption_consent \
         test_agent_consent_refusal_names_only_the_unified_retry \
         test_agent_discovery_failure_preserves_applied_dotfiles_for_retry \
@@ -120,7 +140,7 @@ test_every_suite_lists_all_case_names() {
   all_cases="$(mktemp)"
   trap 'rm -f "$all_cases"' RETURN
   for suite in \
-    bashrc-aoe-autolaunch.bash \
+    workstation-login.bash \
     chezmoi-target-inventory.bash \
     update-agent-tools-check.bash \
     workstation-agent-tools-bootstrap.bash \
@@ -145,7 +165,7 @@ test_every_suite_preserves_no_argument_full_run() {
   local output
 
   for specification in \
-    'bashrc-aoe-autolaunch.bash|PASS: bashrc AoE auto-launch boundary' \
+    'workstation-login.bash|PASS: workstation SSH login freshness' \
     'chezmoi-target-inventory.bash|PASS: chezmoi target inventory' \
     'update-agent-tools-check.bash|PASS: update-agent-tools --check' \
     'workstation-agent-tools-bootstrap.bash|PASS: workstation agent-tool bootstrap handoff' \
@@ -166,7 +186,7 @@ test_every_suite_runs_one_exact_named_case() {
   local output
 
   for specification in \
-    'bashrc-aoe-autolaunch.bash|test_silent_check_adds_no_login_output|PASS: bashrc AoE auto-launch boundary' \
+    'workstation-login.bash|test_healthy_ssh_login_is_silent|PASS: workstation SSH login freshness' \
     'chezmoi-target-inventory.bash|test_repository_only_paths_are_ignored|PASS: chezmoi target inventory' \
     'update-agent-tools-check.bash|test_machine_status_reports_current_by_exit_status_without_output|PASS: update-agent-tools --check' \
     'workstation-agent-tools-bootstrap.bash|test_failed_install_fails_the_bootstrap_handoff|PASS: workstation agent-tool bootstrap handoff' \
@@ -201,7 +221,7 @@ test_unknown_and_malformed_invocations_fail_clearly() {
   local suite
 
   for suite in \
-    bashrc-aoe-autolaunch.bash \
+    workstation-login.bash \
     chezmoi-target-inventory.bash \
     update-agent-tools-check.bash \
     workstation-agent-tools-bootstrap.bash \
@@ -213,7 +233,7 @@ test_unknown_and_malformed_invocations_fail_clearly() {
     assert_dispatch_fails_with "$suite" 'Usage:' --case ''
     assert_dispatch_fails_with "$suite" 'Usage:' --list unexpected
     assert_dispatch_fails_with \
-      "$suite" 'Usage:' test_silent_check_adds_no_login_output
+      "$suite" 'Usage:' test_healthy_ssh_login_is_silent
   done
 
   assert_dispatch_fails_with \
