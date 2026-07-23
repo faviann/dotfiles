@@ -137,15 +137,10 @@ Agent of Empires (`aoe`) is managed here as a user-level workstation tool, not i
   `update-agent-tools --yes` when any managed command is missing. The existing
   `workstation-setup` handoff therefore installs the full toolchain without a
   separate package-discovery or Ansible step.
-- SSH launch: `dot_bashrc.tmpl` checks workstation freshness, then
-  auto-attaches eligible interactive SSH logins to tmux session `main`, or
-  creates it running `aoe`. The hook skips local and non-interactive shells,
-  remote commands, nested tmux, and incomplete workstation setup. A missing or
-  failed freshness command never prevents the existing tmux/AoE launch.
-- Opt out: create `~/.config/workstation/no-autolaunch` to land on a plain shell
-  instead. The freshness notice still runs; only the tmux attach is skipped. The
-  session keeps running; `tmux attach -t main` still reaches it, and removing the
-  file restores the auto-launch.
+- SSH login: `dot_bash_profile.tmpl` invokes the dedicated
+  `workstation-login` helper for eligible interactive SSH login shells. The
+  helper checks workstation freshness and then returns to a plain shell; tmux
+  and AoE remain available as explicit commands.
 - Shell choice: the workstation LXC is bash-based; `.chezmoiignore` excludes fish config on LXC hosts.
 - Dashboard: `home/workstation.nix` declares the `aoe-serve.service`, `aoe-lan-proxy.service`, and `aoe-lan-proxy.socket` user units. The socket exposes `0.0.0.0:4001` and proxies to the localhost service.
 - Reboot survival: Ansible enables lingering for the workstation user with `loginctl enable-linger <user>`.
@@ -193,21 +188,22 @@ missing.
 ### Login freshness notices
 
 Eligible interactive SSH logins run a synchronous, non-mutating freshness
-check immediately before tmux attaches or creates the AoE session. Dotfiles and
-agent-tool sources cache successful checks for 24 hours and retry failed source
-checks after one hour; their cache ages are independent. Local blockers and
-incomplete maintenance are evaluated on every eligible login. Healthy or
-not-yet-due state is silent. Available updates and retryable maintenance produce
-one combined notice with exactly one `Run: workstation-update` action. A local
-blocker instead says that maintenance is blocked and must be resolved before
-the command is run. A hard 15-second deadline bounds the check, and failure or
-timeout never prevents tmux/AoE launch.
+check from the dotfiles-managed Bash login profile. Dotfiles and agent-tool
+sources cache successful checks for 24 hours and retry failed source checks
+after one hour; their cache ages are independent. Local blockers and incomplete
+maintenance are evaluated on every eligible login. Healthy or not-yet-due state
+is silent. Available updates and retryable maintenance produce one combined
+notice with exactly one `Run: workstation-update` action. A local blocker
+instead says that maintenance is blocked and must be resolved before the
+command is run. A hard 15-second deadline bounds the check, and failure or
+timeout never prevents the shell from opening.
 
 Login never installs updates. There is no background timer or scheduler, and
-local shells, nested tmux sessions, remote commands, and non-interactive shells
-do not run the login check. Workstations without the completed setup marker also
-skip it. Logins that opted out of the tmux attach still run the check, because
-the notice is the only reminder that maintenance is due.
+local shells, remote commands, and non-interactive shells do not run the login
+check. Workstations without the completed setup marker also skip it. Each
+eligible SSH login warns when maintenance is actionable; healthy state remains
+silent. The login profile deliberately does not source `.bashrc`, so unrelated
+interactive-shell configuration is not pulled into the login boundary.
 
 ## Workstation herdr
 

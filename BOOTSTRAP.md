@@ -158,8 +158,10 @@ maintenance are evaluated every time. Current state is silent. Actionable state
 prints one combined notice rather than release notes. Available updates and
 retryable maintenance show one `Run: workstation-update` action; local blockers
 say that they must be resolved before running the command. The check has a hard
-15-second deadline and never prevents the tmux/AoE session from opening. There
-is no background scheduling or per-component update command.
+15-second deadline and never prevents the shell from opening. The
+dotfiles-managed Bash login profile and `workstation-login` helper own this
+check; they do not source `.bashrc` or auto-launch tmux/AoE. There is no
+background scheduling or per-component update command.
 
 Failed updates do not roll back automatically. Use the reported phase and
 component, inspect `systemctl --user status aoe-serve.service` and

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -u
+
+[[ -t 0 && -t 1 ]] || exit 0
+[[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]] || exit 0
+[[ -z "${SSH_ORIGINAL_COMMAND:-}" ]] || exit 0
+[[ -e "$HOME/.local/state/workstation-setup/complete" ]] || exit 0
+
+readonly workstation_update="$HOME/.local/bin/workstation-update"
+if [[ ! -x "$workstation_update" ]]; then
+  printf '%s\n' \
+    'Workstation freshness checker is unavailable. Run: workstation-setup' >&2
+  exit 0
+fi
+
+if ! "$workstation_update" --freshness; then
+  printf '%s\n' \
+    'Workstation freshness check failed unexpectedly. Run: workstation-update' >&2
+fi

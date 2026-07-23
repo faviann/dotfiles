@@ -13,35 +13,6 @@ if [ -r "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh" ]; then
 	. "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
 fi
 
-# Auto-launch AoE on SSH login. Create ~/.config/workstation/no-autolaunch to
-# opt out and land on a plain shell instead; `tmux attach -t main` still reaches
-# the session, and removing the file restores the auto-launch. Opting out keeps
-# the freshness notice, which is the only reminder that an update is due.
-_aoe_autolaunch() {
-	[[ $- == *i* ]] || return
-	[[ -t 0 && -t 1 ]] || return
-	[[ -n "${SSH_TTY:-}" ]] || return
-	[[ -z "${SSH_ORIGINAL_COMMAND:-}" ]] || return
-	[[ -n "${TMUX:-}" ]] && return
-	[[ -e "$HOME/.local/state/workstation-setup/complete" ]] || return
-	command -v aoe >/dev/null 2>&1 || return
-	command -v tmux >/dev/null 2>&1 || return
-
-	if command -v workstation-update >/dev/null 2>&1; then
-		workstation-update --freshness || true
-	fi
-
-	[[ -e "$HOME/.config/workstation/no-autolaunch" ]] && return
-
-	if tmux has-session -t main 2>/dev/null; then
-		exec tmux attach-session -t main
-	else
-		exec tmux new-session -s main "aoe; exec ${SHELL:-/bin/bash} -il"
-	fi
-}
-_aoe_autolaunch
-unset -f _aoe_autolaunch
-
 # Ansible lifecycle playbooks exclude workstation when run on that host.
 # Override intentionally, e.g.:
 # uv run --locked ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation

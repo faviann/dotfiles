@@ -67,8 +67,10 @@
         root = ./.;
         fileset = nixpkgs.lib.fileset.unions [
           ./.chezmoiscripts
+          ./dot_bash_profile.tmpl
           ./dot_bashrc.tmpl
           ./dot_local/bin/executable_update-agent-tools
+          ./dot_local/bin/executable_workstation-login
           ./dot_local/bin/executable_workstation-update
           ./scripts/run-shellcheck
           ./scripts/run-tests

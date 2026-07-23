@@ -5,7 +5,9 @@ readonly REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 shell_inputs=(
   "$REPO_ROOT/dot_local/bin/executable_update-agent-tools"
+  "$REPO_ROOT/dot_local/bin/executable_workstation-login"
   "$REPO_ROOT/dot_local/bin/executable_workstation-update"
+  "$REPO_ROOT/dot_bash_profile.tmpl"
   "$REPO_ROOT/dot_bashrc.tmpl"
   "$REPO_ROOT"/tests/*.bash
   "$REPO_ROOT"/tests/contracts/*.bash
