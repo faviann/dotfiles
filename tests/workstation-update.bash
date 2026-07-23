@@ -7,7 +7,8 @@ readonly COMMAND="$REPO_ROOT/dot_local/bin/executable_workstation-update"
 REAL_BASH="$(command -v bash)"
 REAL_CHEZMOI="$(command -v chezmoi)"
 REAL_GIT_UPLOAD_PACK="$(command -v git-upload-pack)"
-readonly REAL_BASH REAL_CHEZMOI REAL_GIT_UPLOAD_PACK
+REAL_SCRIPT="$(command -v script)"
+readonly REAL_BASH REAL_CHEZMOI REAL_GIT_UPLOAD_PACK REAL_SCRIPT
 readonly CANONICAL_ORIGIN='git@github.com:faviann/dotfiles.git'
 
 fail() {
@@ -33,7 +34,7 @@ resolved_command_path() {
   done
 }
 
-COMMAND_PATH="$(resolved_command_path bash chmod date flock git grep jq mkdir mktemp mv rm sed sha256sum sleep stat timeout touch)"
+COMMAND_PATH="$(resolved_command_path bash chmod date flock git grep jq mkdir mktemp mv rm script sed sha256sum sleep stat timeout touch)"
 readonly COMMAND_PATH
 
 write_agent_tools_fixture() {
@@ -208,6 +209,33 @@ if [[ "${TEST_DRIFT_AFTER_APPLY:-0}" == 1 \
   && "$1" == apply && "$*" != *'--dry-run'* ]]; then
   printf 'post-apply drift\n' >"$HOME/.managed"
 fi
+if [[ "${TEST_REQUIRE_BW_SESSION:-0}" == 1 \
+  && ( "$1" == apply || "$1" == verify ) \
+  && "${BW_SESSION:-}" != test-session-token ]]; then
+  printf 'chezmoi fixture did not inherit the unlocked Bitwarden session\n' >&2
+  exit 64
+fi
+STUB
+
+  printf '#!%s\n' "$REAL_BASH" >"$home/stubs/bw"
+  cat >>"$home/stubs/bw" <<'STUB'
+set -euo pipefail
+printf 'bw' >>"$BW_LOG"
+printf ' %q' "$@" >>"$BW_LOG"
+printf '\n' >>"$BW_LOG"
+
+case "$*" in
+  'unlock --check')
+    [[ "${BW_SESSION:-}" == test-session-token ]]
+    ;;
+  'unlock --raw')
+    printf 'test-session-token\n'
+    ;;
+  *)
+    printf 'unexpected bw fixture invocation: %s\n' "$*" >&2
+    exit 65
+    ;;
+esac
 STUB
 
   printf '#!%s\n' "$REAL_BASH" >"$home/stubs/ssh"
@@ -226,12 +254,26 @@ if [[ -n "${TEST_SSH_GATE:-}" ]]; then
 fi
 exec "$TEST_REAL_GIT_UPLOAD_PACK" "$TEST_REMOTE_REPO"
 STUB
-  chmod +x "$home/stubs/chezmoi" "$home/stubs/ssh"
+  chmod +x "$home/stubs/bw" "$home/stubs/chezmoi" "$home/stubs/ssh"
+}
+
+invoke_update() {
+  local command_path="$1"
+  local command_line
+  shift
+
+  if [[ "${TEST_UPDATE_INTERACTIVE:-0}" == 1 ]]; then
+    printf -v command_line '%q ' "$REAL_BASH" "$command_path" "$@"
+    SHELL="$REAL_BASH" "$REAL_SCRIPT" -qefc "$command_line" /dev/null
+  else
+    "$REAL_BASH" "$command_path" "$@" </dev/null
+  fi
 }
 
 run_update() {
   local test_dir="$1"
   local test_now="${WORKSTATION_UPDATE_NOW:-2026-07-15T00:00:00Z}"
+  local update_status=0
   shift
 
   HOME="$test_dir/home" \
@@ -251,6 +293,10 @@ run_update() {
     TEST_FAIL_DRY_RUN="${TEST_FAIL_DRY_RUN:-0}" \
     TEST_FAIL_APPLY="${TEST_FAIL_APPLY:-0}" \
     TEST_DRIFT_AFTER_APPLY="${TEST_DRIFT_AFTER_APPLY:-0}" \
+    TEST_REQUIRE_BW_SESSION="${TEST_REQUIRE_BW_SESSION:-0}" \
+    TEST_UPDATE_INTERACTIVE="${TEST_UPDATE_INTERACTIVE:-0}" \
+    BW_SESSION="${TEST_INITIAL_BW_SESSION:-test-session-token}" \
+    BW_LOG="$test_dir/home/bw-log" \
     TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS="${TEST_CHEZMOI_FRESHNESS_DELAY_SECONDS:-0}" \
     AGENT_TOOLS_LOG="$test_dir/home/agent-tools-log" \
     AGENT_FRESHNESS_ATTEMPT_LOG="$test_dir/home/agent-freshness-attempt-log" \
@@ -267,8 +313,14 @@ run_update() {
     WORKSTATION_UPDATE_NOW="$test_now" \
     UPDATE_AGENT_TOOLS_NOW="$test_now" \
     WORKSTATION_FRESHNESS_DEADLINE_SECONDS="${WORKSTATION_FRESHNESS_DEADLINE_SECONDS:-15}" \
-    bash "$COMMAND" "$@" </dev/null \
-      >"$test_dir/home/stdout" 2>"$test_dir/home/stderr"
+    invoke_update "$COMMAND" "$@" \
+      >"$test_dir/home/stdout" 2>"$test_dir/home/stderr" \
+    || update_status=$?
+  if [[ "${TEST_UPDATE_INTERACTIVE:-0}" == 1 ]]; then
+    tr -d '\r' <"$test_dir/home/stdout" >"$test_dir/home/stdout.normalized"
+    mv "$test_dir/home/stdout.normalized" "$test_dir/home/stdout"
+  fi
+  return "$update_status"
 }
 
 test_freshness_combines_dotfiles_and_agent_updates_without_mutation() {
@@ -963,6 +1015,89 @@ test_successful_update_reports_progress_and_completion() {
       'Workstation update complete') \
     "$test_dir/home/stdout" \
     || fail 'successful update did not report clear progress and completion'
+}
+
+test_required_apply_unlocks_bitwarden_once_for_all_chezmoi_phases() {
+  local output_file
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+
+  TEST_INITIAL_BW_SESSION=expired-session \
+    TEST_REQUIRE_BW_SESSION=1 \
+    TEST_UPDATE_INTERACTIVE=1 \
+    run_update "$test_dir" \
+    || fail "interactive Bitwarden unlock failed: $(<"$test_dir/home/stdout")"
+
+  diff -u \
+    <(printf '%s\n' \
+      'bw unlock --check' \
+      'bw unlock --raw' \
+      'bw unlock --check') \
+    "$test_dir/home/bw-log" \
+    || fail 'required apply did not establish exactly one valid Bitwarden session'
+  for output_file in \
+    "$test_dir/home/stdout" \
+    "$test_dir/home/stderr" \
+    "$test_dir/home/command-log" \
+    "$test_dir/home/phase-log"; do
+    ! grep -Fq 'test-session-token' "$output_file" \
+      || fail "Bitwarden session token leaked through $output_file"
+  done
+}
+
+test_required_apply_reuses_an_existing_bitwarden_session_without_prompting() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+
+  TEST_INITIAL_BW_SESSION=test-session-token \
+    TEST_REQUIRE_BW_SESSION=1 \
+    run_update "$test_dir" \
+    || fail "valid Bitwarden session was not reused: $(<"$test_dir/home/stderr")"
+
+  diff -u \
+    <(printf '%s\n' 'bw unlock --check') \
+    "$test_dir/home/bw-log" \
+    || fail 'valid Bitwarden session triggered a redundant unlock'
+}
+
+test_noninteractive_apply_requires_a_pre_unlocked_bitwarden_session() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+
+  if TEST_INITIAL_BW_SESSION=expired-session \
+    TEST_REQUIRE_BW_SESSION=1 \
+    run_update "$test_dir"; then
+    fail "non-interactive update unlocked Bitwarden or continued without a session: stdout=$(<"$test_dir/home/stdout") stderr=$(<"$test_dir/home/stderr")"
+  fi
+
+  grep -Fq \
+    'credential phase failed: Bitwarden is locked; run bw unlock --raw and export its output as BW_SESSION before unattended use' \
+    "$test_dir/home/stderr" \
+    || fail 'non-interactive update did not explain how to unblock Bitwarden'
+  diff -u \
+    <(printf '%s\n' 'bw unlock --check') \
+    "$test_dir/home/bw-log" \
+    || fail 'non-interactive update attempted to prompt for Bitwarden'
+  ! grep -Eq '^chezmoi (apply|verify)' "$test_dir/home/command-log" \
+    || fail 'non-interactive update rendered secrets without a valid session'
 }
 
 test_yes_forwards_only_agent_disruption_consent() {
@@ -1776,6 +1911,9 @@ readonly test_cases=(
   test_first_run_adopts_verified_equal_history
   test_current_agent_tools_are_checked_without_mutation
   test_successful_update_reports_progress_and_completion
+  test_required_apply_unlocks_bitwarden_once_for_all_chezmoi_phases
+  test_required_apply_reuses_an_existing_bitwarden_session_without_prompting
+  test_noninteractive_apply_requires_a_pre_unlocked_bitwarden_session
   test_yes_forwards_only_agent_disruption_consent
   test_agent_consent_refusal_names_only_the_unified_retry
   test_agent_discovery_failure_preserves_applied_dotfiles_for_retry

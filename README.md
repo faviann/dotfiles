@@ -166,6 +166,11 @@ alone. For unattended use, `workstation-update --yes` authorizes those
 agent-session restarts; it does not authorize overwriting local dotfile changes
 or bypass any source guard.
 
+When applying Bitwarden-backed templates, the command reuses a valid
+`BW_SESSION`. If the vault is locked during an interactive update, it prompts
+once and shares the resulting session with preview, apply, and verification.
+Unattended runs must export a valid session before invoking the updater.
+
 All installs, command and package-version checks, and `aoe acp doctor` must
 succeed before activation begins. The updater then restarts the AoE user
 service, replaces the ACP workers that were running at the start, and performs
