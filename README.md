@@ -170,6 +170,8 @@ When applying Bitwarden-backed templates, the command reuses a valid
 `BW_SESSION`. If the vault is locked during an interactive update, it prompts
 once and shares the resulting session with preview, apply, and verification.
 Unattended runs must export a valid session before invoking the updater.
+Chezmoi lifecycle scripts run and must succeed during apply; post-apply
+verification checks durable targets without rerunning those actions.
 
 All installs, command and package-version checks, and `aoe acp doctor` must
 succeed before activation begins. The updater then restarts the AoE user

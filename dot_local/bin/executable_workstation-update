@@ -716,7 +716,7 @@ if (( apply_required == 1 )); then
     || fail 'dry-run phase failed: chezmoi apply preview'
   chezmoi apply \
     || fail 'apply phase failed: chezmoi apply'
-  chezmoi verify \
+  chezmoi verify --exclude scripts \
     || fail 'verification phase failed: chezmoi targets'
   record_applied_commit
 fi
