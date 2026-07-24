@@ -1,0 +1,31 @@
+{{- if .is_lxc -}}
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly skills_repo="$HOME/repos/skills"
+readonly skills_url="https://github.com/faviann/skills.git"
+readonly reconciler="$skills_repo/scripts/reconcile-skills.sh"
+
+if [[ -e "$skills_repo" || -L "$skills_repo" ]]; then
+  checkout_root="$(git -C "$skills_repo" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ "$checkout_root" != "$skills_repo" ]]; then
+    printf 'error: skills path is not a Git checkout: %s\n' "$skills_repo" >&2
+    exit 1
+  fi
+else
+  mkdir -p "$(dirname "$skills_repo")"
+  git clone "$skills_url" "$skills_repo"
+fi
+
+if [[ ! -x "$reconciler" ]]; then
+  printf 'error: skills reconciler is missing or not executable: %s\n' \
+    "$reconciler" >&2
+  exit 1
+fi
+
+# The reconciler is repository-owned code from a checkout this hook deliberately
+# does not pin or verify. Applying dotfiles can carry an unlocked vault session
+# (workstation-update exports BW_SESSION before chezmoi apply), and linking
+# skills never needs it, so withhold it.
+env -u BW_SESSION "$reconciler"
+{{- end }}

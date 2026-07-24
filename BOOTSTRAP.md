@@ -54,6 +54,12 @@ AoE's host-level `acp.allow_agent_install` setting stays disabled; dotfiles is
 the package owner. The bootstrap update is part of `workstation-setup`, not an
 SSH-login installation or a background schedule.
 
+Chezmoi also recovers agent skills on the workstation. If `~/repos/skills` is
+absent, it clones `faviann/skills`; it never updates an existing checkout. The
+repository's reconciler restores supported harness links while leaving
+deprecated skills unlinked. Skill reconciliation runs during `chezmoi apply`,
+not during login-time freshness checks.
+
 Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
 has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
 before enabling the bind mount.
