@@ -35,16 +35,34 @@ rendered_raw() {
 }
 
 test_workstation_profile_selects_bun_baseline_for_pre_avx2_cpu() {
-  local package_names
+  local bun_package
 
-  package_names="$(
-    rendered_json '.packageNames' \
+  bun_package="$(
+    rendered_json '.bunPackage' \
       "$REPO_ROOT#homeConfigurations.workstation.config.home.packages" \
-      --apply 'packages: map (package: package.pname or package.name) packages'
+      --apply '
+        packages:
+        let
+          package = builtins.head (
+            builtins.filter
+              (package: (package.pname or package.name) == "bun-baseline")
+              packages
+          );
+        in
+        {
+          pname = package.pname or package.name;
+          inherit (package) version;
+          srcUrl = package.src.url;
+        }
+      '
   )" || fail 'could not render the workstation package profile'
 
-  jq -e 'index("bun-baseline") != null' <<<"$package_names" >/dev/null \
-    || fail 'rendered workstation package profile does not select baseline-compatible Bun'
+  jq -e '
+    (.pname == "bun-baseline") and
+    (.version == "1.3.13") and
+    (.srcUrl == "https://github.com/oven-sh/bun/releases/download/bun-v1.3.13/bun-linux-x64-baseline.zip")
+  ' <<<"$bun_package" >/dev/null \
+    || fail 'rendered workstation package profile does not select the pinned baseline Bun archive'
 }
 
 test_collie_origin_socket_listens_on_the_portal_origin_port() {

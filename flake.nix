@@ -65,9 +65,19 @@
       );
       workstationRenderedConfiguration = pkgs.writeText "workstation-rendered-configuration.json" (
         builtins.toJSON {
-          packageNames = map (
-            package: package.pname or package.name
-          ) workstationHomeConfiguration.config.home.packages;
+          bunPackage =
+            let
+              package = builtins.head (
+                builtins.filter
+                  (package: (package.pname or package.name) == "bun-baseline")
+                  workstationHomeConfiguration.config.home.packages
+              );
+            in
+            {
+              pname = package.pname or package.name;
+              inherit (package) version;
+              srcUrl = package.src.url;
+            };
           collieOriginSocket =
             workstationHomeConfiguration.config.systemd.user.sockets.collie-origin-forwarder;
           collieOriginService =

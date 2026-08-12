@@ -132,7 +132,7 @@ test "$(ss -H -ltn 'sport = :8787' | awk '{print $4}')" = \
   '127.0.0.1:8787'
 curl --fail --show-error --silent --output /dev/null \
   --header 'Host: collie.admin.faviann.com' \
-  --write-out='HTTP %{http_code}\n' http://127.0.0.1:8787/
+  --write-out 'HTTP %{http_code}\n' http://127.0.0.1:8787/
 ```
 
 The listener check rejects wildcard and IPv6-any binds; the only accepted
@@ -150,7 +150,7 @@ systemctl --user status collie-origin-forwarder.socket --no-pager
 ss -H -ltn 'sport = :8788'
 curl --fail --show-error --silent --output /dev/null \
   --header 'Host: collie.admin.faviann.com' \
-  --write-out='HTTP %{http_code}\n' http://127.0.0.1:8788/
+  --write-out 'HTTP %{http_code}\n' http://127.0.0.1:8788/
 ```
 
 Replace `WORKSTATION_LAN_IP` below with the same workstation address for both
@@ -159,7 +159,7 @@ remote checks. From the portal host, port 8788 must be reachable:
 ```bash
 curl --fail --show-error --silent --connect-timeout 5 --output /dev/null \
   --header 'Host: collie.admin.faviann.com' \
-  --write-out='HTTP %{http_code}\n' http://WORKSTATION_LAN_IP:8788/
+  --write-out 'HTTP %{http_code}\n' http://WORKSTATION_LAN_IP:8788/
 ```
 
 From a different LAN client that is not the portal, the same command must fail
@@ -168,7 +168,7 @@ to connect:
 ```bash
 curl --fail --show-error --silent --connect-timeout 5 --output /dev/null \
   --header 'Host: collie.admin.faviann.com' \
-  --write-out='HTTP %{http_code}\n' http://WORKSTATION_LAN_IP:8788/
+  --write-out 'HTTP %{http_code}\n' http://WORKSTATION_LAN_IP:8788/
 ```
 
 Record the portal success and other-client failure together. The negative
@@ -217,7 +217,7 @@ curl --fail --show-error --silent \
   http://127.0.0.1:8787/api/snapshot | jq '.sessions[0].reachable'
 curl --fail --show-error --silent --output /dev/null \
   --header 'Host: collie.admin.faviann.com' \
-  --write-out='HTTP %{http_code}\n' http://127.0.0.1:8787/
+  --write-out 'HTTP %{http_code}\n' http://127.0.0.1:8787/
 ```
 
 Start a new Herdr process for the same disposable session and verify that the
