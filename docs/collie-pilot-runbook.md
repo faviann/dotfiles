@@ -51,7 +51,8 @@ chmod 600 "$collie_env"
 "${EDITOR:-vi}" "$collie_env"
 ```
 
-The mutable file must contain exactly these pilot values:
+Before the Web Push phase, the mutable file contains these seven base pilot
+values:
 
 ```dotenv
 COLLIE_SKIP_SERVE=1
@@ -80,6 +81,263 @@ That action creates, enables, and starts the app-owned `collie.service` user
 unit. Do not copy the generated unit into Home Manager or make the forwarder
 depend on it.
 
+## Enable Web Push
+
+This phase extends the accepted Android PWA pilot. It changes only Collie's
+app-owned plugin checkout, mutable environment, and state. Run it against the
+pinned `0.28.0+2910f40` installation recorded above; do not update Collie as
+part of this procedure.
+
+### Install the optional dependency
+
+Resolve the managed plugin checkout from Herdr rather than copying the
+installation cache path from this document. The JSON query prints only the
+checkout path:
+
+```bash
+collie_plugin_root="$(
+  herdr plugin list --plugin herdr.collie --json |
+    jq --exit-status --raw-output \
+      '.result.plugins[] | select(.plugin_id == "herdr.collie") | .plugin_root'
+)"
+test -f "$collie_plugin_root/herdr-plugin.toml"
+test "$(git -C "$collie_plugin_root" rev-parse HEAD)" = \
+  '2910f40278f3ca1646fc472dd3589da4a47776e4'
+(cd "$collie_plugin_root" && bun add web-push)
+(cd "$collie_plugin_root" && bun -e '
+  const mod = await import("web-push");
+  const api = mod.default ?? mod;
+  if (typeof api.sendNotification !== "function") process.exit(1);
+  console.log("web-push import: ok");
+')
+```
+
+The final command must print only `web-push import: ok`. This dependency is
+installed in Collie's managed checkout, not in dotfiles or a global Bun
+environment.
+
+### Establish the signing identity
+
+Generate the VAPID keypair directly into an owner-only temporary file, merge
+it into the plugin-owned `.env`, and delete the temporary directory. None of
+these commands prints either key. The canonical HTTPS origin is also a valid
+VAPID subject URI and is the subject for this pilot.
+
+```bash
+collie_plugin_root="$(
+  herdr plugin list --plugin herdr.collie --json |
+    jq --exit-status --raw-output \
+      '.result.plugins[] | select(.plugin_id == "herdr.collie") | .plugin_root'
+)"
+collie_env="$(herdr plugin config-dir herdr.collie)/.env"
+test "$(stat --format='%a' "$collie_env")" = '600'
+if grep --quiet '^COLLIE_VAPID_\(PUBLIC\|PRIVATE\|SUBJECT\)=' "$collie_env"; then
+  echo 'VAPID configuration already exists; refusing to rotate it' >&2
+  exit 1
+fi
+collie_vapid_tmp="$(mktemp -d)"
+chmod 700 "$collie_vapid_tmp"
+trap 'rm -rf -- "$collie_vapid_tmp"' EXIT
+
+COLLIE_VAPID_OUTPUT="$collie_vapid_tmp/vapid.env" \
+  COLLIE_VAPID_SUBJECT_VALUE='https://collie.admin.faviann.com' \
+  bun --cwd "$collie_plugin_root" -e '
+    const mod = await import("web-push");
+    const api = mod.default ?? mod;
+    const keys = api.generateVAPIDKeys();
+    const text = [
+      `COLLIE_VAPID_PUBLIC=${keys.publicKey}`,
+      `COLLIE_VAPID_PRIVATE=${keys.privateKey}`,
+      `COLLIE_VAPID_SUBJECT=${process.env.COLLIE_VAPID_SUBJECT_VALUE}`,
+      "",
+    ].join("\n");
+    await Bun.write(process.env.COLLIE_VAPID_OUTPUT, text);
+  '
+chmod 600 "$collie_vapid_tmp/vapid.env"
+
+awk '!/^COLLIE_VAPID_(PUBLIC|PRIVATE|SUBJECT)=/' "$collie_env" \
+  >"$collie_vapid_tmp/base.env"
+printf '\n' >>"$collie_vapid_tmp/base.env"
+dd if="$collie_vapid_tmp/vapid.env" of="$collie_vapid_tmp/base.env" \
+  oflag=append conv=notrunc status=none
+install --mode=600 "$collie_vapid_tmp/base.env" "$collie_env"
+rm -rf -- "$collie_vapid_tmp"
+trap - EXIT
+```
+
+Do not use `bunx web-push generate-vapid-keys` directly for this pilot: its
+normal output displays the private key. Do not `cat`, source, diff, or commit
+the resulting `.env`. Verify only its ownership, mode, required key names,
+non-empty values, uniqueness, exact subject, and key shapes:
+
+```bash
+collie_env="$(herdr plugin config-dir herdr.collie)/.env"
+stat --format='%a %U:%G %n' "$collie_env"
+awk -F= '
+  /^COLLIE_VAPID_(PUBLIC|PRIVATE|SUBJECT)=/ {
+    count[$1]++
+    value = substr($0, index($0, "=") + 1)
+    nonempty[$1] = length(value) > 0
+    if ($1 == "COLLIE_VAPID_PUBLIC")
+      valid[$1] = length(value) == 87 && value !~ /[^A-Za-z0-9_-]/
+    else if ($1 == "COLLIE_VAPID_PRIVATE")
+      valid[$1] = length(value) == 43 && value !~ /[^A-Za-z0-9_-]/
+    else
+      valid[$1] = value == "https://collie.admin.faviann.com"
+  }
+  END {
+    names[1]="COLLIE_VAPID_PUBLIC"
+    names[2]="COLLIE_VAPID_PRIVATE"
+    names[3]="COLLIE_VAPID_SUBJECT"
+    for (i=1; i<=3; i++) {
+      name=names[i]
+      check = name == "COLLIE_VAPID_SUBJECT" ? "exact" : "shape"
+      printf "%s: count=%d nonempty=%s %s=%s\n", name, count[name], \
+        nonempty[name] ? "yes" : "no", check, valid[name] ? "yes" : "no"
+      if (count[name] != 1 || !nonempty[name] || !valid[name]) bad=1
+    }
+    exit bad
+  }
+' "$collie_env"
+```
+
+The expected metadata is mode `600`, owner/group `faviann:faviann`, and one
+non-empty occurrence of each name. The pinned `web-push` generator encodes its
+65-byte public key and 32-byte private key as unpadded URL-safe base64, producing
+the 87- and 43-character shapes checked above. These checks do not independently
+prove that the keys form a cryptographic pair; generating both in the same
+in-process `generateVAPIDKeys()` call is the source of that pairing. The output
+deliberately contains no value.
+
+### Restart and prove server-side enablement
+
+Restart through Collie's app-owned action, then inspect only the enablement
+banner and the safe shape of `/api/config`:
+
+```bash
+herdr plugin action invoke restart --plugin herdr.collie
+herdr plugin action invoke status --plugin herdr.collie
+journalctl --user -u collie.service --since=-5m --no-pager |
+  grep -F '[push] enabled ('
+curl --fail --show-error --silent \
+  --header 'Host: collie.admin.faviann.com' \
+  http://127.0.0.1:8787/api/config |
+  jq '{push, vapidPublicKeyPresent:
+    (.vapidPublicKey | type == "string" and length > 0), build}'
+```
+
+Require Collie's log to report `[push] enabled (N saved subscription(s))`, its
+status action to remain healthy, and the filtered API result to report
+`push: true` and `vapidPublicKeyPresent: true`. Never record the public-key
+value even though it is not secret; doing so keeps this evidence incapable of
+capturing the private key by a future command change.
+
+### Subscribe the accepted Android PWA
+
+On the accepted Android Chrome client, open the installed Collie PWA at
+`https://collie.admin.faviann.com`, open the gear menu, and go to **Settings**.
+Turn on **Push notifications** and choose **Allow** in Android's notification
+permission prompt. The switch must remain on after leaving and reopening
+Settings. If Collie says notifications are blocked, use Android's site/app
+notification settings to allow notifications for this installed PWA, then
+return to Collie and turn the switch on again. Do not copy browser subscription
+details from Chrome diagnostics.
+
+Back on the workstation, prove that Collie persisted at least one subscription
+without displaying its endpoint or keys:
+
+```bash
+collie_state_dir='/home/faviann/.local/state/collie'
+collie_subscriptions="$collie_state_dir/push-subscriptions.json"
+test -f "$collie_subscriptions"
+stat --format='%a %U:%G %n' "$collie_subscriptions"
+jq --exit-status '
+  if type == "array" and length > 0 and all(.[];
+    type == "object" and
+    (.endpoint | type == "string" and length > 0) and
+    (.keys | type == "object") and
+    (.keys.p256dh | type == "string" and length > 0) and
+    (.keys.auth | type == "string" and length > 0)
+  ) then
+    {subscriptionCount: length, hasValidSubscriptions: true}
+  else
+    error("subscription state must be a nonempty array of valid subscriptions")
+  end
+' "$collie_subscriptions"
+```
+
+Require `hasValidSubscriptions: true`. Record only the file metadata and count,
+not the file body, endpoint, or browser keys.
+
+### End-to-end push test
+
+Send this exact title and body through Collie's own VAPID signing and saved
+subscription path:
+
+```bash
+collie_plugin_root="$(
+  herdr plugin list --plugin herdr.collie --json |
+    jq --exit-status --raw-output \
+      '.result.plugins[] | select(.plugin_id == "herdr.collie") | .plugin_root'
+)"
+(cd "$collie_plugin_root" && \
+  bash scripts/collie-ctl.sh push-test \
+    'Collie pilot Web Push' \
+    'Issue #71 end-to-end test') >/dev/null 2>&1
+```
+
+Keep both output streams suppressed as shown, and do not redirect them to a
+persistent file: pinned Collie v0.28.0 can include a saved subscription endpoint
+in a per-endpoint send-failure message. Do not print or record subscription
+endpoints or keys.
+
+The command's exit status is not proof of delivery. Pinned v0.28.0 can report a
+per-endpoint send failure and still exit successfully. The required proof is
+the Android phone actually displaying title **Collie pilot Web Push** and body
+**Issue #71 end-to-end test**. Tap that notification and record that the
+installed PWA opens at the canonical `https://collie.admin.faviann.com` origin.
+The test notification uses the special `test` pane ID, so landing at the origin
+root is expected.
+
+### Real lifecycle transition and the v0.28.0 limit
+
+Run this proof with no other agent already blocked or done, so Collie's
+single-agent notification shape is unambiguous:
+
+1. Choose a real working agent in Collie and record its agent label, workspace
+   label, and cwd without recording pane output.
+2. Cause that agent to enter a genuine `blocked` transition by having it ask
+   the unique question `Collie issue 71 lifecycle probe: approve completion?`
+   and wait for input. A genuine transition to `done` may be used instead.
+3. Confirm the Collie UI changes from working to blocked (or done), wait for
+   the notification debounce, and record the received notification.
+4. Tap the notification. Confirm that the PWA opens on the canonical origin at
+   that agent's pane, then resolve the temporary prompt normally.
+
+For pinned Collie v0.28.0, the expected single-agent notification is title
+`<agent> needs you` (or `<agent> is done`) and body `<workspace> · <cwd>`.
+This proves the real transition, delivery, and agent deep-link. It does **not**
+prove that the notification contains the agent's message: v0.28.0's shipped
+`bridge/notifications.ts` has no blocking-message capture and deliberately
+uses workspace/cwd for the body. Record the issue criterion "notification
+containing agent message" as **blocked/unverified on pinned v0.28.0**, even
+when every other step succeeds. Do not substitute the manually supplied
+`push-test` body as evidence for this lifecycle criterion, and do not patch
+Collie upstream during this pilot.
+
+### State locations for the persistence follow-up
+
+Record paths and metadata only:
+
+| State | App-owned mutable path |
+| --- | --- |
+| VAPID public/private keypair and subject | `/home/faviann/.config/herdr/plugins/config/herdr.collie/.env`, in the three `COLLIE_VAPID_*` entries |
+| Browser subscriptions | `/home/faviann/.local/state/collie/push-subscriptions.json` |
+
+Neither path is made rebuild-persistent by this runbook. Capturing their
+contents or backing them up belongs to the later persistence ticket; the VAPID
+private key and subscription file must never be committed to this repository.
+
 ## Pilot evidence
 
 Run these checks on the workstation after the start action. Preserve the raw
@@ -106,6 +364,12 @@ secrets or large JSON responses in this repository.
 | Remote negative probe | From distinct auth client `10.1.9.29`, the same endpoint timed out with curl rc `28` and HTTP `000`. |
 | Herdr disconnect/reconnect | Against an isolated `collie-pilot` named-session socket, the snapshot changed from `reachable=false` to `reachable=true` after a new Herdr process returned. Collie stayed active at captured proof PID `2802133` with HTTP `200` and `NRestarts=0`; this PID is historical evidence, not a durable current value. |
 | Final restored state | The disposable service and session state were removed, Collie was returned to the normal primary socket and remained active, the default snapshot was reachable, and the environment file remained mode `600`. It contained only the seven pilot values documented above, with no VAPID keys. |
+
+The Web Push follow-up captured this additional secret-safe record:
+
+| Timestamp | Observed Web Push evidence |
+| --- | --- |
+| `2026-08-12T20:16:33Z` | The pinned checkout contained Collie's app-owned `web-push` import. Each `.env` VAPID name was present exactly once and nonempty; the file was mode `600` and owned by `faviann:faviann`, and no values were recorded. The restart action succeeded. The generated service was enabled and active with `NRestarts=0`. Filtered API evidence reported push `true` and public-key-present `true`. The journal reported `[push] enabled (0 saved subscription(s))`. Android permission/subscription, push receipt/tap, and a lifecycle transition were not yet observed. Because pinned v0.28.0 uses workspace/cwd rather than the agent message for lifecycle notification bodies, the message-content criterion is failing. |
 
 ### Plugin health and generated service
 
@@ -253,9 +517,11 @@ curl --fail --show-error --silent \
 stat --format='%a %U:%G %n' "$collie_env"
 ```
 
-Confirm the environment file is again exactly the seven pilot values above.
-During the pilot proof, reconnection occurred before this cleanup restart: the
-captured Collie PID stayed `2802133` and `NRestarts` stayed `0`.
+For the original loopback proof, the environment returned to exactly the seven
+base pilot values above. After the Web Push phase it must instead retain those
+seven values plus the three `COLLIE_VAPID_*` entries. During the original
+pilot proof, reconnection occurred before this cleanup restart: the captured
+Collie PID stayed `2802133` and `NRestarts` stayed `0`.
 
 ## Manual update
 
@@ -271,8 +537,11 @@ bridge. Repeat the version, health, service, and loopback evidence afterward.
 
 ## Excluded from this pilot
 
-Web Push and VAPID keys, automatic updates, public Traefik routing, and Home
-Manager ownership of `collie.service` are excluded. Collie's generated service
-and mutable `.env` remain application-owned. This repository owns only the
+Web Push enablement and manual Android acceptance are now part of this pilot.
+VAPID backup, rebuild persistence for VAPID/subscription state, status-only
+notification customization, automatic updates, upstream Collie changes,
+public Traefik changes, and Home Manager ownership of `collie.service` remain
+excluded. Collie's generated service, mutable `.env`, dependency checkout, and
+subscription state remain application-owned. This repository owns only the
 runtime prerequisite and the origin forwarder; homelab ingress policy and
 configuration stay in their respective external ownership boundaries.
