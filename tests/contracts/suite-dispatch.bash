@@ -91,7 +91,7 @@ expected_cases() {
       ;;
     workstation-collie-forwarder.bash)
       printf '%s\n' \
-        test_workstation_profile_provides_bun_from_the_pinned_package_set \
+        test_workstation_profile_selects_bun_baseline_for_pre_avx2_cpu \
         test_collie_origin_socket_listens_on_the_portal_origin_port \
         test_collie_origin_socket_activates_with_normal_user_sockets \
         test_collie_origin_forwarder_connects_to_the_loopback_bridge \
