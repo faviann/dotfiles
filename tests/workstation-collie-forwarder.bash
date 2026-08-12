@@ -34,7 +34,7 @@ rendered_raw() {
   nix eval --raw "$installable"
 }
 
-test_workstation_profile_provides_bun_from_the_pinned_package_set() {
+test_workstation_profile_selects_bun_baseline_for_pre_avx2_cpu() {
   local package_names
 
   package_names="$(
@@ -43,8 +43,8 @@ test_workstation_profile_provides_bun_from_the_pinned_package_set() {
       --apply 'packages: map (package: package.pname or package.name) packages'
   )" || fail 'could not render the workstation package profile'
 
-  jq -e 'index("bun") != null' <<<"$package_names" >/dev/null \
-    || fail 'rendered workstation package profile does not provide Bun'
+  jq -e 'index("bun-baseline") != null' <<<"$package_names" >/dev/null \
+    || fail 'rendered workstation package profile does not select baseline-compatible Bun'
 }
 
 test_collie_origin_socket_listens_on_the_portal_origin_port() {
@@ -131,7 +131,7 @@ test_existing_aoe_forwarder_rendering_is_unchanged() {
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
 readonly test_cases=(
-  test_workstation_profile_provides_bun_from_the_pinned_package_set
+  test_workstation_profile_selects_bun_baseline_for_pre_avx2_cpu
   test_collie_origin_socket_listens_on_the_portal_origin_port
   test_collie_origin_socket_activates_with_normal_user_sockets
   test_collie_origin_forwarder_connects_to_the_loopback_bridge

@@ -228,3 +228,7 @@ over HTTP, while herdr is a TUI.
   writes to it itself, so chezmoi does not own it.
 - No services: herdr listens on a Unix socket only. It has no dashboard and no
   LAN port, so it declares no user units.
+
+The manual, loopback-only Collie evaluation that uses herdr is documented in
+the [Collie pilot runbook](docs/collie-pilot-runbook.md). Collie's plugin,
+configuration, state, and generated service remain outside dotfiles ownership.

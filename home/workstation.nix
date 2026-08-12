@@ -1,5 +1,14 @@
 { pkgs, lib, config, hermesPackage, ... }:
 
+let
+  bunBaseline = pkgs.bun.overrideAttrs (oldAttrs: {
+    pname = "bun-baseline";
+    src = pkgs.fetchurl {
+      url = "https://github.com/oven-sh/bun/releases/download/bun-v${oldAttrs.version}/bun-linux-x64-baseline.zip";
+      hash = "sha256-nYokKSpwaAkCBdqsCloiP19pc29Sh+N7+I07QDHtx1A=";
+    };
+  });
+in
 {
   home.username = "faviann";
   home.homeDirectory = "/home/faviann";
@@ -8,7 +17,7 @@
   programs.home-manager.enable = true;
 
   home.packages = with pkgs; [
-    bun
+    bunBaseline
     nodejs
     uv
     gh
