@@ -9,11 +9,36 @@ fail() {
   exit 1
 }
 
+rendered_json() {
+  local fixture_filter="$1"
+  local installable="$2"
+  shift 2
+
+  if [[ -n "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
+    jq -ce "$fixture_filter" "$TEST_WORKSTATION_RENDERED_CONFIGURATION"
+    return
+  fi
+
+  nix eval --json "$installable" "$@"
+}
+
+rendered_raw() {
+  local fixture_filter="$1"
+  local installable="$2"
+
+  if [[ -n "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
+    jq -er "$fixture_filter" "$TEST_WORKSTATION_RENDERED_CONFIGURATION"
+    return
+  fi
+
+  nix eval --raw "$installable"
+}
+
 test_workstation_profile_provides_bun_from_the_pinned_package_set() {
   local package_names
 
   package_names="$(
-    nix eval --json \
+    rendered_json '.packageNames' \
       "$REPO_ROOT#homeConfigurations.workstation.config.home.packages" \
       --apply 'packages: map (package: package.pname or package.name) packages'
   )" || fail 'could not render the workstation package profile'
@@ -26,7 +51,7 @@ test_collie_origin_socket_listens_on_the_portal_origin_port() {
   local listen_stream
 
   listen_stream="$(
-    nix eval --raw \
+    rendered_raw '.collieOriginSocket.Socket.ListenStream' \
       "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.sockets.collie-origin-forwarder.Socket.ListenStream"
   )" || fail 'could not render the Collie origin socket listener'
 
@@ -38,7 +63,7 @@ test_collie_origin_socket_activates_with_normal_user_sockets() {
   local wanted_by
 
   wanted_by="$(
-    nix eval --json \
+    rendered_json '.collieOriginSocket.Install.WantedBy' \
       "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.sockets.collie-origin-forwarder.Install.WantedBy"
   )" || fail 'could not render the Collie origin socket activation target'
 
@@ -50,7 +75,7 @@ test_collie_origin_forwarder_connects_to_the_loopback_bridge() {
   local exec_start
 
   exec_start="$(
-    nix eval --json \
+    rendered_json '.collieOriginService.Service.ExecStart' \
       "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.services.collie-origin-forwarder.Service.ExecStart"
   )" || fail 'could not render the Collie origin forwarder command'
 
@@ -62,7 +87,7 @@ test_collie_origin_forwarder_has_no_collie_service_dependency_or_fallback() {
   local rendered_service
 
   rendered_service="$(
-    nix eval --json \
+    rendered_json '.collieOriginService' \
       "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.services.collie-origin-forwarder"
   )" || fail 'could not render the Collie origin forwarder service'
 
@@ -80,11 +105,11 @@ test_existing_aoe_forwarder_rendering_is_unchanged() {
   local rendered_service
 
   rendered_socket="$(
-    nix eval --json \
+    rendered_json '.aoeLanProxySocket' \
       "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.sockets.aoe-lan-proxy"
   )" || fail 'could not render the existing AoE proxy socket'
   rendered_service="$(
-    nix eval --json \
+    rendered_json '.aoeLanProxyService' \
       "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.services.aoe-lan-proxy"
   )" || fail 'could not render the existing AoE proxy service'
 
