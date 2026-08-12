@@ -63,6 +63,19 @@
       bootstrapAgentToolsActivation = pkgs.writeText "bootstrap-agent-tools" (
         workstationHomeConfiguration.config.home.activation.bootstrapAgentTools.data
       );
+      workstationRenderedConfiguration = pkgs.writeText "workstation-rendered-configuration.json" (
+        builtins.toJSON {
+          packageNames = map (
+            package: package.pname or package.name
+          ) workstationHomeConfiguration.config.home.packages;
+          collieOriginSocket =
+            workstationHomeConfiguration.config.systemd.user.sockets.collie-origin-forwarder;
+          collieOriginService =
+            workstationHomeConfiguration.config.systemd.user.services.collie-origin-forwarder;
+          aoeLanProxySocket = workstationHomeConfiguration.config.systemd.user.sockets.aoe-lan-proxy;
+          aoeLanProxyService = workstationHomeConfiguration.config.systemd.user.services.aoe-lan-proxy;
+        }
+      );
       shellcheckSource = nixpkgs.lib.fileset.toSource {
         root = ./.;
         fileset = nixpkgs.lib.fileset.unions [
@@ -125,6 +138,7 @@
             offline = true
           '';
           TEST_BOOTSTRAP_ACTIVATION_SCRIPT = bootstrapAgentToolsActivation;
+          TEST_WORKSTATION_RENDERED_CONFIGURATION = workstationRenderedConfiguration;
         } ''
           export HOME="$TMPDIR/home"
           export XDG_CACHE_HOME="$TMPDIR/cache"

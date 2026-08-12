@@ -8,6 +8,7 @@
   programs.home-manager.enable = true;
 
   home.packages = with pkgs; [
+    bun
     nodejs
     uv
     gh
@@ -89,6 +90,14 @@
 
     Install.WantedBy = [ "sockets.target" ];
   };
+
+  systemd.user.sockets.collie-origin-forwarder = {
+    Socket.ListenStream = "0.0.0.0:8788";
+    Install.WantedBy = [ "sockets.target" ];
+  };
+
+  systemd.user.services.collie-origin-forwarder.Service.ExecStart =
+    "/lib/systemd/systemd-socket-proxyd 127.0.0.1:8787";
 
   systemd.user.services.hermes-gateway = {
     Unit = {
