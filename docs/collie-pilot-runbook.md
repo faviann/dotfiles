@@ -168,7 +168,7 @@ trap - EXIT
 Do not use `bunx web-push generate-vapid-keys` directly for this pilot: its
 normal output displays the private key. Do not `cat`, source, diff, or commit
 the resulting `.env`. Verify only its ownership, mode, required key names,
-non-empty values, and uniqueness:
+non-empty values, uniqueness, exact subject, and key shapes:
 
 ```bash
 collie_env="$(herdr plugin config-dir herdr.collie)/.env"
@@ -176,7 +176,14 @@ stat --format='%a %U:%G %n' "$collie_env"
 awk -F= '
   /^COLLIE_VAPID_(PUBLIC|PRIVATE|SUBJECT)=/ {
     count[$1]++
-    nonempty[$1] = length(substr($0, index($0, "=") + 1)) > 0
+    value = substr($0, index($0, "=") + 1)
+    nonempty[$1] = length(value) > 0
+    if ($1 == "COLLIE_VAPID_PUBLIC")
+      valid[$1] = length(value) == 87 && value !~ /[^A-Za-z0-9_-]/
+    else if ($1 == "COLLIE_VAPID_PRIVATE")
+      valid[$1] = length(value) == 43 && value !~ /[^A-Za-z0-9_-]/
+    else
+      valid[$1] = value == "https://collie.admin.faviann.com"
   }
   END {
     names[1]="COLLIE_VAPID_PUBLIC"
@@ -184,9 +191,10 @@ awk -F= '
     names[3]="COLLIE_VAPID_SUBJECT"
     for (i=1; i<=3; i++) {
       name=names[i]
-      printf "%s: count=%d nonempty=%s\n", name, count[name], \
-        nonempty[name] ? "yes" : "no"
-      if (count[name] != 1 || !nonempty[name]) bad=1
+      check = name == "COLLIE_VAPID_SUBJECT" ? "exact" : "shape"
+      printf "%s: count=%d nonempty=%s %s=%s\n", name, count[name], \
+        nonempty[name] ? "yes" : "no", check, valid[name] ? "yes" : "no"
+      if (count[name] != 1 || !nonempty[name] || !valid[name]) bad=1
     }
     exit bad
   }
@@ -194,7 +202,12 @@ awk -F= '
 ```
 
 The expected metadata is mode `600`, owner/group `faviann:faviann`, and one
-non-empty occurrence of each name. The output deliberately contains no value.
+non-empty occurrence of each name. The pinned `web-push` generator encodes its
+65-byte public key and 32-byte private key as unpadded URL-safe base64, producing
+the 87- and 43-character shapes checked above. These checks do not independently
+prove that the keys form a cryptographic pair; generating both in the same
+in-process `generateVAPIDKeys()` call is the source of that pairing. The output
+deliberately contains no value.
 
 ### Restart and prove server-side enablement
 
@@ -239,16 +252,22 @@ collie_subscriptions="$collie_state_dir/push-subscriptions.json"
 test -f "$collie_subscriptions"
 stat --format='%a %U:%G %n' "$collie_subscriptions"
 jq --exit-status '
-  if type == "array" then
-    {subscriptionCount: length, hasSubscription: (length > 0)}
+  if type == "array" and length > 0 and all(.[];
+    type == "object" and
+    (.endpoint | type == "string" and length > 0) and
+    (.keys | type == "object") and
+    (.keys.p256dh | type == "string" and length > 0) and
+    (.keys.auth | type == "string" and length > 0)
+  ) then
+    {subscriptionCount: length, hasValidSubscriptions: true}
   else
-    error("subscription state is not an array")
+    error("subscription state must be a nonempty array of valid subscriptions")
   end
 ' "$collie_subscriptions"
 ```
 
-Require `hasSubscription: true`. Record only the file metadata and count, not
-the file body, endpoint, or browser keys.
+Require `hasValidSubscriptions: true`. Record only the file metadata and count,
+not the file body, endpoint, or browser keys.
 
 ### End-to-end push test
 
@@ -345,6 +364,12 @@ secrets or large JSON responses in this repository.
 | Remote negative probe | From distinct auth client `10.1.9.29`, the same endpoint timed out with curl rc `28` and HTTP `000`. |
 | Herdr disconnect/reconnect | Against an isolated `collie-pilot` named-session socket, the snapshot changed from `reachable=false` to `reachable=true` after a new Herdr process returned. Collie stayed active at captured proof PID `2802133` with HTTP `200` and `NRestarts=0`; this PID is historical evidence, not a durable current value. |
 | Final restored state | The disposable service and session state were removed, Collie was returned to the normal primary socket and remained active, the default snapshot was reachable, and the environment file remained mode `600`. It contained only the seven pilot values documented above, with no VAPID keys. |
+
+The Web Push follow-up captured this additional secret-safe record:
+
+| Timestamp | Observed Web Push evidence |
+| --- | --- |
+| `2026-08-12T20:16:33Z` | The pinned checkout contained Collie's app-owned `web-push` import. Each `.env` VAPID name was present exactly once and nonempty; the file was mode `600` and owned by `faviann:faviann`, and no values were recorded. The restart action succeeded. The generated service was enabled and active with `NRestarts=0`. Filtered API evidence reported push `true` and public-key-present `true`. The journal reported `[push] enabled (0 saved subscription(s))`. Android permission/subscription, push receipt/tap, and a lifecycle transition were not yet observed. Because pinned v0.28.0 uses workspace/cwd rather than the agent message for lifecycle notification bodies, the message-content criterion is failing. |
 
 ### Plugin health and generated service
 
