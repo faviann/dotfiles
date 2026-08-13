@@ -84,7 +84,7 @@ if [[ "$*" == "acp doctor" ]]; then
   exit 0
 fi
 
-if [[ "$*" == "acp ps --json" ]]; then
+if [[ "$*" == "ps --acp --dead --json" ]]; then
   ps_count=0
   if [[ -f "$HOME/acp-ps-count" ]]; then
     ps_count="$(<"$HOME/acp-ps-count")"
@@ -436,7 +436,7 @@ test_machine_status_reports_outdated_by_exit_status_without_output() {
     and .check_status == "success"
   ' "$state_file" >/dev/null \
     || fail "outdated machine status did not record fresh success"
-  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+  if grep -Eq '^(aoe update|aoe ps --acp|aoe acp restart|npm install|systemctl )' \
     "$test_dir/command-log"; then
     fail "outdated machine status mutated or inspected ACP workers"
   fi
@@ -477,7 +477,7 @@ test_machine_status_reports_discovery_failure_and_preserves_freshness_state() {
     and .check_status == "failed"
   ' "$state_file" >/dev/null \
     || fail "failed machine status did not preserve freshness state"
-  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+  if grep -Eq '^(aoe update|aoe ps --acp|aoe acp restart|npm install|systemctl )' \
     "$test_dir/command-log"; then
     fail "failed machine status mutated or inspected ACP workers"
   fi
@@ -523,7 +523,7 @@ test_machine_status_reports_unresolved_activation_failure_as_maintenance_needed(
     and .activation_failure.component == "AoE service restart"
   ' "$state_file" >/dev/null \
     || fail "activation-failed machine status did not preserve recovery state"
-  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+  if grep -Eq '^(aoe update|aoe ps --acp|aoe acp restart|npm install|systemctl )' \
     "$test_dir/command-log"; then
     fail "activation-failed machine status mutated or inspected ACP workers"
   fi
@@ -551,7 +551,7 @@ test_conditional_update_leaves_current_toolchain_and_acp_workers_alone() {
     and .check_status == "success"
   ' "$state_file" >/dev/null \
     || fail "current conditional update did not record fresh discovery"
-  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+  if grep -Eq '^(aoe update|aoe ps --acp|aoe acp restart|npm install|systemctl )' \
     "$test_dir/command-log"; then
     fail "current conditional update mutated or inspected ACP workers"
   fi
@@ -585,7 +585,7 @@ test_conditional_update_stops_before_mutation_when_discovery_fails() {
     and .check_status == "failed"
   ' "$state_file" >/dev/null \
     || fail "failed conditional update did not record discovery failure"
-  if grep -Eq '^(aoe update|aoe acp ps|aoe acp restart|npm install|systemctl )' \
+  if grep -Eq '^(aoe update|aoe ps --acp|aoe acp restart|npm install|systemctl )' \
     "$test_dir/command-log"; then
     fail "failed conditional update mutated or inspected ACP workers"
   fi
@@ -615,7 +615,7 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
     || fail "outdated conditional update did not perform discovery and verification"
   discovery_line="$(grep -n '^npm view @openai/codex@latest version$' \
     "$test_dir/command-log" | head -n 1 | cut -d: -f1)"
-  inspection_line="$(grep -n '^aoe acp ps --json$' \
+  inspection_line="$(grep -n '^aoe ps --acp --dead --json$' \
     "$test_dir/command-log" | head -n 1 | cut -d: -f1)"
   mutation_line="$(grep -n '^aoe update --yes$' \
     "$test_dir/command-log" | cut -d: -f1)"
@@ -1504,7 +1504,7 @@ test_workers_are_reconciled_by_identity_after_pre_activation_verification() {
   if grep -Eq 'session-a|session-b' "$test_dir/stdout"; then
     fail "interactive worker update exposed captured identities"
   fi
-  capture_line="$(grep -n '^aoe acp ps --json$' "$test_dir/command-log" \
+  capture_line="$(grep -n '^aoe ps --acp --dead --json$' "$test_dir/command-log" \
     | head -n 1 | cut -d: -f1)"
   install_line="$(grep -n '^aoe update --yes$' "$test_dir/command-log" \
     | cut -d: -f1)"
@@ -1524,7 +1524,7 @@ test_workers_are_reconciled_by_identity_after_pre_activation_verification() {
   [[ "$pre_activation_line" -lt "$service_restart_line" \
     && "$service_restart_line" -lt "$worker_restart_line" ]] \
     || fail "daemon or worker restart happened before pre-activation verification completed"
-  worker_health_line="$(grep -n '^aoe acp ps --json$' "$test_dir/command-log" \
+  worker_health_line="$(grep -n '^aoe ps --acp --dead --json$' "$test_dir/command-log" \
     | tail -n 1 | cut -d: -f1)"
   timestamp_line="$(grep -n '^date -u -d 2026-07-14T00:04:00Z +%Y-%m-%dT%H:%M:%SZ$' \
     "$test_dir/command-log" | cut -d: -f1)"
@@ -1553,7 +1553,7 @@ test_temporarily_unregistered_worker_is_reconciled_without_restart() {
     "$test_dir/command-log" >/dev/null; then
     fail "temporarily unregistered worker was restarted before it could re-register"
   fi
-  [[ "$(grep -c '^aoe acp ps --json$' "$test_dir/command-log")" -eq 3 ]] \
+  [[ "$(grep -c '^aoe ps --acp --dead --json$' "$test_dir/command-log")" -eq 3 ]] \
     || fail "temporarily unregistered worker was not reconciled on a later snapshot"
   jq -e '
     .last_successful_activation != null
@@ -1585,7 +1585,7 @@ test_coexisting_old_and_replacement_identities_fail_health_without_restarting_ag
     "$test_dir/command-log" >/dev/null; then
     fail "coexisting healthy replacement identity was restarted again"
   fi
-  [[ "$(grep -c '^aoe acp ps --json$' "$test_dir/command-log")" -eq 12 ]] \
+  [[ "$(grep -c '^aoe ps --acp --dead --json$' "$test_dir/command-log")" -eq 12 ]] \
     || fail "captured identity exit was not awaited for the bounded health window"
   diff -u \
     <(printf 'update-agent-tools: post-activation verification failed: ACP session replacement\n') \
@@ -1627,7 +1627,7 @@ test_each_worker_restart_decision_uses_a_fresh_identity_snapshot() {
   if grep -Fx 'aoe acp restart session-b' "$test_dir/command-log" >/dev/null; then
     fail "later worker auto-replaced during reconciliation was manually restarted"
   fi
-  [[ "$(grep -c '^aoe acp ps --json$' "$test_dir/command-log")" -eq 4 ]] \
+  [[ "$(grep -c '^aoe ps --acp --dead --json$' "$test_dir/command-log")" -eq 4 ]] \
     || fail "restart decisions did not use immediate per-worker identity snapshots"
 }
 
@@ -1655,7 +1655,7 @@ test_worker_replacement_health_failure_is_bounded_and_not_successful() {
     <(printf 'update-agent-tools: post-activation verification failed: ACP session replacement\n') \
     "$test_dir/stderr" \
     || fail "worker health failure did not identify the post-activation phase"
-  [[ "$(grep -c '^aoe acp ps --json$' "$test_dir/command-log")" -eq 12 ]] \
+  [[ "$(grep -c '^aoe ps --acp --dead --json$' "$test_dir/command-log")" -eq 12 ]] \
     || fail "worker replacement health wait was not bounded"
   [[ "$(grep -c '^aoe acp restart private-session$' "$test_dir/command-log")" -eq 1 ]] \
     || fail "unhealthy worker was restarted more than once"
