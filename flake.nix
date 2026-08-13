@@ -84,6 +84,10 @@
             workstationHomeConfiguration.config.systemd.user.services.collie-origin-forwarder;
           aoeLanProxySocket = workstationHomeConfiguration.config.systemd.user.sockets.aoe-lan-proxy;
           aoeLanProxyService = workstationHomeConfiguration.config.systemd.user.services.aoe-lan-proxy;
+          aoeServeService = workstationHomeConfiguration.config.systemd.user.services.aoe-serve;
+          collieServiceDropIn =
+            workstationHomeConfiguration.config.xdg.configFile
+            ."systemd/user/collie.service.d/10-origin-forwarder.conf".text;
         }
       );
       shellcheckSource = nixpkgs.lib.fileset.toSource {
