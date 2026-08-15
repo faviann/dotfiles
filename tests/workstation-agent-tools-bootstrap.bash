@@ -135,7 +135,11 @@ test_bootstrap_handoff_runs_after_the_profile_exists() {
     || fail "handoff must run after installPackages, or home.packages tools are missing from the profile it reads"
 }
 
-test_updater_lock_tool_is_reachable_from_the_bootstrap_handoff() {
+# The updater's other dependencies come from the profile (npm) or Home Manager's
+# own activation PATH (jq, sed, date, mktemp); these two have no other source.
+readonly updater_host_tools=(flock curl)
+
+test_updater_host_tools_are_reachable_from_the_bootstrap_handoff() {
   local test_dir
   local bin_dir
   test_dir="$(mktemp -d)"
@@ -147,13 +151,15 @@ test_updater_lock_tool_is_reachable_from_the_bootstrap_handoff() {
   cat >>"$bin_dir/update-agent-tools" <<'STUB'
 set -euo pipefail
 
-command -v flock >/dev/null 2>&1 || exit 23
+for tool in $UPDATER_HOST_TOOLS; do
+  command -v "$tool" >/dev/null 2>&1 || { printf '%s\n' "$tool" >"$COMMAND_LOG.missing"; exit 23; }
+done
 printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
 STUB
   chmod +x "$bin_dir/update-agent-tools"
 
-  run_activation "$test_dir" \
-    || fail "handoff ran the updater without its flock lock tool on PATH"
+  UPDATER_HOST_TOOLS="${updater_host_tools[*]}" run_activation "$test_dir" \
+    || fail "handoff ran the updater without $(cat "$test_dir/command-log.missing" 2>/dev/null || printf 'its host tools') on PATH"
 }
 
 # shellcheck source=tests/lib/suite-dispatch.bash
@@ -163,7 +169,7 @@ readonly test_cases=(
   test_missing_tools_are_installed_by_the_bootstrap_handoff
   test_complete_toolchain_is_not_refreshed_during_bootstrap
   test_bootstrap_handoff_runs_after_the_profile_exists
-  test_updater_lock_tool_is_reachable_from_the_bootstrap_handoff
+  test_updater_host_tools_are_reachable_from_the_bootstrap_handoff
   test_failed_install_fails_the_bootstrap_handoff
 )
 
