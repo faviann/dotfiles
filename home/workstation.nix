@@ -41,29 +41,34 @@ in
 
   systemd.user.startServices = "sd-switch";
 
-  home.activation.bootstrapAgentTools = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
-    # Activation runs with a curated store-only PATH, so system directories are
-    # absent and the updater cannot reach /usr/bin/flock for its lock. Carry the
-    # store's util-linux instead of assuming the host supplies one.
-    export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${lib.getBin pkgs.util-linux}/bin:$PATH"
+  # installPackages is what creates the profile this handoff reads from. Ordered
+  # only after reloadSystemd, the handoff ran while ~/.nix-profile was still a
+  # dangling symlink, so every home.packages tool the updater needs — npm, jq —
+  # was missing and activation died on whichever one it probed first.
+  home.activation.bootstrapAgentTools =
+    lib.hm.dag.entryAfter [ "reloadSystemd" "installPackages" ] ''
+      # Activation runs with a curated store-only PATH, so system directories are
+      # absent and the updater cannot reach /usr/bin/flock for its lock. Carry the
+      # store's util-linux instead of assuming the host supplies one.
+      export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${lib.getBin pkgs.util-linux}/bin:$PATH"
 
-    _agent_tools_missing=false
-    for _agent_tool in \
-      aoe codex claude pi codex-acp claude-agent-acp pi-acp; do
-      if ! command -v "$_agent_tool" >/dev/null 2>&1; then
-        _agent_tools_missing=true
-        break
+      _agent_tools_missing=false
+      for _agent_tool in \
+        aoe codex claude pi codex-acp claude-agent-acp pi-acp; do
+        if ! command -v "$_agent_tool" >/dev/null 2>&1; then
+          _agent_tools_missing=true
+          break
+        fi
+      done
+
+      if [ "$_agent_tools_missing" = true ]; then
+        command -v aoe >/dev/null 2>&1 \
+          || { echo "Agent-tool bootstrap requires chezmoi to install AoE first" >&2; exit 1; }
+        command -v update-agent-tools >/dev/null 2>&1 \
+          || { echo "Agent-tool bootstrap requires the dotfiles updater" >&2; exit 1; }
+        update-agent-tools --yes
       fi
-    done
-
-    if [ "$_agent_tools_missing" = true ]; then
-      command -v aoe >/dev/null 2>&1 \
-        || { echo "Agent-tool bootstrap requires chezmoi to install AoE first" >&2; exit 1; }
-      command -v update-agent-tools >/dev/null 2>&1 \
-        || { echo "Agent-tool bootstrap requires the dotfiles updater" >&2; exit 1; }
-      update-agent-tools --yes
-    fi
-  '';
+    '';
 
   systemd.user.services.aoe-serve = {
     Unit = {

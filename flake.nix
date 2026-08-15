@@ -63,6 +63,9 @@
       bootstrapAgentToolsActivation = pkgs.writeText "bootstrap-agent-tools" (
         workstationHomeConfiguration.config.home.activation.bootstrapAgentTools.data
       );
+      bootstrapAgentToolsOrdering = pkgs.writeText "bootstrap-agent-tools-after" (
+        builtins.toJSON workstationHomeConfiguration.config.home.activation.bootstrapAgentTools.after
+      );
       workstationRenderedConfiguration = pkgs.writeText "workstation-rendered-configuration.json" (
         builtins.toJSON {
           bunPackage =
@@ -152,6 +155,7 @@
             offline = true
           '';
           TEST_BOOTSTRAP_ACTIVATION_SCRIPT = bootstrapAgentToolsActivation;
+          TEST_BOOTSTRAP_ACTIVATION_AFTER = bootstrapAgentToolsOrdering;
           TEST_WORKSTATION_RENDERED_CONFIGURATION = workstationRenderedConfiguration;
         } ''
           export HOME="$TMPDIR/home"

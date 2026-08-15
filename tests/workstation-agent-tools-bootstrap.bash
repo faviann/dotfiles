@@ -21,6 +21,16 @@ activation_script() {
     "$REPO_ROOT#homeConfigurations.workstation.config.home.activation.bootstrapAgentTools.data"
 }
 
+activation_ordering() {
+  if [[ -n "${TEST_BOOTSTRAP_ACTIVATION_AFTER:-}" ]]; then
+    cat "$TEST_BOOTSTRAP_ACTIVATION_AFTER"
+    return
+  fi
+
+  nix eval --json \
+    "$REPO_ROOT#homeConfigurations.workstation.config.home.activation.bootstrapAgentTools.after"
+}
+
 make_stub() {
   local path="$1"
 
@@ -115,6 +125,16 @@ STUB
   fi
 }
 
+test_bootstrap_handoff_runs_after_the_profile_exists() {
+  local after
+
+  after="$(activation_ordering)" \
+    || fail "could not read the bootstrap handoff ordering"
+
+  jq -e 'index("installPackages")' >/dev/null <<<"$after" \
+    || fail "handoff must run after installPackages, or home.packages tools are missing from the profile it reads"
+}
+
 test_updater_lock_tool_is_reachable_from_the_bootstrap_handoff() {
   local test_dir
   local bin_dir
@@ -142,6 +162,7 @@ source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 readonly test_cases=(
   test_missing_tools_are_installed_by_the_bootstrap_handoff
   test_complete_toolchain_is_not_refreshed_during_bootstrap
+  test_bootstrap_handoff_runs_after_the_profile_exists
   test_updater_lock_tool_is_reachable_from_the_bootstrap_handoff
   test_failed_install_fails_the_bootstrap_handoff
 )
