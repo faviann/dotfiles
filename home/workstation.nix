@@ -42,7 +42,10 @@ in
   systemd.user.startServices = "sd-switch";
 
   home.activation.bootstrapAgentTools = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
-    export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:$PATH"
+    # Activation runs with a curated store-only PATH, so system directories are
+    # absent and the updater cannot reach /usr/bin/flock for its lock. Carry the
+    # store's util-linux instead of assuming the host supplies one.
+    export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${lib.getBin pkgs.util-linux}/bin:$PATH"
 
     _agent_tools_missing=false
     for _agent_tool in \

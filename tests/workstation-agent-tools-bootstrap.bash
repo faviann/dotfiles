@@ -115,12 +115,34 @@ STUB
   fi
 }
 
+test_updater_lock_tool_is_reachable_from_the_bootstrap_handoff() {
+  local test_dir
+  local bin_dir
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  bin_dir="$test_dir/.local/bin"
+
+  make_stub "$bin_dir/aoe"
+  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
+  cat >>"$bin_dir/update-agent-tools" <<'STUB'
+set -euo pipefail
+
+command -v flock >/dev/null 2>&1 || exit 23
+printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
+STUB
+  chmod +x "$bin_dir/update-agent-tools"
+
+  run_activation "$test_dir" \
+    || fail "handoff ran the updater without its flock lock tool on PATH"
+}
+
 # shellcheck source=tests/lib/suite-dispatch.bash
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
 readonly test_cases=(
   test_missing_tools_are_installed_by_the_bootstrap_handoff
   test_complete_toolchain_is_not_refreshed_during_bootstrap
+  test_updater_lock_tool_is_reachable_from_the_bootstrap_handoff
   test_failed_install_fails_the_bootstrap_handoff
 )
 
