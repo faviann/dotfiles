@@ -90,7 +90,7 @@ in
     Service = {
       Type = "simple";
       Environment = "PATH=%h/.local/bin:%h/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin";
-      ExecStart = "/usr/bin/env aoe serve --host 127.0.0.1 --port 4000 --no-auth";
+      ExecStart = "/usr/bin/env aoe serve --host 127.0.0.1 --port 4000 --no-auth --behind-proxy --allowed-host aoe.local.faviann.com";
       Restart = "on-failure";
       RestartSec = 5;
     };

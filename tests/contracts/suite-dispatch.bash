@@ -87,6 +87,8 @@ expected_cases() {
       printf '%s\n' \
         test_missing_tools_are_installed_by_the_bootstrap_handoff \
         test_complete_toolchain_is_not_refreshed_during_bootstrap \
+        test_bootstrap_handoff_runs_after_the_profile_exists \
+        test_updater_host_tools_are_reachable_from_the_bootstrap_handoff \
         test_failed_install_fails_the_bootstrap_handoff
       ;;
     workstation-collie-forwarder.bash)
@@ -96,7 +98,18 @@ expected_cases() {
         test_collie_origin_socket_activates_with_normal_user_sockets \
         test_collie_origin_forwarder_connects_to_the_loopback_bridge \
         test_collie_origin_forwarder_has_no_collie_service_dependency_or_fallback \
+        test_aoe_serve_pulls_up_its_origin_socket \
+        test_collie_service_drop_in_pulls_up_its_origin_socket \
         test_existing_aoe_forwarder_rendering_is_unchanged
+      ;;
+    workstation-skills-bootstrap.bash)
+      printf '%s\n' \
+        test_missing_checkout_is_cloned_and_reconciled \
+        test_existing_checkout_is_preserved_and_idempotent \
+        test_invalid_existing_path_fails_without_reconciliation \
+        test_clone_and_reconciler_failures_propagate \
+        test_reconciler_cannot_read_the_unlocked_vault_session \
+        test_non_lxc_render_is_a_noop
       ;;
     workstation-update.bash)
       printf '%s\n' \
@@ -158,6 +171,7 @@ test_every_suite_lists_all_case_names() {
     update-agent-tools-check.bash \
     workstation-agent-tools-bootstrap.bash \
     workstation-collie-forwarder.bash \
+    workstation-skills-bootstrap.bash \
     workstation-update.bash; do
     listed_cases="$(bash "$REPO_ROOT/tests/$suite" --list)" \
       || fail "$suite --list exited nonzero"
@@ -184,6 +198,7 @@ test_every_suite_preserves_no_argument_full_run() {
     'update-agent-tools-check.bash|PASS: update-agent-tools --check' \
     'workstation-agent-tools-bootstrap.bash|PASS: workstation agent-tool bootstrap handoff' \
     'workstation-collie-forwarder.bash|PASS: workstation Collie runtime and origin forwarder' \
+    'workstation-skills-bootstrap.bash|PASS: workstation skills bootstrap' \
     'workstation-update.bash|PASS: workstation update'; do
     IFS='|' read -r suite pass_line <<<"$specification"
     output="$(bash "$REPO_ROOT/tests/$suite")" \
@@ -206,6 +221,7 @@ test_every_suite_runs_one_exact_named_case() {
     'update-agent-tools-check.bash|test_machine_status_reports_current_by_exit_status_without_output|PASS: update-agent-tools --check' \
     'workstation-agent-tools-bootstrap.bash|test_failed_install_fails_the_bootstrap_handoff|PASS: workstation agent-tool bootstrap handoff' \
     'workstation-collie-forwarder.bash|test_collie_origin_socket_listens_on_the_portal_origin_port|PASS: workstation Collie runtime and origin forwarder' \
+    'workstation-skills-bootstrap.bash|test_non_lxc_render_is_a_noop|PASS: workstation skills bootstrap' \
     'workstation-update.bash|test_unsupported_arguments_fail_before_maintenance|PASS: workstation update'; do
     IFS='|' read -r suite test_case pass_line <<<"$specification"
     output="$(bash "$REPO_ROOT/tests/$suite" --case "$test_case")" \
@@ -242,6 +258,7 @@ test_unknown_and_malformed_invocations_fail_clearly() {
     update-agent-tools-check.bash \
     workstation-agent-tools-bootstrap.bash \
     workstation-collie-forwarder.bash \
+    workstation-skills-bootstrap.bash \
     workstation-update.bash; do
     assert_dispatch_fails_with \
       "$suite" 'ERROR: unknown test case:' \
