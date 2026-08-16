@@ -152,10 +152,13 @@ package installation; the AoE dashboard does not.
 
 `workstation-update` is the only routine maintenance command. It validates the
 chezmoi source as a clean, canonical `main` checkout, fetches and fast-forwards
-it to `origin/main`, previews and applies dotfile changes when required, and
-then refreshes AoE, all three standalone CLIs, and all three ACP adapters as
-one unit. Agent tools use latest stable releases and do not retrieve or display
-release notes.
+it to `origin/main`, previews and applies dotfile changes when required, then
+delegates workstation configuration to `workstation-setup` whenever dotfiles
+work occurred, and finally refreshes AoE, all three standalone CLIs, and all
+three ACP adapters as one unit. `workstation-setup` owns workstation
+configuration freshness, comparing and activating the Home Manager build; it is
+installed by homelab-iac rather than by chezmoi. Agent tools use latest stable
+releases and do not retrieve or display release notes.
 
 The command refuses unsafe source states such as local content, a non-canonical
 origin, the wrong branch or upstream, and ahead or diverged history. It does
