@@ -157,7 +157,7 @@ delegates workstation configuration to `workstation-setup` whenever dotfiles
 work occurred, and finally refreshes AoE, all three standalone CLIs, and all
 three ACP adapters as one unit. `workstation-setup` owns workstation
 configuration freshness, comparing and activating the Home Manager build; it is
-installed by homelab-iac rather than by chezmoi. Agent tools use latest stable
+installed by Ansible rather than by chezmoi. Agent tools use latest stable
 releases and do not retrieve or display release notes.
 
 The command refuses unsafe source states such as local content, a non-canonical
@@ -189,11 +189,11 @@ component, `systemctl --user status aoe-serve.service`, and
 activation failures remain recorded until a successful rerun.
 
 The lower-level `update-agent-tools` command remains available for targeted
-recovery when a dotfiles/source failure prevents `workstation-update` from
-reaching its agent-tool phase. Use it only to repair that agent-tool state, then
-return to `workstation-update` for routine maintenance. Home Manager also uses
-`update-agent-tools --yes` during initial bootstrap when managed commands are
-missing.
+recovery when a dotfiles/source or workstation-configuration failure prevents
+`workstation-update` from reaching its agent-tool phase. Use it only to repair
+that agent-tool state, then return to `workstation-update` for routine
+maintenance. Home Manager also uses `update-agent-tools --yes` during initial
+bootstrap when managed commands are missing.
 
 ### Login freshness notices
 
