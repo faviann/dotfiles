@@ -87,6 +87,8 @@ expected_cases() {
       printf '%s\n' \
         test_missing_tools_are_installed_by_the_bootstrap_handoff \
         test_complete_toolchain_is_not_refreshed_during_bootstrap \
+        test_bootstrap_handoff_runs_after_the_profile_exists \
+        test_updater_host_tools_are_reachable_from_the_bootstrap_handoff \
         test_failed_install_fails_the_bootstrap_handoff
       ;;
     workstation-collie-forwarder.bash)
@@ -96,6 +98,8 @@ expected_cases() {
         test_collie_origin_socket_activates_with_normal_user_sockets \
         test_collie_origin_forwarder_connects_to_the_loopback_bridge \
         test_collie_origin_forwarder_has_no_collie_service_dependency_or_fallback \
+        test_aoe_serve_pulls_up_its_origin_socket \
+        test_collie_service_drop_in_pulls_up_its_origin_socket \
         test_existing_aoe_forwarder_rendering_is_unchanged
       ;;
     workstation-skills-bootstrap.bash)
