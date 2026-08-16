@@ -26,6 +26,10 @@ may specialize the environment, but workstation-owned orchestration and
 credentials remain global.
 _Avoid_: Repository-local AFK workflow, bespoke launcher
 
+**Workstation configuration freshness**:
+Owned by `workstation-setup`; canonical definition lives in homelab-iac's `CONTEXT.md`.
+_Avoid_: Home Manager generation check, local freshness algorithm
+
 ## Supported AFK workflow
 
 This repository's supported AFK workflow is the root-installed Sandcastle

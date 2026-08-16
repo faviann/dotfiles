@@ -727,6 +727,16 @@ else
   printf 'Dotfiles: current\n'
 fi
 
+if (( dotfiles_changed == 1 )); then
+  printf 'Workstation configuration: checking...\n'
+  workstation_setup="$(command -v workstation-setup 2>/dev/null || true)"
+  [[ -n "$workstation_setup" && -x "$workstation_setup" ]] \
+    || fail 'workstation-configuration phase failed: workstation-setup is not executable'
+  "$workstation_setup" \
+    || fail 'workstation-configuration phase failed: workstation-setup'
+  printf 'Workstation configuration: ready\n'
+fi
+
 agent_tools="$HOME/.local/bin/update-agent-tools"
 [[ -x "$agent_tools" ]] \
   || fail 'agent-tools phase failed: managed update-agent-tools is not executable'
