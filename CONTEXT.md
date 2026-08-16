@@ -12,6 +12,20 @@ _Avoid_: Standard workflow, production queue
 A temporary, proof-oriented setup used to validate an AFK workflow's safety and behavior before adoption.
 _Avoid_: Daily workflow, supported workflow
 
+**Support portfolio**:
+The bounded set of target repositories for which the supported AFK workflow
+promises a zero-AFK-configuration launch experience. The initial portfolio is
+dotfiles, homelab-iac, and overmind; other repositories join only after their
+needs are observed and deliberately supported.
+_Avoid_: Every repository, arbitrary repository
+
+**Repository environment override**:
+An exceptional, repository-owned extension to the shared AFK environment for a
+target repository whose validation contract cannot run in the common image. It
+may specialize the environment, but workstation-owned orchestration and
+credentials remain global.
+_Avoid_: Repository-local AFK workflow, bespoke launcher
+
 ## Supported AFK workflow
 
 This repository's supported AFK workflow is the root-installed Sandcastle
