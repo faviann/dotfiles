@@ -1468,6 +1468,137 @@ test_workstation_configuration_failure_stops_before_agent_tools() {
     || fail 'failed workstation configuration mutated the agent toolchain'
 }
 
+test_failed_workstation_configuration_without_marker_is_retried() {
+  local expected_commit
+  local marker
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  publish_source_only_change "$test_dir"
+  expected_commit="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/seed" rev-parse HEAD)"
+  marker="$test_dir/home/state/workstation-update/applied-commit"
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+
+  if TEST_WORKSTATION_SETUP_FAIL=1 run_update "$test_dir"; then
+    fail 'no-marker workstation-configuration failure exited zero'
+  fi
+
+  [[ ! -e "$marker" ]] \
+    || fail 'no-marker workstation-configuration failure recorded completion'
+  [[ ! -e "$test_dir/home/agent-tools-log" ]] \
+    || fail 'no-marker workstation-configuration failure discovered agent tools'
+  ! grep -Fq 'Workstation update complete' "$test_dir/home/stdout" \
+    || fail 'no-marker workstation-configuration failure reported completion'
+
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+  run_update "$test_dir" \
+    || fail "no-marker workstation-configuration retry failed: $(<"$test_dir/home/stderr")"
+
+  [[ -f "$marker" && "$(<"$marker")" == "$expected_commit" ]] \
+    || fail 'successful no-marker retry did not record completion'
+  diff -u \
+    <(printf '%s\n' \
+      'chezmoi source-path' \
+      'chezmoi verify' \
+      'workstation-setup' \
+      'update-agent-tools v1 --update-if-needed') \
+    "$test_dir/home/phase-log" \
+    || fail 'no-marker retry did not complete workstation configuration before agent tools'
+  [[ "$(grep -c '^workstation-setup$' \
+    "$test_dir/home/workstation-setup-log")" -eq 2 ]] \
+    || fail 'no-marker workstation configuration was not retried'
+  grep -Fq 'Workstation update complete' "$test_dir/home/stdout" \
+    || fail 'successful no-marker retry did not report completion'
+
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log" \
+    "$test_dir/home/workstation-setup-log"
+  run_update "$test_dir" \
+    || fail "current update after no-marker retry failed: $(<"$test_dir/home/stderr")"
+
+  [[ ! -e "$test_dir/home/workstation-setup-log" ]] \
+    || fail 'fully current run repeated no-marker workstation configuration'
+  ! grep -Fq 'workstation-setup' "$test_dir/home/phase-log" \
+    || fail 'fully current run reached no-marker workstation configuration'
+}
+
+test_failed_workstation_configuration_is_retried_before_completion() {
+  local expected_commit
+  local marker
+  local previous_commit
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  previous_commit="$(source_commit "$test_dir")"
+  publish_managed_version "$test_dir" v2
+  expected_commit="$(GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$test_dir/seed" rev-parse HEAD)"
+  marker="$test_dir/home/state/workstation-update/applied-commit"
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+
+  if TEST_WORKSTATION_SETUP_FAIL=1 TEST_AGENT_OUTDATED=1 \
+    run_update "$test_dir"; then
+    fail 'failed workstation configuration exited zero'
+  fi
+
+  [[ "$(source_commit "$test_dir")" == "$expected_commit" ]] \
+    || fail 'failed workstation configuration did not retain advanced dotfiles'
+  [[ "$(<"$marker")" == "$previous_commit" ]] \
+    || fail 'failed workstation configuration recorded dotfiles completion'
+  grep -Fq 'workstation-configuration phase failed: workstation-setup' \
+    "$test_dir/home/stderr" \
+    || fail 'failed workstation configuration did not name its phase'
+  ! grep -Fq 'update-agent-tools' "$test_dir/home/phase-log" \
+    || fail 'failed workstation configuration reached agent-tool maintenance'
+  [[ ! -e "$test_dir/home/agent-tools-log" ]] \
+    || fail 'failed workstation configuration discovered agent tools'
+  ! grep -Fq 'Workstation update complete' "$test_dir/home/stdout" \
+    || fail 'failed workstation configuration reported completion'
+
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+  TEST_AGENT_OUTDATED=1 run_update "$test_dir" \
+    || fail "workstation-configuration retry failed: $(<"$test_dir/home/stderr")"
+
+  [[ "$(<"$marker")" == "$expected_commit" ]] \
+    || fail 'successful workstation-configuration retry did not record completion'
+  diff -u \
+    <(printf '%s\n' \
+      'chezmoi source-path' \
+      'chezmoi apply --dry-run --verbose' \
+      'chezmoi apply' \
+      'chezmoi verify --exclude scripts' \
+      'workstation-setup' \
+      'update-agent-tools v2 --update-if-needed') \
+    "$test_dir/home/phase-log" \
+    || fail 'retry did not complete workstation configuration before agent tools'
+  [[ "$(grep -c '^workstation-setup$' \
+    "$test_dir/home/workstation-setup-log")" -eq 2 ]] \
+    || fail 'failed workstation configuration was not retried'
+  grep -Fq 'Workstation update complete' "$test_dir/home/stdout" \
+    || fail 'successful workstation-configuration retry did not report completion'
+
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log" \
+    "$test_dir/home/workstation-setup-log"
+  run_update "$test_dir" \
+    || fail "current update after retry failed: $(<"$test_dir/home/stderr")"
+
+  [[ ! -e "$test_dir/home/workstation-setup-log" ]] \
+    || fail 'fully current run repeated workstation configuration'
+  ! grep -Fq 'workstation-setup' "$test_dir/home/phase-log" \
+    || fail 'fully current run reached workstation configuration'
+  grep -Fq 'Dotfiles: current' "$test_dir/home/stdout" \
+    || fail 'fully current run did not report current dotfiles'
+  grep -Fq 'Workstation update complete' "$test_dir/home/stdout" \
+    || fail 'fully current run did not report completion'
+}
+
 test_agent_update_failure_retries_without_reapplying_dotfiles() {
   local expected_commit
   local marker
@@ -2120,6 +2251,8 @@ readonly test_cases=(
   test_source_only_change_still_delegates_workstation_configuration
   test_current_workstation_does_not_delegate_workstation_configuration
   test_workstation_configuration_failure_stops_before_agent_tools
+  test_failed_workstation_configuration_without_marker_is_retried
+  test_failed_workstation_configuration_is_retried_before_completion
   test_agent_update_failure_retries_without_reapplying_dotfiles
   test_unsupported_arguments_fail_before_maintenance
   test_dotfiles_failure_prevents_agent_tool_checks
