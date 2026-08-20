@@ -723,6 +723,12 @@ fi
 
 if (( dotfiles_changed == 1 )); then
   printf 'Dotfiles: updated\n'
+  printf 'Workstation configuration: checking...\n'
+  # workstation-setup is installed by Ansible, not managed by chezmoi, so it
+  # resolves from PATH rather than from a managed location.
+  workstation-setup \
+    || fail 'workstation-configuration phase failed: workstation-setup'
+  printf 'Workstation configuration: ready\n'
 else
   printf 'Dotfiles: current\n'
 fi

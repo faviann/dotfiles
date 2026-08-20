@@ -238,6 +238,17 @@ case "$*" in
 esac
 STUB
 
+  printf '#!%s\n' "$REAL_BASH" >"$home/stubs/workstation-setup"
+  cat >>"$home/stubs/workstation-setup" <<'STUB'
+set -euo pipefail
+printf 'workstation-setup\n' >>"$WORKSTATION_SETUP_LOG"
+printf 'workstation-setup\n' >>"$PHASE_LOG"
+if [[ "${TEST_WORKSTATION_SETUP_FAIL:-0}" == 1 ]]; then
+  printf 'workstation-setup: injected workstation-setup failure\n' >&2
+  exit 44
+fi
+STUB
+
   printf '#!%s\n' "$REAL_BASH" >"$home/stubs/ssh"
   cat >>"$home/stubs/ssh" <<'STUB'
 set -euo pipefail
@@ -254,7 +265,8 @@ if [[ -n "${TEST_SSH_GATE:-}" ]]; then
 fi
 exec "$TEST_REAL_GIT_UPLOAD_PACK" "$TEST_REMOTE_REPO"
 STUB
-  chmod +x "$home/stubs/bw" "$home/stubs/chezmoi" "$home/stubs/ssh"
+  chmod +x "$home/stubs/bw" "$home/stubs/chezmoi" "$home/stubs/ssh" \
+    "$home/stubs/workstation-setup"
 }
 
 invoke_update() {
@@ -301,6 +313,8 @@ run_update() {
     AGENT_TOOLS_LOG="$test_dir/home/agent-tools-log" \
     AGENT_FRESHNESS_ATTEMPT_LOG="$test_dir/home/agent-freshness-attempt-log" \
     PHASE_LOG="$test_dir/home/phase-log" \
+    WORKSTATION_SETUP_LOG="$test_dir/home/workstation-setup-log" \
+    TEST_WORKSTATION_SETUP_FAIL="${TEST_WORKSTATION_SETUP_FAIL:-0}" \
     TEST_AGENT_CHECK_FAIL="${TEST_AGENT_CHECK_FAIL:-0}" \
     TEST_AGENT_ACP_RUNNING="${TEST_AGENT_ACP_RUNNING:-0}" \
     TEST_AGENT_OUTDATED="${TEST_AGENT_OUTDATED:-0}" \
@@ -887,6 +901,18 @@ write_applied_marker() {
     >"$test_dir/home/state/workstation-update/applied-commit"
 }
 
+publish_seed() {
+  local test_dir="$1"
+  local message="$2"
+  local seed="$test_dir/seed"
+
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" git -C "$seed" add .
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$seed" commit --quiet -m "$message"
+  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
+    git -C "$seed" push --quiet origin main
+}
+
 publish_managed_version() {
   local test_dir="$1"
   local version="$2"
@@ -898,11 +924,15 @@ publish_managed_version() {
   printf '#!%s\nprintf "workstation update %s\\n"\n' \
     "$REAL_BASH" "$version" \
     >"$seed/dot_local/bin/executable_workstation-update"
-  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" git -C "$seed" add .
-  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$seed" commit --quiet -m "publish $version"
-  GIT_CONFIG_GLOBAL="$test_dir/gitconfig" \
-    git -C "$seed" push --quiet origin main
+  publish_seed "$test_dir" "publish $version"
+}
+
+publish_source_only_change() {
+  local test_dir="$1"
+  local seed="$test_dir/seed"
+
+  printf 'ignored-local\nsource-only-note\n' >"$seed/.gitignore"
+  publish_seed "$test_dir" 'publish source-only change'
 }
 
 assert_update_fails_with() {
@@ -1301,6 +1331,7 @@ test_outdated_agent_tools_use_the_latest_verified_updater() {
       'chezmoi apply --dry-run --verbose' \
       'chezmoi apply' \
       'chezmoi verify --exclude scripts' \
+      'workstation-setup' \
       'update-agent-tools v2 --update-if-needed') \
     "$test_dir/home/phase-log" \
     || fail 'agent-tool update did not follow verified dotfiles in order'
@@ -1310,6 +1341,131 @@ test_outdated_agent_tools_use_the_latest_verified_updater() {
       'agent-tools mutation v2') \
     "$test_dir/home/agent-tools-log" \
     || fail 'outdated update did not use the latest managed updater'
+}
+
+test_dotfiles_work_delegates_workstation_configuration_to_setup() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+
+  run_update "$test_dir" \
+    || fail "delegated workstation configuration failed: $(<"$test_dir/home/stderr")"
+
+  diff -u \
+    <(printf '%s\n' 'workstation-setup') \
+    "$test_dir/home/workstation-setup-log" \
+    || fail 'dotfiles work did not delegate workstation configuration exactly once'
+  diff -u \
+    <(printf '%s\n' \
+      'chezmoi source-path' \
+      'chezmoi apply --dry-run --verbose' \
+      'chezmoi apply' \
+      'chezmoi verify --exclude scripts' \
+      'workstation-setup' \
+      'update-agent-tools v2 --update-if-needed') \
+    "$test_dir/home/phase-log" \
+    || fail 'workstation configuration did not run between chezmoi and agent tools'
+  # The apply path also streams chezmoi's dry-run preview, whose blob hashes
+  # depend on the fixture's interpreter path and are not host-stable; drop that
+  # block so the remaining stdout is this command's own progress reporting.
+  diff -u \
+    <(printf '%s\n' \
+      'Dotfiles: checking...' \
+      'Dotfiles: updated' \
+      'Workstation configuration: checking...' \
+      'Workstation configuration: ready' \
+      'Agent tools: checking...' \
+      'Agent tools: ready' \
+      'Workstation update complete') \
+    <(sed '/^diff --git /,/^Dotfiles: updated$/{/^Dotfiles: updated$/!d}' \
+      "$test_dir/home/stdout") \
+    || fail 'delegated update did not report the workstation-configuration phase'
+}
+
+test_source_only_change_still_delegates_workstation_configuration() {
+  local before_target
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  before_target="$(<"$test_dir/home/.managed")"
+  # No applied-commit marker: the fast-forward below sets the dotfiles-changed
+  # semantic while the unmarked branch verifies the already-current targets and
+  # leaves chezmoi with no apply work to do. Gating on chezmoi target work
+  # instead of on that semantic therefore skips workstation configuration here.
+  publish_source_only_change "$test_dir"
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+
+  run_update "$test_dir" \
+    || fail "source-only update failed: $(<"$test_dir/home/stderr")"
+
+  [[ "$(<"$test_dir/home/.managed")" == "$before_target" ]] \
+    || fail 'source-only fixture unexpectedly changed a rendered target'
+  diff -u \
+    <(printf '%s\n' 'chezmoi source-path' 'chezmoi verify') \
+    "$test_dir/home/command-log" \
+    || fail 'source-only fixture did not leave chezmoi without apply work'
+  diff -u \
+    <(printf '%s\n' 'workstation-setup') \
+    "$test_dir/home/workstation-setup-log" \
+    || fail 'source-only dotfiles work skipped workstation configuration'
+}
+
+test_current_workstation_does_not_delegate_workstation_configuration() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+
+  run_update "$test_dir" \
+    || fail "current update failed: $(<"$test_dir/home/stderr")"
+
+  [[ ! -e "$test_dir/home/workstation-setup-log" ]] \
+    || fail 'an already-current workstation delegated workstation configuration'
+  ! grep -Fq 'workstation-setup' "$test_dir/home/phase-log" \
+    || fail 'an already-current workstation reached the workstation-configuration phase'
+  grep -Fq 'update-agent-tools' "$test_dir/home/phase-log" \
+    || fail 'an already-current workstation skipped agent-tool maintenance'
+}
+
+test_workstation_configuration_failure_stops_before_agent_tools() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_fixture "$test_dir"
+  run_chezmoi "$test_dir" apply
+  write_applied_marker "$test_dir"
+  publish_managed_version "$test_dir" v2
+  rm -f "$test_dir/home/command-log" "$test_dir/home/phase-log"
+
+  if TEST_WORKSTATION_SETUP_FAIL=1 TEST_AGENT_OUTDATED=1 run_update "$test_dir"; then
+    fail 'failed workstation configuration exited zero'
+  fi
+
+  grep -Fq 'workstation-configuration phase failed: workstation-setup' \
+    "$test_dir/home/stderr" \
+    || fail "failed workstation configuration did not name its phase: $(<"$test_dir/home/stderr")"
+  grep -Fq 'rerun workstation-update' "$test_dir/home/stderr" \
+    || fail 'failed workstation configuration did not recommend the unified retry'
+  ! grep -Fq 'update-agent-tools' "$test_dir/home/phase-log" \
+    || fail 'failed workstation configuration reached agent-tool maintenance'
+  [[ ! -e "$test_dir/home/agent-tools-log" ]] \
+    || fail 'failed workstation configuration discovered agent tools'
+  [[ ! -e "$test_dir/home/agent-tools-updated" ]] \
+    || fail 'failed workstation configuration mutated the agent toolchain'
 }
 
 test_agent_update_failure_retries_without_reapplying_dotfiles() {
@@ -1916,6 +2072,8 @@ test_dry_run_and_verification_failures_are_safe_to_retry() {
     || fail 'verification failure changed the prior marker'
   [[ "$(<"$test_dir/home/.managed")" == 'post-apply drift' ]] \
     || fail 'verification fault injection did not create target drift'
+  [[ ! -e "$test_dir/home/workstation-setup-log" ]] \
+    || fail 'a failed chezmoi phase delegated workstation configuration'
 
   printf 'managed v2\n' >"$test_dir/home/.managed"
   rm -f "$test_dir/home/command-log"
@@ -1958,6 +2116,10 @@ readonly test_cases=(
   test_agent_discovery_failure_preserves_applied_dotfiles_for_retry
   test_concurrent_update_is_rejected_without_queueing
   test_outdated_agent_tools_use_the_latest_verified_updater
+  test_dotfiles_work_delegates_workstation_configuration_to_setup
+  test_source_only_change_still_delegates_workstation_configuration
+  test_current_workstation_does_not_delegate_workstation_configuration
+  test_workstation_configuration_failure_stops_before_agent_tools
   test_agent_update_failure_retries_without_reapplying_dotfiles
   test_unsupported_arguments_fail_before_maintenance
   test_dotfiles_failure_prevents_agent_tool_checks
