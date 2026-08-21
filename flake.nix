@@ -81,6 +81,18 @@
               inherit (package) version;
               srcUrl = package.src.url;
             };
+          dotnetSdkPackage =
+            let
+              package = builtins.head (
+                builtins.filter
+                  (package: (package.pname or package.name) == "dotnet-sdk-wrapped")
+                  workstationHomeConfiguration.config.home.packages
+              );
+            in
+            {
+              pname = package.pname or package.name;
+              inherit (package) version;
+            };
           collieOriginSocket =
             workstationHomeConfiguration.config.systemd.user.sockets.collie-origin-forwarder;
           collieOriginService =

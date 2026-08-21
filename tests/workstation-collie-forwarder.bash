@@ -65,6 +65,35 @@ test_workstation_profile_selects_bun_baseline_for_pre_avx2_cpu() {
     || fail 'rendered workstation package profile does not select the pinned baseline Bun archive'
 }
 
+test_workstation_profile_includes_dotnet_10_lts_sdk() {
+  local dotnet_sdk_package
+
+  dotnet_sdk_package="$(
+    rendered_json '.dotnetSdkPackage' \
+      "$REPO_ROOT#homeConfigurations.workstation.config.home.packages" \
+      --apply '
+        packages:
+        let
+          package = builtins.head (
+            builtins.filter
+              (package: (package.pname or package.name) == "dotnet-sdk-wrapped")
+              packages
+          );
+        in
+        {
+          pname = package.pname or package.name;
+          inherit (package) version;
+        }
+      '
+  )" || fail 'could not render the workstation .NET SDK package'
+
+  jq -e '
+    (.pname == "dotnet-sdk-wrapped") and
+    (.version | startswith("10."))
+  ' <<<"$dotnet_sdk_package" >/dev/null \
+    || fail 'rendered workstation package profile does not include the .NET 10 LTS SDK'
+}
+
 test_collie_origin_socket_listens_on_the_portal_origin_port() {
   local listen_stream
 
@@ -193,6 +222,7 @@ source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
 readonly test_cases=(
   test_workstation_profile_selects_bun_baseline_for_pre_avx2_cpu
+  test_workstation_profile_includes_dotnet_10_lts_sdk
   test_collie_origin_socket_listens_on_the_portal_origin_port
   test_collie_origin_socket_activates_with_normal_user_sockets
   test_collie_origin_forwarder_connects_to_the_loopback_bridge
