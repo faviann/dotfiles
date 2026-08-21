@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPO_ROOT
+readonly LOCK_FILE="$REPO_ROOT/flake.lock"
+readonly TRACK_INPUT='dotnet-nixpkgs'
+readonly TRACK_MAJOR='10'
+
+lock_backup=''
+keep_lock=0
+
+fail() {
+  printf 'update-dotnet-sdk: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  local status=$?
+
+  trap - EXIT
+  if [[ -n "$lock_backup" && -f "$lock_backup" ]]; then
+    if (( keep_lock == 0 )); then
+      cp -- "$lock_backup" "$LOCK_FILE" || status=1
+    fi
+    rm -f -- "$lock_backup" || status=1
+  fi
+  exit "$status"
+}
+
+dotnet_version() {
+  nix eval --raw "$REPO_ROOT#dotnet-sdk.version"
+}
+
+validate_track_version() {
+  local version="$1"
+
+  [[ "$version" =~ ^${TRACK_MAJOR}\.[0-9]+\.[0-9]+$ ]] \
+    || fail "resolved SDK version is outside the .NET $TRACK_MAJOR GA track: $version"
+}
+
+(( $# == 0 )) || fail 'usage: update-dotnet-sdk'
+
+for command in cp diff git jq mktemp nix rm sort tail; do
+  command -v "$command" >/dev/null 2>&1 \
+    || fail "required command is missing: $command"
+done
+
+[[ "$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null)" == "$REPO_ROOT" ]] \
+  || fail 'repository root is unavailable'
+[[ -z "$(git -C "$REPO_ROOT" status --porcelain=v1 --untracked-files=all)" ]] \
+  || fail 'repository must be clean before updating the .NET SDK track'
+
+old_version="$(dotnet_version)" \
+  || fail 'could not evaluate the currently locked .NET SDK version'
+validate_track_version "$old_version"
+
+lock_backup="$(mktemp "${TMPDIR:-/tmp}/dotnet-sdk-lock.XXXXXX")" \
+  || fail 'could not create a lock-file backup'
+trap cleanup EXIT
+cp -- "$LOCK_FILE" "$lock_backup" \
+  || fail 'could not back up flake.lock'
+
+(
+  cd "$REPO_ROOT"
+  nix flake update "$TRACK_INPUT"
+) || fail "could not update the $TRACK_INPUT flake input"
+
+if git -C "$REPO_ROOT" diff --quiet -- "$LOCK_FILE"; then
+  printf '.NET SDK: current (%s)\n' "$old_version"
+  exit 0
+fi
+
+[[ -z "$(git -C "$REPO_ROOT" diff --name-only -- . ':(exclude)flake.lock')" ]] \
+  || fail 'the flake update changed a tracked file other than flake.lock'
+[[ -z "$(git -C "$REPO_ROOT" ls-files --others --exclude-standard)" ]] \
+  || fail 'the flake update created an unexpected untracked file'
+
+if ! diff -u \
+  <(jq -S --arg input "$TRACK_INPUT" '.nodes[$input].locked = null' "$lock_backup") \
+  <(jq -S --arg input "$TRACK_INPUT" '.nodes[$input].locked = null' "$LOCK_FILE") \
+  >/dev/null; then
+  fail "the flake update changed lock data outside $TRACK_INPUT"
+fi
+
+new_version="$(dotnet_version)" \
+  || fail 'could not evaluate the updated .NET SDK version'
+validate_track_version "$new_version"
+
+if [[ "$new_version" == "$old_version" ]]; then
+  printf '.NET SDK: current (%s)\n' "$old_version"
+  exit 0
+fi
+
+latest_version="$(printf '%s\n%s\n' "$old_version" "$new_version" | sort -V | tail -n 1)"
+[[ "$latest_version" == "$new_version" ]] \
+  || fail "refusing .NET SDK downgrade: $old_version -> $new_version"
+
+dotnet_out_path="$(nix eval --raw "$REPO_ROOT#dotnet-sdk.outPath")" \
+  || fail "could not evaluate the .NET SDK $new_version output path"
+nix path-info --store https://cache.nixos.org "$dotnet_out_path" >/dev/null \
+  || fail "binary substitute is unavailable for .NET SDK $new_version"
+
+(
+  cd "$REPO_ROOT"
+  nix flake check
+) || fail "validation failed for .NET SDK $new_version"
+
+keep_lock=1
+printf '.NET SDK: %s -> %s\n' "$old_version" "$new_version"

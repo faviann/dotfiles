@@ -1,4 +1,4 @@
-{ pkgs, lib, config, hermesPackage, ... }:
+{ pkgs, lib, config, dotnetSdk, hermesPackage, ... }:
 
 let
   # Host tools update-agent-tools shells out to that neither home.packages nor
@@ -21,7 +21,7 @@ in
 
   home.packages = with pkgs; [
     bunBaseline
-    dotnet-sdk_10
+    dotnetSdk
     nodejs
     uv
     gh
