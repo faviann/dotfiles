@@ -69,7 +69,8 @@ test_repository_only_paths_are_ignored() {
   destination_dir="$test_dir/home"
   managed_file="$test_dir/managed"
   ignored_file="$test_dir/ignored"
-  mkdir -p "$source_dir/docs" "$source_dir/tests" "$source_dir/home" \
+  mkdir -p "$source_dir/docs" "$source_dir/tests" "$source_dir/scripts" \
+    "$source_dir/home" "$source_dir/.github/workflows" \
     "$source_dir/node_modules/example" "$source_dir/dot_sandcastle/logs" \
     "$source_dir/dot_local/bin" "$destination_dir"
   cp "$REPO_ROOT/.chezmoiignore" "$source_dir/.chezmoiignore"
@@ -77,6 +78,7 @@ test_repository_only_paths_are_ignored() {
   for path in \
     README.md BOOTSTRAP.md AGENTS.md CLAUDE.md CONTRIBUTING.md \
     CONTEXT.md CONTEXT-MAP.md docs/guide.md tests/inventory.bash \
+    scripts/update-dotnet-sdk .github/workflows/update-dotnet-sdk.yml \
     flake.nix flake.lock home/workstation.nix package.json package-lock.json \
     node_modules/example/index.js; do
     printf 'repository only\n' >"$source_dir/$path"
@@ -104,13 +106,15 @@ test_repository_only_paths_are_ignored() {
     assert_lacks_line "$path" "$managed_file"
     assert_has_line "$path" "$ignored_file"
   done
-  for path in docs/guide.md tests/inventory.bash home/workstation.nix; do
+  for path in \
+    docs/guide.md tests/inventory.bash scripts/update-dotnet-sdk \
+    .github/workflows/update-dotnet-sdk.yml home/workstation.nix; do
     assert_lacks_line "$path" "$managed_file"
   done
   for path in .sandcastle/main.mts .sandcastle/logs/run.log; do
     assert_lacks_line "$path" "$managed_file"
   done
-  for path in docs tests home node_modules .sandcastle; do
+  for path in docs tests scripts home node_modules .sandcastle; do
     assert_has_line "$path" "$ignored_file"
   done
   assert_has_line '.bash_profile' "$managed_file"

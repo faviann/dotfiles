@@ -12,6 +12,12 @@ docs/**
 # Repository-only tests
 tests/
 tests/**
+scripts/
+scripts/**
+
+# Repository-only GitHub automation
+.github/
+.github/**
 
 # Repository-only Home Manager source
 flake.nix

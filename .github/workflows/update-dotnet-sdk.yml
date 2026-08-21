@@ -1,0 +1,80 @@
+name: Update .NET 10 SDK
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: update-dotnet-sdk
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - name: Update and validate the .NET SDK track
+        id: update
+        run: |
+          scripts/update-dotnet-sdk
+          if git diff --quiet -- flake.lock; then
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >>"$GITHUB_OUTPUT"
+            echo "version=$(nix eval --raw .#dotnet-sdk.version)" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish the validated update
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.update.outputs.version }}
+        run: |
+          branch='automation/dotnet-sdk-10'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git add -- flake.lock
+          git commit -m "Update .NET 10 SDK to $VERSION"
+
+          remote_sha="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
+          if [[ -n "$remote_sha" ]]; then
+            git push \
+              --force-with-lease="refs/heads/$branch:$remote_sha" \
+              origin "HEAD:refs/heads/$branch"
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+
+          pr_number="$(
+            gh pr list \
+              --base main \
+              --head "$branch" \
+              --state open \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+          if [[ -z "$pr_number" ]]; then
+            pr_url="$(
+              gh pr create \
+                --base main \
+                --head "$branch" \
+                --title "Update .NET 10 SDK to $VERSION" \
+                --body $'Automated .NET 10 SDK track update.\n\nValidation completed before publication:\n\n- resolved SDK remains on major 10\n- only the dedicated .NET lock entry changed\n- SDK runtime smoke check passed\n- Home Manager activation package built\n- `nix flake check` passed'
+            )"
+            pr_number="${pr_url##*/}"
+          fi
+
+          gh pr merge "$pr_number" --merge --delete-branch

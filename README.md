@@ -94,6 +94,16 @@ workstation: the .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, `jq`, `ripgrep`,
 `github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
 credentials and runtime configuration stay in `~/.hermes`.
 
+The .NET policy floats within major 10 while each published workstation
+generation remains reproducible. A dedicated `dotnet-nixpkgs` flake input
+isolates the SDK from the workstation's other Nix packages. The daily and
+manually dispatchable `Update .NET 10 SDK` GitHub workflow invokes
+`scripts/update-dotnet-sdk`, which advances only that input, rejects a major
+change or downgrade, executes the SDK, builds the real Home Manager activation
+package, and runs `nix flake check`. A validated version change is published
+and merged through one automation PR; a failure leaves `main` on its last
+known-good SDK.
+
 Dotfiles and the complete AoE agent toolchain are maintained through one
 operator-facing command:
 
@@ -160,6 +170,13 @@ configuration freshness, comparing and activating the Home Manager build; it is
 installed by Ansible rather than by chezmoi. Agent tools use latest stable
 releases and do not retrieve or display release notes.
 
+`workstation-update` never rewrites `flake.lock`. .NET release discovery and
+publication happen upstream through the dedicated GitHub workflow; the normal
+SSH notice and `workstation-update` then deliver that validated commit through
+the same dotfiles and `workstation-setup` path as any other workstation change.
+For maintainer recovery or an on-demand refresh, run
+`scripts/update-dotnet-sdk` from a clean canonical checkout.
+
 The command refuses unsafe source states such as local content, a non-canonical
 origin, the wrong branch or upstream, and ahead or diverged history. It does
 not reset or discard local work. If ACP sessions are running, an interactive
@@ -208,12 +225,13 @@ instead says that maintenance is blocked and must be resolved before the
 command is run. A hard 15-second deadline bounds the check, and failure or
 timeout never prevents the shell from opening.
 
-Login never installs updates. There is no background timer or scheduler, and
-local shells, remote commands, and non-interactive shells do not run the login
-check. Workstations without the completed setup marker also skip it. Each
-eligible SSH login warns when maintenance is actionable; healthy state remains
-silent. The login profile deliberately does not source `.bashrc`, so unrelated
-interactive-shell configuration is not pulled into the login boundary.
+Login never installs updates. There is no workstation-side background timer or
+scheduler, and local shells, remote commands, and non-interactive shells do not
+run the login check. Workstations without the completed setup marker also skip
+it. Each eligible SSH login warns when maintenance is actionable; healthy state
+remains silent. The login profile deliberately does not source `.bashrc`, so
+unrelated interactive-shell configuration is not pulled into the login
+boundary.
 
 ## Workstation herdr
 
