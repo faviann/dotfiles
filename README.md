@@ -89,10 +89,10 @@ part of daily operation.
 ## Workstation Home Manager
 
 The `workstation` Home Manager flake installs user tooling for the Debian LXC
-workstation: Node.js/npm, `uv`, `gh`, `jq`, `ripgrep`, `fd`, `fzf`, and
-Hermes. Hermes is installed from `github:NousResearch/hermes-agent` as a
-normal non-NixOS package; provider credentials and runtime configuration stay
-in `~/.hermes`.
+workstation: the .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, `jq`, `ripgrep`,
+`fd`, `fzf`, and Hermes. Hermes is installed from
+`github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
+credentials and runtime configuration stay in `~/.hermes`.
 
 Dotfiles and the complete AoE agent toolchain are maintained through one
 operator-facing command:

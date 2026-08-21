@@ -21,6 +21,7 @@ in
 
   home.packages = with pkgs; [
     bunBaseline
+    dotnet-sdk_10
     nodejs
     uv
     gh
