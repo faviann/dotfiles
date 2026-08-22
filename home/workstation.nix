@@ -59,7 +59,7 @@ in
 
       _agent_tools_missing=false
       for _agent_tool in \
-        aoe codex claude pi codex-acp claude-agent-acp pi-acp; do
+        aoe codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
         if ! command -v "$_agent_tool" >/dev/null 2>&1; then
           _agent_tools_missing=true
           break

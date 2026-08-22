@@ -88,7 +88,7 @@ test_complete_toolchain_is_not_refreshed_during_bootstrap() {
   bin_dir="$test_dir/.local/bin"
 
   for command in \
-    aoe codex claude pi codex-acp claude-agent-acp pi-acp; do
+    aoe codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
     make_stub "$bin_dir/$command"
   done
   printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
@@ -104,6 +104,39 @@ STUB
 
   [[ ! -e "$test_dir/command-log" ]] \
     || fail "bootstrap refreshed an already-complete toolchain"
+}
+
+test_missing_new_harnesses_are_repaired_by_the_bootstrap_handoff() {
+  local bin_dir
+  local command
+  local missing_harness
+  local test_dir
+
+  for missing_harness in opencode omp; do
+    test_dir="$(mktemp -d)"
+    bin_dir="$test_dir/.local/bin"
+    for command in \
+      aoe codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
+      if [[ "$command" != "$missing_harness" ]]; then
+        make_stub "$bin_dir/$command"
+      fi
+    done
+    printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
+    cat >>"$bin_dir/update-agent-tools" <<'STUB'
+set -euo pipefail
+
+printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
+STUB
+    chmod +x "$bin_dir/update-agent-tools"
+
+    run_activation "$test_dir" \
+      || fail "missing-$missing_harness bootstrap handoff exited nonzero"
+    diff -u \
+      <(printf 'update-agent-tools --yes\n') \
+      "$test_dir/command-log" \
+      || fail "missing $missing_harness did not trigger the bootstrap handoff"
+    rm -rf "$test_dir"
+  done
 }
 
 test_failed_install_fails_the_bootstrap_handoff() {
@@ -168,6 +201,7 @@ source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 readonly test_cases=(
   test_missing_tools_are_installed_by_the_bootstrap_handoff
   test_complete_toolchain_is_not_refreshed_during_bootstrap
+  test_missing_new_harnesses_are_repaired_by_the_bootstrap_handoff
   test_bootstrap_handoff_runs_after_the_profile_exists
   test_updater_host_tools_are_reachable_from_the_bootstrap_handoff
   test_failed_install_fails_the_bootstrap_handoff
