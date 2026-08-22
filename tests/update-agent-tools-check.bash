@@ -626,10 +626,7 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
   grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
     || fail "outdated conditional update did not update AoE"
   assert_complete_npm_refresh "$test_dir/command-log"
-  for harness in opencode omp pi; do
-    grep -Fx "$harness --version" "$test_dir/command-log" >/dev/null \
-      || fail "complete update did not verify $harness --version"
-  done
+  assert_harness_versions_checked "$test_dir/command-log"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
     || fail "outdated conditional update did not activate the whole toolchain"
   [[ "$(wc -l <"$test_dir/query-log")" -eq 18 ]] \
@@ -843,6 +840,16 @@ EOF
   diff -u "$expected" "$actual" \
     || fail "default update did not attempt all eight managed npm packages"
   rm -f "$actual" "$expected"
+}
+
+assert_harness_versions_checked() {
+  local command_log="$1"
+  local harness
+
+  for harness in opencode omp pi; do
+    grep -Fx "$harness --version" "$command_log" >/dev/null \
+      || fail "complete update did not verify $harness --version"
+  done
 }
 
 test_due_check_runs_once_per_success_interval() {
@@ -1386,10 +1393,7 @@ test_default_update_refreshes_and_activates_the_complete_toolchain() {
   grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
     || fail "complete update did not use AoE self-update"
   assert_complete_npm_refresh "$test_dir/command-log"
-  for harness in opencode omp pi; do
-    grep -Fx "$harness --version" "$test_dir/command-log" >/dev/null \
-      || fail "complete update did not verify $harness --version"
-  done
+  assert_harness_versions_checked "$test_dir/command-log"
   [[ "$(grep -c '^aoe acp doctor$' "$test_dir/command-log")" -eq 2 ]] \
     || fail "complete update did not run pre- and post-activation ACP diagnostics"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
