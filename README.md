@@ -117,6 +117,8 @@ The managed unit contains:
 - the standalone Codex CLI (`@openai/codex`)
 - Claude Code (`@anthropic-ai/claude-code`)
 - Pi (`@earendil-works/pi-coding-agent`)
+- OpenCode (`opencode-ai`)
+- Oh My Pi (`@oh-my-pi/pi-coding-agent`)
 - the `codex-acp` adapter (`@agentclientprotocol/codex-acp`)
 - the `claude-agent-acp` adapter
   (`@agentclientprotocol/claude-agent-acp`)
@@ -126,6 +128,11 @@ The managed unit contains:
 runtime is distinct from the standalone Codex CLI: updating `@openai/codex`
 does not update the runtime used by structured Codex sessions. The updater
 checks both scopes and refreshes `codex-acp` to maintain its bundled runtime.
+
+Pi and Oh My Pi intentionally coexist while OMP is evaluated as a separate
+harness. The `pi` command continues to use `~/.pi`; the distinct `omp` command
+uses its own default `~/.omp` state. OMP does not replace Pi or the existing
+`pi-acp` adapter.
 
 Home Manager provides Node/npm and writes the npm prefix as
 `/home/faviann/.local`; all npm-managed commands resolve from `~/.local/bin`.
@@ -164,7 +171,7 @@ package installation; the AoE dashboard does not.
 chezmoi source as a clean, canonical `main` checkout, fetches and fast-forwards
 it to `origin/main`, previews and applies dotfile changes when required, then
 delegates workstation configuration to `workstation-setup` whenever dotfiles
-work occurred, and finally refreshes AoE, all three standalone CLIs, and all
+work occurred, and finally refreshes AoE, all five standalone CLIs, and all
 three ACP adapters as one unit. `workstation-setup` owns workstation
 configuration freshness, comparing and activating the Home Manager build; it is
 installed by Ansible rather than by chezmoi. Agent tools use latest stable

@@ -161,6 +161,8 @@ if [[ "$*" == "list --global --json --all" ]]; then
   codex_current="$CODEX_CURRENT"
   claude_current="$CLAUDE_CURRENT"
   pi_current="$PI_CURRENT"
+  opencode_current="$OPENCODE_CURRENT"
+  omp_current="$OMP_CURRENT"
   codex_acp_current="$CODEX_ACP_CURRENT"
   claude_acp_current="$CLAUDE_ACP_CURRENT"
   pi_acp_current="$PI_ACP_CURRENT"
@@ -169,6 +171,8 @@ if [[ "$*" == "list --global --json --all" ]]; then
     codex_current="$CODEX_LATEST"
     claude_current="$CLAUDE_LATEST"
     pi_current="$PI_LATEST"
+    opencode_current="$OPENCODE_LATEST"
+    omp_current="$OMP_LATEST"
     codex_acp_current="$CODEX_ACP_LATEST"
     claude_acp_current="$CLAUDE_ACP_LATEST"
     pi_acp_current="$PI_ACP_LATEST"
@@ -184,6 +188,8 @@ if [[ "$*" == "list --global --json --all" ]]; then
     "@openai/codex": {"version": "${codex_current}"},
     "@anthropic-ai/claude-code": {"version": "${claude_current}"},
     "@earendil-works/pi-coding-agent": {"version": "${pi_current}"},
+    "opencode-ai": {"version": "${opencode_current}"},
+    "@oh-my-pi/pi-coding-agent": {"version": "${omp_current}"},
     "@agentclientprotocol/codex-acp": {
       "version": "${codex_acp_current}",
       "dependencies": {"@openai/codex": {"version": "${bundled_codex_current}"}}
@@ -201,6 +207,8 @@ EOF
     "@openai/codex": {"version": "${codex_current}"},
     "@anthropic-ai/claude-code": {"version": "${claude_current}"},
     "@earendil-works/pi-coding-agent": {"version": "${pi_current}"},
+    "opencode-ai": {"version": "${opencode_current}"},
+    "@oh-my-pi/pi-coding-agent": {"version": "${omp_current}"},
     "@agentclientprotocol/codex-acp": {
       "version": "${codex_acp_current}",
       "dependencies": {"@openai/codex": {"version": "${bundled_codex_current}"}}
@@ -229,6 +237,8 @@ if [[ "$1" == "view" && "$3" == "version" ]]; then
     '@openai/codex@latest') printf '%s\n' "$CODEX_LATEST" ;;
     '@anthropic-ai/claude-code@latest') printf '%s\n' "$CLAUDE_LATEST" ;;
     '@earendil-works/pi-coding-agent@latest') printf '%s\n' "$PI_LATEST" ;;
+    'opencode-ai@latest') printf '%s\n' "$OPENCODE_LATEST" ;;
+    '@oh-my-pi/pi-coding-agent@latest') printf '%s\n' "$OMP_LATEST" ;;
     '@agentclientprotocol/codex-acp@latest') printf '%s\n' "$CODEX_ACP_LATEST" ;;
     '@agentclientprotocol/claude-agent-acp@latest') printf '%s\n' "$CLAUDE_ACP_LATEST" ;;
     'pi-acp@latest') printf '%s\n' "$PI_ACP_LATEST" ;;
@@ -240,7 +250,7 @@ fi
 if [[ "$1" == "install" && "$2" == "--global" ]]; then
   package="$3"
   if [[ "${NPM_REQUIRE_CLEARED_SHIMS:-0}" == "1" ]]; then
-    for stale_binary in codex claude pi; do
+    for stale_binary in codex claude pi opencode omp; do
       stale_path="$HOME/.local/bin/$stale_binary"
       if [[ -e "$stale_path" || -L "$stale_path" ]] \
         && grep -Fx 'stale-shim' "$stale_path" >/dev/null 2>&1; then
@@ -256,17 +266,20 @@ if [[ "$1" == "install" && "$2" == "--global" ]]; then
     '@openai/codex@latest') binary=codex ;;
     '@anthropic-ai/claude-code@latest') binary=claude ;;
     '@earendil-works/pi-coding-agent@latest') binary=pi ;;
+    'opencode-ai@latest') binary=opencode ;;
+    '@oh-my-pi/pi-coding-agent@latest') binary=omp ;;
     '@agentclientprotocol/codex-acp@latest') binary=codex-acp ;;
     '@agentclientprotocol/claude-agent-acp@latest') binary=claude-agent-acp ;;
     'pi-acp@latest') binary=pi-acp ;;
     *) printf 'unexpected npm install package: %s\n' "$package" >&2; exit 64 ;;
   esac
   if [[ "$binary" != "${NPM_OMIT_BINARY:-}" ]]; then
-    printf '#!%s\nexit 0\n' "$TEST_REAL_BASH" \
+    printf '#!%s\nprintf "%s %%s\\n" "$*" >>"$COMMAND_LOG"\nexit 0\n' \
+      "$TEST_REAL_BASH" "$binary" \
       >"$HOME/.local/bin/$binary"
     chmod +x "$HOME/.local/bin/$binary"
   fi
-  if [[ "$package" == "pi-acp@latest" ]]; then
+  if [[ "$package" == "@oh-my-pi/pi-coding-agent@latest" ]]; then
     : >"$HOME/npm-installed"
   fi
   exit 0
@@ -365,6 +378,10 @@ run_tool() {
     CLAUDE_LATEST="${CLAUDE_LATEST:-3.4.5}" \
     PI_CURRENT="${PI_CURRENT:-4.5.6}" \
     PI_LATEST="${PI_LATEST:-4.5.6}" \
+    OPENCODE_CURRENT="${OPENCODE_CURRENT:-8.9.0}" \
+    OPENCODE_LATEST="${OPENCODE_LATEST:-8.9.0}" \
+    OMP_CURRENT="${OMP_CURRENT:-9.10.0}" \
+    OMP_LATEST="${OMP_LATEST:-9.10.0}" \
     CODEX_ACP_CURRENT="${CODEX_ACP_CURRENT:-5.6.7}" \
     CODEX_ACP_LATEST="${CODEX_ACP_LATEST:-5.6.7}" \
     CLAUDE_ACP_CURRENT="${CLAUDE_ACP_CURRENT:-6.7.8}" \
@@ -513,7 +530,7 @@ test_machine_status_reports_unresolved_activation_failure_as_maintenance_needed(
     || fail "activation-failed machine status exited $status instead of $CHECK_STATUS_UPDATES_AVAILABLE"
   [[ ! -s "$test_dir/stdout" && ! -s "$test_dir/stderr" ]] \
     || fail "activation-failed machine status wrote output"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
     || fail "activation-failed machine status did not perform fresh discovery"
   jq -e '
     .last_successful_check == "2026-07-14T00:00:00Z"
@@ -609,9 +626,10 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
   grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
     || fail "outdated conditional update did not update AoE"
   assert_complete_npm_refresh "$test_dir/command-log"
+  assert_harness_versions_checked "$test_dir/command-log"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
     || fail "outdated conditional update did not activate the whole toolchain"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 14 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 18 ]] \
     || fail "outdated conditional update did not perform discovery and verification"
   discovery_line="$(grep -n '^npm view @openai/codex@latest version$' \
     "$test_dir/command-log" | head -n 1 | cut -d: -f1)"
@@ -635,7 +653,7 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
     || fail "post-update cached freshness check failed: $(<"$test_dir/after-stderr")"
   [[ ! -s "$test_dir/after-stdout" && ! -s "$test_dir/after-stderr" ]] \
     || fail "post-update cached freshness check replayed a stale update notice"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 14 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 18 ]] \
     || fail "post-update not-due freshness check queried registries"
 }
 
@@ -655,7 +673,7 @@ test_conditional_update_requires_yes_for_unattended_acp_disruption() {
     <(printf 'update-agent-tools: 1 running ACP session would be disrupted; rerun workstation-update --yes to authorize replacement\n') \
     "$test_dir/stderr" \
     || fail "unattended conditional refusal was not actionable"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
     || fail "unattended conditional refusal bypassed fresh discovery"
   if grep -Eq '^(aoe update|aoe acp restart|npm install|systemctl )' \
     "$test_dir/command-log"; then
@@ -677,7 +695,7 @@ test_conditional_update_yes_authorizes_only_acp_disruption() {
     run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed --yes \
     || fail "--yes conditional update failed: $(<"$test_dir/stderr")"
 
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 14 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 18 ]] \
     || fail "--yes conditional update bypassed discovery or verification"
   assert_complete_npm_refresh "$test_dir/command-log"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
@@ -734,12 +752,12 @@ test_conditional_update_retries_a_current_toolchain_after_activation_failure() {
 
   [[ "$(grep -c '^aoe update --yes$' "$test_dir/command-log")" -eq 2 ]] \
     || fail "conditional recovery did not refresh AoE as a whole-unit retry"
-  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 12 ]] \
+  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 16 ]] \
     || fail "conditional recovery skipped the whole npm refresh after versions became current"
   [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
     "$test_dir/command-log")" -eq 2 ]] \
     || fail "conditional recovery did not retry activation"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 28 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 36 ]] \
     || fail "conditional recovery did not freshly discover and verify both attempts"
   jq -e '
     .last_successful_check == "2026-07-14T01:00:00Z"
@@ -785,12 +803,12 @@ test_conditional_update_retries_after_pre_activation_failure_makes_versions_curr
 
   [[ "$(grep -c '^aoe update --yes$' "$test_dir/command-log")" -eq 2 ]] \
     || fail "pre-activation recovery did not rerun the whole AoE update"
-  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 12 ]] \
+  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 16 ]] \
     || fail "pre-activation recovery did not rerun the whole npm update"
   [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
     "$test_dir/command-log")" -eq 1 ]] \
     || fail "pre-activation recovery did not activate exactly once after verification passed"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 28 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 36 ]] \
     || fail "pre-activation recovery did not freshly discover and verify both attempts"
   jq -e '
     .last_successful_check == "2026-07-14T01:00:00Z"
@@ -813,13 +831,25 @@ assert_complete_npm_refresh() {
 npm install --global @openai/codex@latest
 npm install --global @anthropic-ai/claude-code@latest
 npm install --global @earendil-works/pi-coding-agent@latest
+npm install --global opencode-ai@latest
+npm install --global @oh-my-pi/pi-coding-agent@latest
 npm install --global @agentclientprotocol/codex-acp@latest
 npm install --global @agentclientprotocol/claude-agent-acp@latest
 npm install --global pi-acp@latest
 EOF
   diff -u "$expected" "$actual" \
-    || fail "default update did not attempt all six managed npm packages"
+    || fail "default update did not attempt all eight managed npm packages"
   rm -f "$actual" "$expected"
+}
+
+assert_harness_versions_checked() {
+  local command_log="$1"
+  local harness
+
+  for harness in opencode omp pi; do
+    grep -Fx "$harness --version" "$command_log" >/dev/null \
+      || fail "complete update did not verify $harness --version"
+  done
 }
 
 test_due_check_runs_once_per_success_interval() {
@@ -835,13 +865,13 @@ test_due_check_runs_once_per_success_interval() {
   fi
   [[ "$(<"$test_dir/stdout-1")" == $'AoE: 1.2.2 -> 1.2.3\nRun: update-agent-tools' ]] \
     || fail "initial due check did not report the current result"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
     || fail "initial due check did not perform all release queries"
 
   UPDATE_AGENT_TOOLS_NOW="2026-07-15T09:59:59Z" \
     run_tool "$test_dir" "$test_dir/stdout-2" "$test_dir/stderr-2" --check-if-due \
     || fail "not-yet-due check exited nonzero: $(<"$test_dir/stderr-2")"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
     || fail "not-yet-due check queried a registry or release"
   [[ "$(<"$test_dir/stdout-2")" == $'AoE: 1.2.2 -> 1.2.3\nRun: update-agent-tools' ]] \
     || fail "not-yet-due check did not reuse the cached result"
@@ -849,7 +879,7 @@ test_due_check_runs_once_per_success_interval() {
   UPDATE_AGENT_TOOLS_NOW="2026-07-15T10:00:00Z" \
     run_tool "$test_dir" "$test_dir/stdout-3" "$test_dir/stderr-3" --check-if-due \
     || fail "due-again check exited nonzero: $(<"$test_dir/stderr-3")"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 14 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 18 ]] \
     || fail "due-again check did not perform fresh release queries"
 }
 
@@ -872,7 +902,7 @@ test_internal_freshness_interface_reuses_cache_without_a_subordinate_action() {
     || fail 'internal freshness interface exposed a subordinate action'
   [[ ! -s "$test_dir/stderr" ]] \
     || fail "internal freshness interface wrote stderr: $(<"$test_dir/stderr")"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
     || fail 'internal freshness interface bypassed the successful cache interval'
 }
 
@@ -1032,7 +1062,7 @@ test_concurrent_due_checks_are_serialized() {
   wait "$first_pid" || fail "first concurrent check exited nonzero"
   wait "$second_pid" || fail "second concurrent check exited nonzero"
 
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 7 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
     || fail "concurrent due checks performed duplicate release queries"
   jq -e '.check_status == "success"' "$state_dir/state.json" >/dev/null \
     || fail "concurrent checks left invalid state"
@@ -1107,7 +1137,7 @@ test_failed_check_preserves_cache_and_retries_after_one_hour() {
   UPDATE_AGENT_TOOLS_NOW="2026-07-15T10:59:59Z" \
     run_tool "$test_dir" "$test_dir/stdout-3" "$test_dir/stderr-3" --check-if-due \
     || fail "pre-retry check exited nonzero"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 8 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 10 ]] \
     || fail "pre-retry check queried a registry or release"
   [[ ! -s "$test_dir/stdout-3" ]] \
     || fail "pre-retry check presented cached output as current"
@@ -1117,7 +1147,7 @@ test_failed_check_preserves_cache_and_retries_after_one_hour() {
   UPDATE_AGENT_TOOLS_NOW="2026-07-15T11:00:00Z" \
     run_tool "$test_dir" "$test_dir/stdout-4" "$test_dir/stderr-4" --check-if-due \
     || fail "one-hour retry exited nonzero: $(<"$test_dir/stderr-4")"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 15 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 19 ]] \
     || fail "one-hour retry did not perform fresh release queries"
 }
 
@@ -1291,6 +1321,8 @@ test_outdated_components_report_exact_versions() {
     CODEX_CURRENT="2.3.3" \
     CLAUDE_CURRENT="3.4.4" \
     PI_CURRENT="4.5.5" \
+    OPENCODE_CURRENT="8.8.9" \
+    OMP_CURRENT="9.9.9" \
     CODEX_ACP_CURRENT="5.6.6" \
     CLAUDE_ACP_CURRENT="6.7.7" \
     PI_ACP_CURRENT="7.8.8" \
@@ -1304,6 +1336,8 @@ AoE: 1.2.2 -> 1.2.3
 Codex CLI (standalone): 2.3.3 -> 2.3.4
 Claude Code CLI: 3.4.4 -> 3.4.5
 Pi agent CLI: 4.5.5 -> 4.5.6
+OpenCode CLI: 8.8.9 -> 8.9.0
+Oh My Pi CLI: 9.9.9 -> 9.10.0
 codex-acp adapter: 5.6.6 -> 5.6.7
 claude-agent-acp adapter: 6.7.7 -> 6.7.8
 pi-acp adapter: 7.8.8 -> 7.8.9
@@ -1359,6 +1393,7 @@ test_default_update_refreshes_and_activates_the_complete_toolchain() {
   grep -Fx 'aoe update --yes' "$test_dir/command-log" >/dev/null \
     || fail "complete update did not use AoE self-update"
   assert_complete_npm_refresh "$test_dir/command-log"
+  assert_harness_versions_checked "$test_dir/command-log"
   [[ "$(grep -c '^aoe acp doctor$' "$test_dir/command-log")" -eq 2 ]] \
     || fail "complete update did not run pre- and post-activation ACP diagnostics"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
@@ -1732,7 +1767,7 @@ test_partial_install_does_not_restart_the_service() {
     <(printf 'update-agent-tools: installation failed: claude-agent-acp adapter (@agentclientprotocol/claude-agent-acp@latest)\n') \
     "$test_dir/stderr" \
     || fail "partial installation did not identify its phase and component"
-  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 5 ]] \
+  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 7 ]] \
     || fail "partial installation did not stop at the named failing component"
   if grep -q '^systemctl ' "$test_dir/command-log"; then
     fail "partial installation restarted or inspected the service"
@@ -1923,7 +1958,7 @@ test_activation_failure_is_recovered_by_a_full_rerun() {
     || fail "activation recovery rerun exited nonzero: $(<"$test_dir/stderr-2")"
   [[ "$(grep -c '^aoe update --yes$' "$test_dir/command-log")" -eq 2 ]] \
     || fail "activation recovery did not refresh the whole unit on rerun"
-  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 12 ]] \
+  [[ "$(grep -c '^npm install --global ' "$test_dir/command-log")" -eq 16 ]] \
     || fail "activation recovery skipped npm refresh because packages were current"
   [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' "$test_dir/command-log")" -eq 2 ]] \
     || fail "activation recovery did not retry service activation"

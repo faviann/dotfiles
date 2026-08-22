@@ -275,6 +275,8 @@ check_toolchain() {
   local bundled_codex_latest
   local claude_latest
   local pi_latest
+  local opencode_latest
+  local omp_latest
   local codex_acp_latest
   local claude_acp_latest
   local pi_acp_latest
@@ -332,6 +334,10 @@ check_toolchain() {
     || { check_failure_component "Claude Code CLI"; return 1; }
   pi_latest="$(npm view @earendil-works/pi-coding-agent@latest version)" \
     || { check_failure_component "Pi agent CLI"; return 1; }
+  opencode_latest="$(npm view opencode-ai@latest version)" \
+    || { check_failure_component "OpenCode CLI"; return 1; }
+  omp_latest="$(npm view @oh-my-pi/pi-coding-agent@latest version)" \
+    || { check_failure_component "Oh My Pi CLI"; return 1; }
   codex_acp_latest="$(npm view @agentclientprotocol/codex-acp@latest version)" \
     || { check_failure_component "codex-acp adapter"; return 1; }
   claude_acp_latest="$(npm view @agentclientprotocol/claude-agent-acp@latest version)" \
@@ -343,6 +349,8 @@ check_toolchain() {
     || return 1
   require_stable_version "Claude Code CLI" "$claude_latest" || return 1
   require_stable_version "Pi agent CLI" "$pi_latest" || return 1
+  require_stable_version "OpenCode CLI" "$opencode_latest" || return 1
+  require_stable_version "Oh My Pi CLI" "$omp_latest" || return 1
   require_stable_version "codex-acp adapter" "$codex_acp_latest" || return 1
   require_stable_version "claude-agent-acp adapter" "$claude_acp_latest" \
     || return 1
@@ -360,6 +368,12 @@ check_toolchain() {
   check_component "Pi agent CLI" \
     "$(jq -r '.dependencies["@earendil-works/pi-coding-agent"].version // "missing"' <<<"$installed")" \
     "$pi_latest"
+  check_component "OpenCode CLI" \
+    "$(jq -r '.dependencies["opencode-ai"].version // "missing"' <<<"$installed")" \
+    "$opencode_latest"
+  check_component "Oh My Pi CLI" \
+    "$(jq -r '.dependencies["@oh-my-pi/pi-coding-agent"].version // "missing"' <<<"$installed")" \
+    "$omp_latest"
   check_component "codex-acp adapter" \
     "$(jq -r '.dependencies["@agentclientprotocol/codex-acp"].version // "missing"' <<<"$installed")" \
     "$codex_acp_latest"
@@ -569,7 +583,7 @@ if ! aoe update --yes; then
   fail "installation failed: AoE"
 fi
 
-for binary in codex claude pi; do
+for binary in codex claude pi opencode omp; do
   binary_path="$EXPECTED_PREFIX/bin/$binary"
   if [[ -e "$binary_path" || -L "$binary_path" ]]; then
     rm -f "$binary_path"
@@ -579,6 +593,8 @@ done
 install_npm_component "Codex CLI (standalone)" "@openai/codex@latest"
 install_npm_component "Claude Code CLI" "@anthropic-ai/claude-code@latest"
 install_npm_component "Pi agent CLI" "@earendil-works/pi-coding-agent@latest"
+install_npm_component "OpenCode CLI" "opencode-ai@latest"
+install_npm_component "Oh My Pi CLI" "@oh-my-pi/pi-coding-agent@latest"
 install_npm_component "codex-acp adapter" "@agentclientprotocol/codex-acp@latest"
 install_npm_component \
   "claude-agent-acp adapter" \
@@ -587,11 +603,17 @@ install_npm_component "pi-acp adapter" "pi-acp@latest"
 
 hash -r 2>/dev/null || true
 
-for binary in aoe codex claude pi codex-acp claude-agent-acp pi-acp; do
+for binary in \
+  aoe codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
   expected_path="$EXPECTED_PREFIX/bin/$binary"
   actual_path="$(command -v "$binary" || true)"
   test "$actual_path" = "$expected_path" \
     || fail "pre-activation verification failed: $binary command must resolve to $expected_path, got ${actual_path:-missing}"
+done
+
+for harness in opencode omp pi; do
+  "$harness" --version >/dev/null \
+    || fail "pre-activation verification failed: $harness --version"
 done
 
 verification_output_file="$(mktemp "$STATE_DIR/verification.stdout.XXXXXX")"
