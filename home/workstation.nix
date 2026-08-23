@@ -44,7 +44,9 @@ let
     watch_root = "~/.codex/archived_sessions"
 
     [[ingest.sources]]
-    name = "claude"
+    # Do not use upstream's setup-owned `claude` signature: v0.7.3 treats an
+    # exact match as legacy generated config and injects newer default sources.
+    name = "claude-projects"
     harness = "claude-code"
     enabled = true
     glob = "~/.claude/projects/**/*.jsonl"
