@@ -101,7 +101,7 @@ test_moraine_configures_codex_and_claude_sources_with_backfill() {
         watch_root: "~/.codex/archived_sessions"
       },
       {
-        name: "claude",
+        name: "claude-projects",
         harness: "claude-code",
         enabled: true,
         glob: "~/.claude/projects/**/*.jsonl",
@@ -109,7 +109,7 @@ test_moraine_configures_codex_and_claude_sources_with_backfill() {
       }
     ])
   ' <<<"$config" >/dev/null \
-    || fail 'Moraine does not declare the expected Codex and Claude Code sources'
+    || fail 'Moraine does not declare only the deployment-owned Codex and Claude Code sources'
 }
 
 test_moraine_config_keeps_redaction_and_the_default_local_topology() {

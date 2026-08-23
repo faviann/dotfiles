@@ -170,9 +170,11 @@ remain under `~/.moraine`. Do not use `moraine setup` or another config-writing
 command to mutate the managed file; change this module and apply a new Home
 Manager generation instead. The enabled sources backfill and watch active Codex
 sessions recursively, archived sessions in Codex's flat archive directory, and
-standard Claude Code project transcripts under `~/.claude/projects`. Claude job
-timelines under `~/.claude/jobs` are intentionally excluded. Moraine's default
-built-in redaction runs before local storage.
+standard Claude Code project transcripts under `~/.claude/projects`. The
+deployment-owned Claude source is named `claude-projects`, avoiding upstream
+setup migrations that append unrelated default harnesses. Claude job timelines
+under `~/.claude/jobs` are intentionally excluded. Moraine's default built-in
+redaction runs before local storage.
 
 The single `moraine.service` user unit is the operator surface for the local
 stack. Upstream `moraine up` owns managed ClickHouse readiness, database
