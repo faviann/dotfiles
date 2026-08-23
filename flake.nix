@@ -39,9 +39,11 @@
         inherit system;
       };
       dotnetSdk = dotnetPkgs.dotnet-sdk_10;
+      morainePackage = pkgs.callPackage ./packages/moraine.nix { };
       behavioralTestInputs = [
         pkgs.bash
         pkgs.chezmoi
+        pkgs.codex
         pkgs.coreutils
         pkgs.diffutils
         pkgs.findutils
@@ -61,7 +63,7 @@
       workstationHomeConfiguration = home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
         extraSpecialArgs = {
-          inherit dotnetSdk;
+          inherit dotnetSdk morainePackage;
           hermesPackage = hermes-agent.packages.${system}.default;
         };
         modules = [
@@ -89,6 +91,23 @@
               pname = package.pname or package.name;
               inherit (package) version;
             };
+          moraineRelease = morainePackage.passthru.release;
+          moraineConfig = builtins.fromTOML (builtins.unsafeDiscardStringContext (
+            workstationHomeConfiguration.config.home.file.".moraine/config.toml".text
+          ));
+          moraineServices = {
+            inherit (workstationHomeConfiguration.config.systemd.user.services) moraine;
+            clickhouse =
+              workstationHomeConfiguration.config.systemd.user.services.moraine-clickhouse;
+            migrate =
+              workstationHomeConfiguration.config.systemd.user.services.moraine-migrate;
+            ingest =
+              workstationHomeConfiguration.config.systemd.user.services.moraine-ingest;
+            backend =
+              workstationHomeConfiguration.config.systemd.user.services.moraine-backend;
+          };
+          moraineCodexMcpActivation =
+            workstationHomeConfiguration.config.home.activation.configureMoraineCodexMcp.data;
           collieOriginSocket =
             workstationHomeConfiguration.config.systemd.user.sockets.collie-origin-forwarder;
           collieOriginService =
@@ -128,7 +147,10 @@
       };
     in
     {
-      packages.${system}.dotnet-sdk = dotnetSdk;
+      packages.${system} = {
+        dotnet-sdk = dotnetSdk;
+        moraine = morainePackage;
+      };
 
       apps.${system}.shellcheck = {
         type = "app";

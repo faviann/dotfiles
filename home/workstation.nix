@@ -1,4 +1,4 @@
-{ pkgs, lib, config, dotnetSdk, hermesPackage, ... }:
+{ pkgs, lib, config, dotnetSdk, hermesPackage, morainePackage, ... }:
 
 let
   # Host tools update-agent-tools shells out to that neither home.packages nor
@@ -9,6 +9,78 @@ let
     pkgs.unzip
     pkgs.findutils
   ];
+  moraineRoot = "~/.moraine";
+  moraineConfigPath = "%h/.moraine/config.toml";
+  moraineControl = "${morainePackage}/bin/moraine --config ${moraineConfigPath}";
+  moraineConfig = ''
+    [identity]
+    author = "faviann@gmail.com"
+
+    [redaction]
+    ruleset = "builtin"
+
+    [ingest]
+    state_dir = "${moraineRoot}/ingestor"
+    backfill_on_start = true
+
+    [[ingest.sources]]
+    name = "codex-active"
+    harness = "codex"
+    enabled = true
+    glob = "~/.codex/sessions/**/*.jsonl"
+    watch_root = "~/.codex/sessions"
+
+    [[ingest.sources]]
+    name = "codex-archived"
+    harness = "codex"
+    enabled = true
+    glob = "~/.codex/archived_sessions/*.jsonl"
+    watch_root = "~/.codex/archived_sessions"
+
+    [mcp]
+    # "Central" is Moraine's name for its local, per-user Unix-socket backend.
+    # Codex still launches `moraine run mcp` over stdio; that process uses this
+    # socket when available and falls back to an embedded server when it is not.
+    use_central_server = true
+    central_socket_path = "mcp.sock"
+
+    [backend]
+    # The unified backend serves both the monitor HTTP listener and the local
+    # MCP socket. This bind is therefore the monitor's canonical listen address.
+    bind = "127.0.0.1"
+    start_on_up = true
+
+    [monitor]
+    # Combined with backend.bind above; [monitor] has no separate canonical bind.
+    port = 8080
+
+    [runtime]
+    root_dir = "${moraineRoot}"
+    logs_dir = "logs"
+    pids_dir = "run"
+    service_bin_dir = "${morainePackage}/bin"
+    managed_clickhouse_dir = "${moraineRoot}/clickhouse/current"
+    clickhouse_auto_install = true
+    clickhouse_version = "v25.12.5.44-stable"
+  '';
+  mkMoraineRuntimeService =
+    {
+      service,
+      dependencies ? [ ],
+    }:
+    {
+      Unit = {
+        After = dependencies;
+        Requires = dependencies;
+        PartOf = [ "moraine.service" ];
+      };
+      Service = {
+        Type = "simple";
+        ExecStart = "${moraineControl} run ${service}";
+        Restart = "on-failure";
+        RestartSec = 5;
+      };
+    };
 in
 {
   home.username = "faviann";
@@ -27,11 +99,14 @@ in
     fd
     fzf
     hermesPackage
+    morainePackage
   ];
 
   home.sessionPath = [
     "$HOME/.local/bin"
   ];
+
+  home.file.".moraine/config.toml".text = moraineConfig;
 
   home.activation.removeLegacyAoeUnits = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
     rm -f \
@@ -41,6 +116,62 @@ in
   '';
 
   systemd.user.startServices = "sd-switch";
+
+  # Operator-facing aggregate for the foreground services below. The no-op
+  # process gives systemd one stable unit to start/stop while PartOf propagates
+  # that lifecycle to the actual ClickHouse, ingest, and unified backend units.
+  systemd.user.services.moraine = {
+    Unit = {
+      Description = "Workstation-local Moraine producer";
+      Requires = [
+        "moraine-ingest.service"
+        "moraine-backend.service"
+      ];
+      After = [
+        "moraine-ingest.service"
+        "moraine-backend.service"
+      ];
+    };
+
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.coreutils}/bin/true";
+      RemainAfterExit = true;
+    };
+
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  systemd.user.services.moraine-clickhouse = mkMoraineRuntimeService {
+    service = "clickhouse";
+  };
+
+  systemd.user.services.moraine-migrate = {
+    Unit = {
+      Requires = [ "moraine-clickhouse.service" ];
+      After = [ "moraine-clickhouse.service" ];
+      PartOf = [ "moraine.service" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${moraineControl} db migrate";
+      RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = 5;
+    };
+  };
+
+  systemd.user.services.moraine-ingest = mkMoraineRuntimeService {
+    service = "ingest";
+    dependencies = [ "moraine-migrate.service" ];
+  };
+
+  # `run backend` launches Moraine's unified moraine-mcp process. It owns both
+  # the loopback monitor UI/API and the per-user Unix socket used by stdio MCP.
+  systemd.user.services.moraine-backend = mkMoraineRuntimeService {
+    service = "backend";
+    dependencies = [ "moraine-migrate.service" ];
+  };
 
   # installPackages is what creates the profile this handoff reads from. Ordered
   # only after reloadSystemd, the handoff ran while ~/.nix-profile was still a
@@ -77,6 +208,25 @@ in
         command -v update-agent-tools >/dev/null 2>&1 \
           || { echo "Agent-tool bootstrap requires the dotfiles updater" >&2; exit 1; }
         update-agent-tools --yes
+      fi
+    '';
+
+  home.activation.configureMoraineCodexMcp =
+    lib.hm.dag.entryAfter [ "bootstrapAgentTools" ] ''
+      export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:$PATH"
+      command -v codex >/dev/null 2>&1 \
+        || { echo "Moraine MCP registration requires the managed Codex CLI" >&2; exit 1; }
+
+      _moraine_command="${morainePackage}/bin/moraine"
+      _moraine_registration="$(codex mcp get moraine --json 2>/dev/null || true)"
+      if ! printf '%s\n' "$_moraine_registration" \
+        | ${pkgs.jq}/bin/jq -e --arg command "$_moraine_command" '
+            (.enabled == true) and
+            (.transport.type == "stdio") and
+            (.transport.command == $command) and
+            (.transport.args == ["run", "mcp"])
+          ' >/dev/null 2>&1; then
+        codex mcp add moraine -- ${morainePackage}/bin/moraine run mcp
       fi
     '';
 

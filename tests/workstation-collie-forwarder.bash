@@ -9,30 +9,8 @@ fail() {
   exit 1
 }
 
-rendered_json() {
-  local fixture_filter="$1"
-  local installable="$2"
-  shift 2
-
-  if [[ -n "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
-    jq -ce "$fixture_filter" "$TEST_WORKSTATION_RENDERED_CONFIGURATION"
-    return
-  fi
-
-  nix eval --json "$installable" "$@"
-}
-
-rendered_raw() {
-  local fixture_filter="$1"
-  local installable="$2"
-
-  if [[ -n "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
-    jq -er "$fixture_filter" "$TEST_WORKSTATION_RENDERED_CONFIGURATION"
-    return
-  fi
-
-  nix eval --raw "$installable"
-}
+# shellcheck source=tests/lib/rendered-configuration.bash
+source "$REPO_ROOT/tests/lib/rendered-configuration.bash"
 
 test_workstation_profile_includes_dotnet_10_lts_sdk() {
   local dotnet_sdk_package

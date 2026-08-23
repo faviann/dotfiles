@@ -90,7 +90,7 @@ part of daily operation.
 
 The `workstation` Home Manager flake installs user tooling for the Debian LXC
 workstation: the .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, `jq`, `ripgrep`,
-`fd`, `fzf`, and Hermes. Hermes is installed from
+`fd`, `fzf`, Hermes, and Moraine. Hermes is installed from
 `github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
 credentials and runtime configuration stay in `~/.hermes`.
 
@@ -156,6 +156,30 @@ directly while developing dotfiles:
 ```bash
 home-manager build --flake /home/aperture/repos/dotfiles#workstation
 ```
+
+## Workstation Moraine
+
+The workstation profile pins one Moraine v0.7.3 release bundle and uses its
+matching CLI, ingest, monitor, and MCP executables. Home Manager writes the
+configuration to `~/.moraine/config.toml`; persistent ingestion state,
+ClickHouse data, logs, sockets, and process state remain under `~/.moraine`.
+The enabled Codex sources backfill and watch active sessions recursively and
+archived sessions in Codex's flat archive directory. Built-in redaction runs
+before local storage.
+
+The `moraine.service` user unit is the operator-facing aggregate for the local
+stack. It starts the pinned ClickHouse release, applies database migrations,
+then runs ingest and Moraine's unified backend as foreground services. The
+unified backend owns both the monitor HTTP listener at `127.0.0.1:8080` and a
+mode-0600 per-user MCP Unix socket; there is intentionally no separate monitor
+unit or non-loopback listener.
+
+Codex retains a direct stdio registration for the pinned `moraine run mcp`
+command. Moraine calls its optional connection to the local Unix socket a
+"central server"; in this configuration that term does not mean a remote
+backend or central database. The stdio process prefers the local unified
+backend when it is healthy and falls back to its embedded server when it is
+not.
 
 ## Workstation Agent of Empires
 
