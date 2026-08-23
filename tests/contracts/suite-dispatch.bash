@@ -93,7 +93,9 @@ expected_cases() {
         test_current_bun_is_not_redownloaded \
         test_bun_release_metadata_failure_is_a_failed_check \
         test_bun_archive_download_failure_stops_before_the_harnesses_change \
-        test_abandoned_bun_work_directories_are_swept
+        test_abandoned_bun_work_directories_are_swept \
+        test_unreadable_engine_metadata_refuses_before_mutation \
+        test_absent_engine_declaration_does_not_block_the_update
       ;;
     workstation-agent-tools-bootstrap.bash)
       printf '%s\n' \

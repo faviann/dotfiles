@@ -130,7 +130,12 @@ which lags Bun badly enough that a harness can declare an engine floor newer
 than the Bun the profile would supply. Keeping it in the same unit as the
 harnesses is what makes the runtime and its dependents move together; the
 updater refuses before changing anything if a harness declares a floor the
-runtime cannot meet.
+runtime cannot meet, or if it cannot read one.
+
+The archive is checked against the digest the release API publishes alongside
+the download URL. That detects a truncated or corrupted download, not a
+compromised release: the digest and the archive come from the same source, and
+no independently pinned hash survives outside it.
 
 `codex-acp` also contains its own compatible Codex runtime. That bundled
 runtime is distinct from the standalone Codex CLI: updating `@openai/codex`

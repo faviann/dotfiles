@@ -184,6 +184,14 @@ if [[ "$1" == "view" && "${NPM_FAIL_PACKAGE:-}" == "$2" ]]; then
   exit 1
 fi
 
+# Healthy while the pre-install guard reads engines, dead by the time
+# pre-activation re-checks: the only way that path still sees a registry failure.
+if [[ "$1" == "view" && "${NPM_FAIL_PACKAGE_AFTER_INSTALL:-}" == "$2" \
+  && -e "$HOME/npm-installed" ]]; then
+  printf 'npm registry unavailable\n' >&2
+  exit 1
+fi
+
 if [[ "$1" == "view" && "${NPM_EMPTY_PACKAGE:-}" == "$2" ]]; then
   exit 0
 fi
@@ -268,6 +276,12 @@ fi
 if [[ "$*" == "view @openai/codex@$BUNDLED_CODEX_RANGE version --json" ]]; then
   printf '%s\n' "$BUNDLED_CODEX_VERSIONS_JSON"
   exit 0
+fi
+
+if [[ "$1" == "view" && "$3" == "engines" \
+  && "${NPM_ENGINES_FAIL_PACKAGE:-}" == "$2" ]]; then
+  printf 'npm registry unavailable\n' >&2
+  exit 1
 fi
 
 if [[ "$1" == "view" && "$3" == "engines" && "$4" == "--json" ]]; then
@@ -448,6 +462,8 @@ run_tool() {
     CURL_FAIL="${CURL_FAIL:-0}" \
     CURL_GATE="${CURL_GATE:-}" \
     NPM_EMPTY_PACKAGE="${NPM_EMPTY_PACKAGE:-}" \
+    NPM_ENGINES_FAIL_PACKAGE="${NPM_ENGINES_FAIL_PACKAGE:-}" \
+    NPM_FAIL_PACKAGE_AFTER_INSTALL="${NPM_FAIL_PACKAGE_AFTER_INSTALL:-}" \
     NPM_FAIL_PACKAGE="${NPM_FAIL_PACKAGE:-}" \
     NPM_FIXTURE="${NPM_FIXTURE:-complete}" \
     NPM_LIST_EMPTY="${NPM_LIST_EMPTY:-0}" \
@@ -1984,7 +2000,7 @@ test_pre_activation_registry_failure_names_the_managed_component() {
   trap 'rm -rf "$test_dir"' RETURN
   make_stubs "$test_dir/stubs"
 
-  if NPM_FAIL_PACKAGE='@agentclientprotocol/claude-agent-acp@latest' \
+  if NPM_FAIL_PACKAGE_AFTER_INSTALL='@agentclientprotocol/claude-agent-acp@latest' \
     run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr"; then
     fail "component registry failure exited zero"
   fi
@@ -2434,7 +2450,7 @@ test_bun_archive_download_failure_stops_before_the_harnesses_change() {
     fail "an unreachable Bun archive was accepted"
   fi
 
-  grep -Fq 'installation failed: Bun runtime (https://example.invalid/baseline.zip)' \
+  grep -Fq 'installation failed: Bun runtime (download of https://example.invalid/baseline.zip)' \
     "$test_dir/stderr" \
     || fail "archive download failure was not reported: $(<"$test_dir/stderr")"
   if grep -Eq '^(npm install|aoe update|systemctl )' "$test_dir/command-log"; then
@@ -2460,6 +2476,45 @@ test_abandoned_bun_work_directories_are_swept() {
 
   [[ ! -e "$test_dir/state/update-agent-tools/bun.abandoned" ]] \
     || fail "an abandoned Bun work directory survived the next install"
+}
+
+# npm install does not enforce engines, so a harness whose floor could not be
+# read installs cleanly and then fails to start. Skipping the unreadable one
+# would reproduce the incident this guard exists to prevent.
+test_unreadable_engine_metadata_refuses_before_mutation() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if NPM_ENGINES_FAIL_PACKAGE='@oh-my-pi/pi-coding-agent@latest' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes; then
+    fail "an unreadable engine declaration was treated as satisfied"
+  fi
+
+  grep -Fq 'update refused before any change: Oh My Pi CLI (engine metadata unavailable)' \
+    "$test_dir/stderr" \
+    || fail "unreadable engine metadata was not explained: $(<"$test_dir/stderr")"
+  if grep -Eq '^(bun install|npm install|aoe update|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "an unreadable engine declaration still mutated the toolchain"
+  fi
+}
+
+# A package that simply declares no engines is the steady state for most of the
+# toolchain, and must not be confused with metadata that failed to load.
+test_absent_engine_declaration_does_not_block_the_update() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  OMP_ENGINES='' PI_ENGINES='' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "absent engine declarations blocked the update: $(<"$test_dir/stderr")"
+  assert_complete_npm_refresh "$test_dir/command-log"
 }
 
 # shellcheck source=tests/lib/suite-dispatch.bash
@@ -2530,6 +2585,8 @@ readonly test_cases=(
   test_bun_release_metadata_failure_is_a_failed_check
   test_bun_archive_download_failure_stops_before_the_harnesses_change
   test_abandoned_bun_work_directories_are_swept
+  test_unreadable_engine_metadata_refuses_before_mutation
+  test_absent_engine_declaration_does_not_block_the_update
 )
 
 suite_dispatch 'update-agent-tools --check' "$@"

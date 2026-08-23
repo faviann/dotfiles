@@ -350,7 +350,10 @@ claim when a command was not run.
 
 The following results were captured during the 2026-08-12 pilot. They are a
 compact record; retain the raw command output separately rather than placing
-secrets or large JSON responses in this repository.
+secrets or large JSON responses in this repository. The record is preserved as
+observed: the Bun row below names a Home Manager store path because that is
+where Bun came from at the time. It has since moved to `update-agent-tools`,
+as described at the top of this runbook.
 
 | Criterion | Outcome and evidence |
 | --- | --- |

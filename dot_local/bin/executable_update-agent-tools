@@ -302,11 +302,19 @@ install_bun_runtime() {
   local archive
   local extracted
   local observed
+  local tool
 
   version="$(jq -er '.version' <<<"$release")" \
     || fail "installation failed: Bun runtime"
   url="$(jq -er '.url' <<<"$release")" || fail "installation failed: Bun runtime"
   digest="$(jq -er '.digest' <<<"$release")" || fail "installation failed: Bun runtime"
+
+  # The profile supplies these, but the updater is runnable outside it, and the
+  # repo's shape for a missing prerequisite is a named tool rather than a
+  # downstream failure that blames the archive.
+  for tool in curl unzip find sha256sum install; do
+    command -v "$tool" >/dev/null 2>&1 || fail "$tool missing from PATH"
+  done
 
   # A run killed mid-download leaves ~100MB of archive and extracted tree behind,
   # and nothing else ever visits these paths, so sweep before adding another.
@@ -318,7 +326,7 @@ install_bun_runtime() {
   trap 'rm -rf "$work_dir" "$EXPECTED_PREFIX/bin/.bun.new"' EXIT
   archive="$work_dir/bun.zip"
 
-  curl -fsSL -o "$archive" "$url" || bun_install_failed "$url"
+  curl -fsSL -o "$archive" "$url" || bun_install_failed "download of $url"
   observed="$(sha256sum "$archive" | cut -d ' ' -f 1)" \
     || bun_install_failed "checksum"
   [[ "$observed" == "$digest" ]] \
@@ -433,11 +441,18 @@ check_runtime_engines() {
   for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
     component="${entry%%|*}"
     package="${entry#*|}"
-    # Being unable to read a floor is not the same as violating one. A registry
-    # that will not answer here will not answer the install either, and that
-    # failure names the component; refusing on it as well would let one blip
-    # block the whole toolchain.
-    engines="$(npm view "$package@latest" engines --json 2>/dev/null)" || continue
+    # Unverifiable is not the same as satisfied. npm install does not enforce
+    # engines — engine-strict defaults to false, so a floor violation is only a
+    # warning there — which means skipping a package whose metadata failed to
+    # load installs a harness that may not start, and the run then dies at the
+    # post-install `$harness --version` with the harnesses already replaced.
+    # That is the incident this guard exists to prevent, so a failed lookup
+    # refuses. A rerun costs a minute; the alternative costs the toolchain.
+    engines="$(npm view "$package@latest" engines --json 2>/dev/null)" \
+      || { runtime_engine_failure="$component (engine metadata unavailable)"; return 1; }
+    # An absent or malformed declaration is different: it is the package's
+    # steady state, not a transient failure, so refusing would block updates
+    # until an upstream author fixed it. Nothing to check means nothing to fail.
     [[ -n "$engines" ]] || continue
     jq -e 'type == "object"' <<<"$engines" >/dev/null 2>&1 || continue
     for runtime in bun node; do
