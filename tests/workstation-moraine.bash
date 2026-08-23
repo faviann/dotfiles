@@ -77,7 +77,7 @@ test_moraine_profile_uses_one_integrity_pinned_release_bundle() {
   done
 }
 
-test_moraine_configures_active_and_archived_codex_sources_with_backfill() {
+test_moraine_configures_codex_and_claude_sources_with_backfill() {
   local config
 
   config="$(rendered_moraine_config)" \
@@ -99,10 +99,17 @@ test_moraine_configures_active_and_archived_codex_sources_with_backfill() {
         enabled: true,
         glob: "~/.codex/archived_sessions/*.jsonl",
         watch_root: "~/.codex/archived_sessions"
+      },
+      {
+        name: "claude",
+        harness: "claude-code",
+        enabled: true,
+        glob: "~/.claude/projects/**/*.jsonl",
+        watch_root: "~/.claude/projects"
       }
     ])
   ' <<<"$config" >/dev/null \
-    || fail 'Moraine does not declare the expected active and archived Codex sources'
+    || fail 'Moraine does not declare the expected Codex and Claude Code sources'
 }
 
 test_moraine_config_keeps_redaction_and_the_default_local_topology() {
@@ -149,6 +156,10 @@ test_moraine_service_owns_and_restarts_the_upstream_stack() {
   jq -e '
     (.names == ["moraine"]) and
     (.service.Unit.Description == "Workstation-local Moraine producer") and
+    (.service.Unit."X-Restart-Triggers" == [
+      (.service.Unit."X-Restart-Triggers"[0] |
+        select(test("^/nix/store/[^/]+-hm_\\.moraineconfig\\.toml$")))
+    ]) and
     (.service.Service.Type == "simple") and
     (.service.Service.Restart == "on-failure") and
     (.service.Service.RestartSec == 5) and
@@ -218,7 +229,7 @@ source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
 readonly test_cases=(
   test_moraine_profile_uses_one_integrity_pinned_release_bundle
-  test_moraine_configures_active_and_archived_codex_sources_with_backfill
+  test_moraine_configures_codex_and_claude_sources_with_backfill
   test_moraine_config_keeps_redaction_and_the_default_local_topology
   test_moraine_service_owns_and_restarts_the_upstream_stack
   test_moraine_leaves_user_codex_configuration_unmanaged

@@ -168,16 +168,20 @@ Home Manager owns `~/.moraine/config.toml` as a read-only Nix-managed file.
 Persistent ingestion state, ClickHouse data, logs, sockets, and process state
 remain under `~/.moraine`. Do not use `moraine setup` or another config-writing
 command to mutate the managed file; change this module and apply a new Home
-Manager generation instead. The enabled Codex sources backfill and watch active
-sessions recursively and archived sessions in Codex's flat archive directory.
-Moraine's default built-in redaction runs before local storage.
+Manager generation instead. The enabled sources backfill and watch active Codex
+sessions recursively, archived sessions in Codex's flat archive directory, and
+standard Claude Code project transcripts under `~/.claude/projects`. Claude job
+timelines under `~/.claude/jobs` are intentionally excluded. Moraine's default
+built-in redaction runs before local storage.
 
 The single `moraine.service` user unit is the operator surface for the local
 stack. Upstream `moraine up` owns managed ClickHouse readiness, database
 migrations, ingest, and unified-backend startup. The foreground unit monitors
 aggregate Moraine health and restarts the complete stack on failure. Default
 Moraine topology keeps the HTTP listener on `127.0.0.1:8080` and its per-user
-MCP Unix socket at mode 0600; there is no non-loopback listener.
+MCP Unix socket at mode 0600; there is no non-loopback listener. Applying a Home
+Manager generation restarts the service when the managed Moraine configuration
+changes, so ingestion reloads newly declared sources.
 
 The workstation profile does not manage `~/.codex/config.toml` or register a
 Codex MCP server. Moraine's local producer and query backend operate without a
