@@ -9,6 +9,17 @@ fail() {
   exit 1
 }
 
+readonly behavioral_suites=(
+  workstation-login.bash
+  chezmoi-target-inventory.bash
+  update-agent-tools-check.bash
+  workstation-agent-tools-bootstrap.bash
+  workstation-collie-forwarder.bash
+  workstation-moraine.bash
+  workstation-skills-bootstrap.bash
+  workstation-update.bash
+)
+
 expected_cases() {
   case "$1" in
     workstation-login.bash)
@@ -123,8 +134,8 @@ expected_cases() {
         test_moraine_profile_uses_one_integrity_pinned_release_bundle \
         test_moraine_configures_active_and_archived_codex_sources_with_backfill \
         test_moraine_config_keeps_redaction_and_the_default_local_topology \
-        test_moraine_service_manages_the_local_stack_in_the_headless_user_session \
-        test_codex_mcp_registration_invokes_the_pinned_moraine_stdio_command
+        test_moraine_service_owns_and_restarts_the_upstream_stack \
+        test_codex_mcp_registration_is_declarative_and_uses_pinned_stdio
       ;;
     workstation-skills-bootstrap.bash)
       printf '%s\n' \
@@ -193,15 +204,7 @@ test_every_suite_lists_all_case_names() {
 
   all_cases="$(mktemp)"
   trap 'rm -f "$all_cases"' RETURN
-  for suite in \
-    workstation-login.bash \
-    chezmoi-target-inventory.bash \
-    update-agent-tools-check.bash \
-    workstation-agent-tools-bootstrap.bash \
-    workstation-collie-forwarder.bash \
-    workstation-moraine.bash \
-    workstation-skills-bootstrap.bash \
-    workstation-update.bash; do
+  for suite in "${behavioral_suites[@]}"; do
     listed_cases="$(bash "$REPO_ROOT/tests/$suite" --list)" \
       || fail "$suite --list exited nonzero"
     diff -u \
@@ -283,15 +286,7 @@ assert_dispatch_fails_with() {
 test_unknown_and_malformed_invocations_fail_clearly() {
   local suite
 
-  for suite in \
-    workstation-login.bash \
-    chezmoi-target-inventory.bash \
-    update-agent-tools-check.bash \
-    workstation-agent-tools-bootstrap.bash \
-    workstation-collie-forwarder.bash \
-    workstation-moraine.bash \
-    workstation-skills-bootstrap.bash \
-    workstation-update.bash; do
+  for suite in "${behavioral_suites[@]}"; do
     assert_dispatch_fails_with \
       "$suite" 'ERROR: unknown test case:' \
       --case definitely_not_a_test_case

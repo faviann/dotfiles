@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (( $# != 2 )); then
+  printf 'Usage: moraine-service MORAINE_COMMAND CONFIG_PATH\n' >&2
+  exit 2
+fi
+
+readonly moraine_command="$1"
+readonly config_path="$2"
+readonly status_interval="${MORAINE_STATUS_INTERVAL_SECONDS:-5}"
+
+[[ "$status_interval" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+  || { printf 'Invalid Moraine status interval: %s\n' "$status_interval" >&2; exit 2; }
+
+readonly control=("$moraine_command" --config "$config_path")
+
+stack_is_healthy() {
+  "${control[@]}" --output json status \
+    | jq -e '
+        ([.services[] | select(.state == "running") | .service] | sort)
+          == ["backend", "clickhouse", "ingest"] and
+        (.doctor.clickhouse_healthy == true) and
+        (.doctor.database_exists == true) and
+        (.doctor.pending_migrations == []) and
+        (.doctor.missing_tables == []) and
+        (.doctor.errors == [])
+      ' >/dev/null
+}
+
+# `moraine up` owns installation, ClickHouse readiness, migrations, and the
+# startup order for ingest and the unified backend. It returns only after the
+# stack is ready, then leaves those processes in this systemd service's cgroup.
+"${control[@]}" up
+
+# Keep the systemd unit's active state tied to Moraine's aggregate health. A
+# failed status makes systemd restart the complete stack instead of leaving a
+# successful no-op aggregate active above failed children.
+while stack_is_healthy; do
+  sleep "$status_interval"
+done
+
+exit 1

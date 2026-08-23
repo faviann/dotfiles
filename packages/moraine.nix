@@ -6,6 +6,14 @@
   libgcc,
 }:
 
+let
+  executables = [
+    "moraine"
+    "moraine-ingest"
+    "moraine-monitor"
+    "moraine-mcp"
+  ];
+in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "moraine";
   version = "0.7.3";
@@ -23,24 +31,14 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   installPhase = ''
     runHook preInstall
 
-    mkdir -p "$out/bin" "$out/web/monitor"
-    cp bin/moraine bin/moraine-ingest bin/moraine-monitor bin/moraine-mcp "$out/bin/"
+    mkdir -p "$out/web/monitor"
+    for executable in ${lib.escapeShellArgs executables}; do
+      install -Dm755 "bin/$executable" "$out/bin/$executable"
+    done
     cp -R web/monitor/dist "$out/web/monitor/"
 
     runHook postInstall
   '';
-
-  passthru.release = {
-    version = "v${finalAttrs.version}";
-    target = "x86_64-unknown-linux-gnu";
-    hash = finalAttrs.src.outputHash;
-    executables = [
-      "moraine"
-      "moraine-ingest"
-      "moraine-monitor"
-      "moraine-mcp"
-    ];
-  };
 
   meta = {
     description = "Local-first coding-agent observability and retrieval";

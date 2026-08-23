@@ -159,27 +159,29 @@ home-manager build --flake /home/aperture/repos/dotfiles#workstation
 
 ## Workstation Moraine
 
-The workstation profile pins one Moraine v0.7.3 release bundle and uses its
-matching CLI, ingest, monitor, and MCP executables. Home Manager writes the
-configuration to `~/.moraine/config.toml`; persistent ingestion state,
-ClickHouse data, logs, sockets, and process state remain under `~/.moraine`.
-The enabled Codex sources backfill and watch active sessions recursively and
-archived sessions in Codex's flat archive directory. Built-in redaction runs
-before local storage.
+The workstation profile pins one Moraine v0.7.3 release bundle and installs its
+matching CLI, ingest, monitor-compatibility alias, and MCP executables. There is
+intentionally no separate monitor unit; the unified MCP/backend executable owns
+the monitor HTTP listener as well as the MCP socket.
 
-The `moraine.service` user unit is the operator-facing aggregate for the local
-stack. It starts the pinned ClickHouse release, applies database migrations,
-then runs ingest and Moraine's unified backend as foreground services. The
-unified backend owns both the monitor HTTP listener at `127.0.0.1:8080` and a
-mode-0600 per-user MCP Unix socket; there is intentionally no separate monitor
-unit or non-loopback listener.
+Home Manager owns `~/.moraine/config.toml` as a read-only Nix-managed file.
+Persistent ingestion state, ClickHouse data, logs, sockets, and process state
+remain under `~/.moraine`. Do not use `moraine setup` or another config-writing
+command to mutate the managed file; change this module and apply a new Home
+Manager generation instead. The enabled Codex sources backfill and watch active
+sessions recursively and archived sessions in Codex's flat archive directory.
+Moraine's default built-in redaction runs before local storage.
 
-Codex retains a direct stdio registration for the pinned `moraine run mcp`
-command. Moraine calls its optional connection to the local Unix socket a
-"central server"; in this configuration that term does not mean a remote
-backend or central database. The stdio process prefers the local unified
-backend when it is healthy and falls back to its embedded server when it is
-not.
+The single `moraine.service` user unit is the operator surface for the local
+stack. Upstream `moraine up` owns managed ClickHouse readiness, database
+migrations, ingest, and unified-backend startup. The foreground unit monitors
+aggregate Moraine health and restarts the complete stack on failure. Default
+Moraine topology keeps the HTTP listener on `127.0.0.1:8080` and its per-user
+MCP Unix socket at mode 0600; there is no non-loopback listener.
+
+Home Manager also owns Codex's direct stdio registration for the pinned
+`moraine run mcp` command. The launcher prefers the Moraine central server
+defined in `CONTEXT.md` when healthy and falls back to its embedded server.
 
 ## Workstation Agent of Empires
 

@@ -30,6 +30,10 @@ _Avoid_: Repository-local AFK workflow, bespoke launcher
 Owned by `workstation-setup`; canonical definition lives in homelab-iac's `CONTEXT.md`.
 _Avoid_: Home Manager generation check, local freshness algorithm
 
+**Moraine central server**:
+Moraine's per-user local Unix-socket backend shared by direct stdio MCP launchers.
+_Avoid_: Remote backend, central database
+
 ## Supported AFK workflow
 
 This repository's supported AFK workflow is the root-installed Sandcastle

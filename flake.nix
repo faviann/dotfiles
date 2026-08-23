@@ -43,7 +43,6 @@
       behavioralTestInputs = [
         pkgs.bash
         pkgs.chezmoi
-        pkgs.codex
         pkgs.coreutils
         pkgs.diffutils
         pkgs.findutils
@@ -91,23 +90,39 @@
               pname = package.pname or package.name;
               inherit (package) version;
             };
-          moraineRelease = morainePackage.passthru.release;
+          moraineRelease = {
+            inherit (morainePackage) version;
+            hash = morainePackage.src.outputHash;
+            source = morainePackage.src.url;
+            storePath = "${morainePackage}";
+            hasReleasePassthru = morainePackage.passthru ? release;
+          };
           moraineConfig = builtins.fromTOML (builtins.unsafeDiscardStringContext (
             workstationHomeConfiguration.config.home.file.".moraine/config.toml".text
           ));
-          moraineServices = {
-            inherit (workstationHomeConfiguration.config.systemd.user.services) moraine;
-            clickhouse =
-              workstationHomeConfiguration.config.systemd.user.services.moraine-clickhouse;
-            migrate =
-              workstationHomeConfiguration.config.systemd.user.services.moraine-migrate;
-            ingest =
-              workstationHomeConfiguration.config.systemd.user.services.moraine-ingest;
-            backend =
-              workstationHomeConfiguration.config.systemd.user.services.moraine-backend;
+          moraineServiceTopology =
+            let
+              services = workstationHomeConfiguration.config.systemd.user.services;
+            in
+            {
+              names = builtins.filter
+                (name: builtins.match "moraine.*" name != null)
+                (builtins.attrNames services);
+              service = services.moraine;
+            };
+          moraineCodex = {
+            enabled = workstationHomeConfiguration.config.programs.codex.enable;
+            packageIsNull = workstationHomeConfiguration.config.programs.codex.package == null;
+            server = workstationHomeConfiguration.config.programs.codex.settings.mcp_servers.moraine;
+            serverNames = builtins.attrNames (
+              workstationHomeConfiguration.config.programs.codex.settings.mcp_servers
+            );
+            configSource = toString (
+              workstationHomeConfiguration.config.home.file.".codex/config.toml".source
+            );
+            hasImperativeActivation =
+              workstationHomeConfiguration.config.home.activation ? configureMoraineCodexMcp;
           };
-          moraineCodexMcpActivation =
-            workstationHomeConfiguration.config.home.activation.configureMoraineCodexMcp.data;
           collieOriginSocket =
             workstationHomeConfiguration.config.systemd.user.sockets.collie-origin-forwarder;
           collieOriginService =
