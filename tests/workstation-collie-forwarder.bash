@@ -59,8 +59,8 @@ test_workstation_profile_selects_bun_baseline_for_pre_avx2_cpu() {
 
   jq -e '
     (.pname == "bun-baseline") and
-    (.version == "1.3.13") and
-    (.srcUrl == "https://github.com/oven-sh/bun/releases/download/bun-v1.3.13/bun-linux-x64-baseline.zip")
+    (.version == "1.4.0") and
+    (.srcUrl == "https://github.com/oven-sh/bun/releases/download/bun-v1.4.0/bun-linux-x64-baseline.zip")
   ' <<<"$bun_package" >/dev/null \
     || fail 'rendered workstation package profile does not select the pinned baseline Bun archive'
 }

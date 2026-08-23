@@ -4,11 +4,16 @@ let
   # Host tools update-agent-tools shells out to that neither home.packages nor
   # Home Manager's activation PATH provides.
   updaterHostTools = lib.makeBinPath [ pkgs.util-linux pkgs.curl ];
-  bunBaseline = pkgs.bun.overrideAttrs (oldAttrs: {
+  # Pinned ahead of nixpkgs: the Oh My Pi CLI (omp) refuses to start on Bun
+  # older than 1.3.14 and nixos-unstable still ships 1.3.13. The baseline
+  # archive is what keeps the pre-AVX2 Xeon workstation able to run Bun at all.
+  bunVersion = "1.4.0";
+  bunBaseline = pkgs.bun.overrideAttrs (_: {
     pname = "bun-baseline";
+    version = bunVersion;
     src = pkgs.fetchurl {
-      url = "https://github.com/oven-sh/bun/releases/download/bun-v${oldAttrs.version}/bun-linux-x64-baseline.zip";
-      hash = "sha256-nYokKSpwaAkCBdqsCloiP19pc29Sh+N7+I07QDHtx1A=";
+      url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-linux-x64-baseline.zip";
+      hash = "sha256-GE+0WV8NQBohfPfHjBvEMLqDMU2reouUgFurv3+nCX8=";
     };
   });
 in
