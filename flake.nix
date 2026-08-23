@@ -39,6 +39,7 @@
         inherit system;
       };
       dotnetSdk = dotnetPkgs.dotnet-sdk_10;
+      morainePackage = pkgs.callPackage ./packages/moraine.nix { };
       behavioralTestInputs = [
         pkgs.bash
         pkgs.chezmoi
@@ -61,7 +62,7 @@
       workstationHomeConfiguration = home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
         extraSpecialArgs = {
-          inherit dotnetSdk;
+          inherit dotnetSdk morainePackage;
           hermesPackage = hermes-agent.packages.${system}.default;
         };
         modules = [
@@ -89,6 +90,31 @@
               pname = package.pname or package.name;
               inherit (package) version;
             };
+          moraineRelease = {
+            inherit (morainePackage) version;
+            hash = morainePackage.src.outputHash;
+            source = morainePackage.src.url;
+            storePath = "${morainePackage}";
+            hasReleasePassthru = morainePackage.passthru ? release;
+          };
+          moraineConfig = builtins.fromTOML (builtins.unsafeDiscardStringContext (
+            workstationHomeConfiguration.config.home.file.".moraine/config.toml".text
+          ));
+          moraineServiceTopology =
+            let
+              services = workstationHomeConfiguration.config.systemd.user.services;
+            in
+            {
+              names = builtins.filter
+                (name: builtins.match "moraine.*" name != null)
+                (builtins.attrNames services);
+              service = services.moraine;
+            };
+          moraineCodexBoundary = {
+            managesConfig = workstationHomeConfiguration.config.home.file ? ".codex/config.toml";
+            hasRegistrationActivation =
+              workstationHomeConfiguration.config.home.activation ? configureMoraineCodexMcp;
+          };
           collieOriginSocket =
             workstationHomeConfiguration.config.systemd.user.sockets.collie-origin-forwarder;
           collieOriginService =
@@ -110,6 +136,7 @@
           ./dot_local/bin/executable_update-agent-tools
           ./dot_local/bin/executable_workstation-login
           ./dot_local/bin/executable_workstation-update
+          ./scripts/moraine-service
           ./scripts/run-shellcheck
           ./scripts/run-tests
           ./scripts/update-dotnet-sdk
@@ -128,7 +155,10 @@
       };
     in
     {
-      packages.${system}.dotnet-sdk = dotnetSdk;
+      packages.${system} = {
+        dotnet-sdk = dotnetSdk;
+        moraine = morainePackage;
+      };
 
       apps.${system}.shellcheck = {
         type = "app";

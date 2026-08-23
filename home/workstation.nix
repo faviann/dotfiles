@@ -1,4 +1,4 @@
-{ pkgs, lib, config, dotnetSdk, hermesPackage, ... }:
+{ pkgs, lib, config, dotnetSdk, hermesPackage, morainePackage, ... }:
 
 let
   # Host tools update-agent-tools shells out to that neither home.packages nor
@@ -9,6 +9,45 @@ let
     pkgs.unzip
     pkgs.findutils
   ];
+  moraineRootRelative = ".moraine";
+  moraineRoot = "~/${moraineRootRelative}";
+  moraineConfigRelative = "${moraineRootRelative}/config.toml";
+  moraineConfigPath = "%h/${moraineConfigRelative}";
+  moraineControl = "${morainePackage}/bin/moraine --config ${moraineConfigPath}";
+  moraineService = pkgs.writeShellApplication {
+    name = "moraine-service";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.jq
+    ];
+    text = builtins.readFile ../scripts/moraine-service;
+  };
+  moraineConfig = ''
+    [identity]
+    author = "faviann@gmail.com"
+
+    [ingest]
+    backfill_on_start = true
+
+    [[ingest.sources]]
+    name = "codex-active"
+    harness = "codex"
+    enabled = true
+    glob = "~/.codex/sessions/**/*.jsonl"
+    watch_root = "~/.codex/sessions"
+
+    [[ingest.sources]]
+    name = "codex-archived"
+    harness = "codex"
+    enabled = true
+    glob = "~/.codex/archived_sessions/*.jsonl"
+    watch_root = "~/.codex/archived_sessions"
+
+    [runtime]
+    root_dir = "${moraineRoot}"
+    service_bin_dir = "${morainePackage}/bin"
+    managed_clickhouse_dir = "${moraineRoot}/clickhouse/current"
+  '';
 in
 {
   home.username = "faviann";
@@ -27,11 +66,14 @@ in
     fd
     fzf
     hermesPackage
+    morainePackage
   ];
 
   home.sessionPath = [
     "$HOME/.local/bin"
   ];
+
+  home.file.${moraineConfigRelative}.text = moraineConfig;
 
   home.activation.removeLegacyAoeUnits = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
     rm -f \
@@ -41,6 +83,23 @@ in
   '';
 
   systemd.user.startServices = "sd-switch";
+
+  # Upstream owns installation, readiness, migrations, and child startup. The
+  # foreground wrapper keeps this unit alive only while that complete stack is
+  # healthy, so one restart policy accurately represents the operator surface.
+  systemd.user.services.moraine = {
+    Unit.Description = "Workstation-local Moraine producer";
+
+    Service = {
+      Type = "simple";
+      ExecStart = "${moraineService}/bin/moraine-service ${morainePackage}/bin/moraine ${moraineConfigPath}";
+      ExecStop = "${moraineControl} down";
+      Restart = "on-failure";
+      RestartSec = 5;
+    };
+
+    Install.WantedBy = [ "default.target" ];
+  };
 
   # installPackages is what creates the profile this handoff reads from. Ordered
   # only after reloadSystemd, the handoff ran while ~/.nix-profile was still a

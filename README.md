@@ -90,7 +90,7 @@ part of daily operation.
 
 The `workstation` Home Manager flake installs user tooling for the Debian LXC
 workstation: the .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, `jq`, `ripgrep`,
-`fd`, `fzf`, and Hermes. Hermes is installed from
+`fd`, `fzf`, Hermes, and Moraine. Hermes is installed from
 `github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
 credentials and runtime configuration stay in `~/.hermes`.
 
@@ -156,6 +156,33 @@ directly while developing dotfiles:
 ```bash
 home-manager build --flake /home/aperture/repos/dotfiles#workstation
 ```
+
+## Workstation Moraine
+
+The workstation profile pins one Moraine v0.7.3 release bundle and installs its
+matching CLI, ingest, monitor-compatibility alias, and MCP executables. There is
+intentionally no separate monitor unit; the unified MCP/backend executable owns
+the monitor HTTP listener as well as the MCP socket.
+
+Home Manager owns `~/.moraine/config.toml` as a read-only Nix-managed file.
+Persistent ingestion state, ClickHouse data, logs, sockets, and process state
+remain under `~/.moraine`. Do not use `moraine setup` or another config-writing
+command to mutate the managed file; change this module and apply a new Home
+Manager generation instead. The enabled Codex sources backfill and watch active
+sessions recursively and archived sessions in Codex's flat archive directory.
+Moraine's default built-in redaction runs before local storage.
+
+The single `moraine.service` user unit is the operator surface for the local
+stack. Upstream `moraine up` owns managed ClickHouse readiness, database
+migrations, ingest, and unified-backend startup. The foreground unit monitors
+aggregate Moraine health and restarts the complete stack on failure. Default
+Moraine topology keeps the HTTP listener on `127.0.0.1:8080` and its per-user
+MCP Unix socket at mode 0600; there is no non-loopback listener.
+
+The workstation profile does not manage `~/.codex/config.toml` or register a
+Codex MCP server. Moraine's local producer and query backend operate without a
+Codex MCP registration; that integration can be added later if the workstation
+needs Codex to query Moraine directly.
 
 ## Workstation Agent of Empires
 
