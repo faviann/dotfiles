@@ -73,18 +73,6 @@ in
     "$HOME/.local/bin"
   ];
 
-  programs.codex = {
-    enable = true;
-    package = null;
-    settings.mcp_servers.moraine = {
-      command = "${morainePackage}/bin/moraine";
-      args = [
-        "run"
-        "mcp"
-      ];
-    };
-  };
-
   home.file.${moraineConfigRelative}.text = moraineConfig;
 
   home.activation.removeLegacyAoeUnits = lib.hm.dag.entryBefore [ "writeBoundary" ] ''

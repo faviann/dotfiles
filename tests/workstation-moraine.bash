@@ -194,32 +194,23 @@ test_moraine_service_owns_and_restarts_the_upstream_stack() {
     || fail 'Moraine service runner does not start upstream before monitoring stack health'
 }
 
-test_codex_mcp_registration_is_declarative_and_uses_pinned_stdio() {
-  local codex
+test_moraine_leaves_user_codex_configuration_unmanaged() {
+  local boundary
 
-  codex="$(
-    rendered_json '.moraineCodex' \
+  boundary="$(
+    rendered_json '.moraineCodexBoundary' \
       "$REPO_ROOT#homeConfigurations.workstation.config" \
       --apply 'config: {
-        enabled = config.programs.codex.enable;
-        packageIsNull = config.programs.codex.package == null;
-        server = config.programs.codex.settings.mcp_servers.moraine;
-        serverNames = builtins.attrNames config.programs.codex.settings.mcp_servers;
-        configSource = toString config.home.file.".codex/config.toml".source;
-        hasImperativeActivation = config.home.activation ? configureMoraineCodexMcp;
+        managesConfig = config.home.file ? ".codex/config.toml";
+        hasRegistrationActivation = config.home.activation ? configureMoraineCodexMcp;
       }'
-  )" || fail 'could not render the declarative Moraine Codex MCP registration'
+  )" || fail 'could not render the Moraine Codex ownership boundary'
 
   jq -e '
-    (.enabled == true) and
-    (.packageIsNull == true) and
-    (.serverNames == ["moraine"]) and
-    (.server.command | test("^/nix/store/[^/]+-moraine-0\\.7\\.3/bin/moraine$")) and
-    (.server.args == ["run", "mcp"]) and
-    (.configSource | test("^/nix/store/")) and
-    (.hasImperativeActivation == false)
-  ' <<<"$codex" >/dev/null \
-    || fail 'Codex MCP is not one declarative pinned direct-stdio registration'
+    (.managesConfig == false) and
+    (.hasRegistrationActivation == false)
+  ' <<<"$boundary" >/dev/null \
+    || fail 'Moraine takes ownership of user-managed Codex configuration'
 }
 
 # shellcheck source=tests/lib/suite-dispatch.bash
@@ -230,7 +221,7 @@ readonly test_cases=(
   test_moraine_configures_active_and_archived_codex_sources_with_backfill
   test_moraine_config_keeps_redaction_and_the_default_local_topology
   test_moraine_service_owns_and_restarts_the_upstream_stack
-  test_codex_mcp_registration_is_declarative_and_uses_pinned_stdio
+  test_moraine_leaves_user_codex_configuration_unmanaged
 )
 
 suite_dispatch 'workstation-local Moraine producer' "$@"

@@ -179,9 +179,10 @@ aggregate Moraine health and restarts the complete stack on failure. Default
 Moraine topology keeps the HTTP listener on `127.0.0.1:8080` and its per-user
 MCP Unix socket at mode 0600; there is no non-loopback listener.
 
-Home Manager also owns Codex's direct stdio registration for the pinned
-`moraine run mcp` command. The launcher prefers the Moraine central server
-defined in `CONTEXT.md` when healthy and falls back to its embedded server.
+The workstation profile does not manage `~/.codex/config.toml` or register a
+Codex MCP server. Moraine's local producer and query backend operate without a
+Codex MCP registration; that integration can be added later if the workstation
+needs Codex to query Moraine directly.
 
 ## Workstation Agent of Empires
 

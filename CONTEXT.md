@@ -30,8 +30,13 @@ _Avoid_: Repository-local AFK workflow, bespoke launcher
 Owned by `workstation-setup`; canonical definition lives in homelab-iac's `CONTEXT.md`.
 _Avoid_: Home Manager generation check, local freshness algorithm
 
+**Workstation-local Moraine**:
+The v1 Moraine deployment whose ingestion, persistence, and query backend all
+run under the workstation user without depending on Overmind.
+_Avoid_: Shared Moraine, Overmind Moraine
+
 **Moraine central server**:
-Moraine's per-user local Unix-socket backend shared by direct stdio MCP launchers.
+Moraine's per-user local Unix-socket backend within Workstation-local Moraine.
 _Avoid_: Remote backend, central database
 
 ## Supported AFK workflow

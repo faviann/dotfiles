@@ -110,17 +110,9 @@
                 (builtins.attrNames services);
               service = services.moraine;
             };
-          moraineCodex = {
-            enabled = workstationHomeConfiguration.config.programs.codex.enable;
-            packageIsNull = workstationHomeConfiguration.config.programs.codex.package == null;
-            server = workstationHomeConfiguration.config.programs.codex.settings.mcp_servers.moraine;
-            serverNames = builtins.attrNames (
-              workstationHomeConfiguration.config.programs.codex.settings.mcp_servers
-            );
-            configSource = toString (
-              workstationHomeConfiguration.config.home.file.".codex/config.toml".source
-            );
-            hasImperativeActivation =
+          moraineCodexBoundary = {
+            managesConfig = workstationHomeConfiguration.config.home.file ? ".codex/config.toml";
+            hasRegistrationActivation =
               workstationHomeConfiguration.config.home.activation ? configureMoraineCodexMcp;
           };
           collieOriginSocket =
