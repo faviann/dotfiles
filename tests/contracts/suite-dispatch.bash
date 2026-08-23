@@ -81,7 +81,21 @@ expected_cases() {
         test_pre_activation_registry_failure_names_the_managed_component \
         test_post_activation_failure_retains_failure_without_rollback \
         test_activation_failure_is_recovered_by_a_full_rerun \
-        test_standalone_and_bundled_codex_remain_separate_on_update
+        test_standalone_and_bundled_codex_remain_separate_on_update \
+        test_outdated_bun_runtime_is_installed_before_the_harnesses \
+        test_missing_bun_runtime_is_reported_and_installed \
+        test_bun_archive_digest_mismatch_stops_before_the_harnesses_change \
+        test_bun_archive_matches_the_host_instruction_set \
+        test_harness_node_floor_above_the_profile_stops_before_mutation \
+        test_harness_bun_floor_above_the_latest_release_stops_before_mutation \
+        test_unparsable_engine_range_does_not_block_the_update \
+        test_engine_floor_refuses_a_direct_update_before_any_change \
+        test_current_bun_is_not_redownloaded \
+        test_bun_release_metadata_failure_is_a_failed_check \
+        test_bun_archive_download_failure_stops_before_the_harnesses_change \
+        test_abandoned_bun_work_directories_are_swept \
+        test_unreadable_engine_metadata_refuses_before_mutation \
+        test_absent_engine_declaration_does_not_block_the_update
       ;;
     workstation-agent-tools-bootstrap.bash)
       printf '%s\n' \
@@ -89,11 +103,11 @@ expected_cases() {
         test_complete_toolchain_is_not_refreshed_during_bootstrap \
         test_bootstrap_handoff_runs_after_the_profile_exists \
         test_updater_host_tools_are_reachable_from_the_bootstrap_handoff \
+        test_bootstrap_handoff_keeps_system_directories_for_systemctl \
         test_failed_install_fails_the_bootstrap_handoff
       ;;
     workstation-collie-forwarder.bash)
       printf '%s\n' \
-        test_workstation_profile_selects_bun_baseline_for_pre_avx2_cpu \
         test_collie_origin_socket_listens_on_the_portal_origin_port \
         test_collie_origin_socket_activates_with_normal_user_sockets \
         test_collie_origin_forwarder_connects_to_the_loopback_bridge \

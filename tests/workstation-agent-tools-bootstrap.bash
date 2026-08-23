@@ -44,6 +44,14 @@ run_activation() {
   local script_path="$home/bootstrap-agent-tools"
 
   activation_script >"$script_path"
+  if [[ "${TEST_ISOLATE_ACTIVATION_PATH:-0}" == "1" ]]; then
+    # The rendered PATH names the real profile by absolute path, so a probe for a
+    # tool this workstation happens to have would pass on host state instead of
+    # on the fixture. Tool-probe cases keep only the fixture's own bin.
+    # $HOME stays literal: the activation script expands it against the fixture.
+    # shellcheck disable=SC2016
+    sed -i 's#^export PATH=.*#export PATH="$HOME/.local/bin"#' "$script_path"
+  fi
   chmod +x "$script_path"
   env \
     HOME="$home" \
@@ -70,7 +78,7 @@ printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
 STUB
   chmod +x "$bin_dir/update-agent-tools"
 
-  run_activation "$test_dir" \
+  TEST_ISOLATE_ACTIVATION_PATH=1 run_activation "$test_dir" \
     || fail "fresh-workstation handoff exited nonzero"
 
   diff -u \
@@ -88,7 +96,7 @@ test_complete_toolchain_is_not_refreshed_during_bootstrap() {
   bin_dir="$test_dir/.local/bin"
 
   for command in \
-    aoe codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
+    aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
     make_stub "$bin_dir/$command"
   done
   printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
@@ -99,7 +107,7 @@ printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
 STUB
   chmod +x "$bin_dir/update-agent-tools"
 
-  run_activation "$test_dir" \
+  TEST_ISOLATE_ACTIVATION_PATH=1 run_activation "$test_dir" \
     || fail "complete-toolchain handoff exited nonzero"
 
   [[ ! -e "$test_dir/command-log" ]] \
@@ -112,11 +120,11 @@ test_missing_new_harnesses_are_repaired_by_the_bootstrap_handoff() {
   local missing_harness
   local test_dir
 
-  for missing_harness in opencode omp; do
+  for missing_harness in opencode omp bun; do
     test_dir="$(mktemp -d)"
     bin_dir="$test_dir/.local/bin"
     for command in \
-      aoe codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
+      aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
       if [[ "$command" != "$missing_harness" ]]; then
         make_stub "$bin_dir/$command"
       fi
@@ -129,7 +137,7 @@ printf 'update-agent-tools %s\n' "$*" >>"$COMMAND_LOG"
 STUB
     chmod +x "$bin_dir/update-agent-tools"
 
-    run_activation "$test_dir" \
+    TEST_ISOLATE_ACTIVATION_PATH=1 run_activation "$test_dir" \
       || fail "missing-$missing_harness bootstrap handoff exited nonzero"
     diff -u \
       <(printf 'update-agent-tools --yes\n') \
@@ -169,8 +177,8 @@ test_bootstrap_handoff_runs_after_the_profile_exists() {
 }
 
 # The updater's other dependencies come from the profile (npm) or Home Manager's
-# own activation PATH (jq, sed, date, mktemp); these two have no other source.
-readonly updater_host_tools=(flock curl)
+# own activation PATH (jq, sed, date, mktemp); these have no other source.
+readonly updater_host_tools=(flock curl unzip find)
 
 test_updater_host_tools_are_reachable_from_the_bootstrap_handoff() {
   local test_dir
@@ -195,6 +203,23 @@ STUB
     || fail "handoff ran the updater without $(cat "$test_dir/command-log.missing" 2>/dev/null || printf 'its host tools') on PATH"
 }
 
+# systemctl cannot be probed by running it: Home Manager's activation PATH
+# replaces the environment's own and drops the system directories, and no build
+# sandbox has a systemd to find. The rendering is the assertable part.
+test_bootstrap_handoff_keeps_system_directories_for_systemctl() {
+  local path_line
+
+  path_line="$(activation_script | grep '^export PATH=')" \
+    || fail "the bootstrap handoff no longer exports a PATH"
+
+  [[ "$path_line" == *':/usr/local/bin:/usr/bin:/bin"' ]] \
+    || fail "the handoff PATH lost the system directories systemctl comes from: $path_line"
+  # $PATH stays literal: this asserts the rendered text, not an expansion.
+  # shellcheck disable=SC2016
+  [[ "$path_line" == *'/bin:$PATH:/usr/local/bin'* ]] \
+    || fail "the system directories must come after everything the store supplies"
+}
+
 # shellcheck source=tests/lib/suite-dispatch.bash
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
@@ -204,6 +229,7 @@ readonly test_cases=(
   test_missing_new_harnesses_are_repaired_by_the_bootstrap_handoff
   test_bootstrap_handoff_runs_after_the_profile_exists
   test_updater_host_tools_are_reachable_from_the_bootstrap_handoff
+  test_bootstrap_handoff_keeps_system_directories_for_systemctl
   test_failed_install_fails_the_bootstrap_handoff
 )
 

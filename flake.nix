@@ -50,7 +50,9 @@
         pkgs.gnused
         pkgs.jq
         pkgs.nix
+        pkgs.unzip
         pkgs.util-linux
+        pkgs.zip
       ];
       behavioralTestSource = nixpkgs.lib.fileset.toSource {
         root = ./.;
@@ -75,19 +77,6 @@
       );
       workstationRenderedConfiguration = pkgs.writeText "workstation-rendered-configuration.json" (
         builtins.toJSON {
-          bunPackage =
-            let
-              package = builtins.head (
-                builtins.filter
-                  (package: (package.pname or package.name) == "bun-baseline")
-                  workstationHomeConfiguration.config.home.packages
-              );
-            in
-            {
-              pname = package.pname or package.name;
-              inherit (package) version;
-              srcUrl = package.src.url;
-            };
           dotnetSdkPackage =
             let
               package = builtins.head (

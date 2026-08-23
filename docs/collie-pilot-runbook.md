@@ -2,9 +2,11 @@
 
 This is the operator runbook and evidence shape for the Collie pilot on the
 workstation. Collie is installed through herdr, owns its generated service, and
-binds only to loopback. Dotfiles supplies Bun and the socket-activated
-`collie-origin-forwarder` from port 8788 to `127.0.0.1:8787`; it does not own
-Collie's plugin, configuration, state, service, or update lifecycle.
+binds only to loopback. Dotfiles supplies Bun through `update-agent-tools`,
+which installs it into `~/.local/bin` rather than the Nix profile, and the
+socket-activated `collie-origin-forwarder` from port 8788 to
+`127.0.0.1:8787`; it does not own Collie's plugin, configuration, state,
+service, or update lifecycle.
 
 ## Version record
 
@@ -348,7 +350,10 @@ claim when a command was not run.
 
 The following results were captured during the 2026-08-12 pilot. They are a
 compact record; retain the raw command output separately rather than placing
-secrets or large JSON responses in this repository.
+secrets or large JSON responses in this repository. The record is preserved as
+observed: the Bun row below names a Home Manager store path because that is
+where Bun came from at the time. It has since moved to `update-agent-tools`,
+as described at the top of this runbook.
 
 | Criterion | Outcome and evidence |
 | --- | --- |

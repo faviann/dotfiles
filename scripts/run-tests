@@ -37,12 +37,15 @@ readonly required_commands=(
   rm
   script
   sed
+  sha256sum
   sleep
   sort
   stat
   tail
   tr
+  unzip
   wc
+  zip
 )
 
 missing_commands=()
