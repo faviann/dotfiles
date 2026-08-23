@@ -3,6 +3,19 @@ set -euo pipefail
 
 EXPECTED_PREFIX="$HOME/.local"
 AOE_LATEST_RELEASE_URL="https://api.github.com/repos/njbrake/agent-of-empires/releases/latest"
+BUN_LATEST_RELEASE_URL="https://api.github.com/repos/oven-sh/bun/releases/latest"
+# Packages whose engines are compared against the runtimes this workstation
+# supplies. Bun is the updater's own; Node comes from the Home Manager profile.
+MANAGED_NPM_ENGINE_COMPONENTS=(
+  "Codex CLI (standalone)|@openai/codex"
+  "Claude Code CLI|@anthropic-ai/claude-code"
+  "Pi agent CLI|@earendil-works/pi-coding-agent"
+  "OpenCode CLI|opencode-ai"
+  "Oh My Pi CLI|@oh-my-pi/pi-coding-agent"
+  "codex-acp adapter|@agentclientprotocol/codex-acp"
+  "claude-agent-acp adapter|@agentclientprotocol/claude-agent-acp"
+  "pi-acp adapter|pi-acp"
+)
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 STATE_DIR="$STATE_HOME/update-agent-tools"
 STATE_FILE="$STATE_DIR/state.json"
@@ -231,6 +244,93 @@ wait_for_aoe_health() {
   return 1
 }
 
+bun_archive_name() {
+  # Bun's own npm installer never selects a baseline build, so a pre-AVX2 host
+  # would get an AVX2 binary that dies on its first instruction. Choosing the
+  # archive here is what lets the updater own Bun at all.
+  if grep -qw avx2 "${UPDATE_AGENT_TOOLS_CPUINFO:-/proc/cpuinfo}" 2>/dev/null; then
+    printf 'bun-linux-x64.zip\n'
+  else
+    printf 'bun-linux-x64-baseline.zip\n'
+  fi
+}
+
+resolve_bun_release() {
+  local archive
+  local release
+
+  archive="$(bun_archive_name)"
+  release="$(curl -fsSL "$BUN_LATEST_RELEASE_URL")" || return 1
+  jq -er --arg archive "$archive" '
+    (.tag_name // "" | sub("^bun-v"; "")) as $version
+    | (.assets // [] | map(select(.name == $archive)) | first) as $asset
+    | if ($version | test("^[0-9]+[.][0-9]+[.][0-9]+$"))
+        and $asset != null
+        and (($asset.browser_download_url // "") | length) > 0
+        and (($asset.digest // "") | test("^sha256:[0-9a-f]{64}$"))
+      then {
+        version: $version,
+        url: $asset.browser_download_url,
+        digest: ($asset.digest | sub("^sha256:"; ""))
+      }
+      else error("unusable bun release") end
+  ' <<<"$release"
+}
+
+bun_installed_version() {
+  local version
+
+  [[ "$(command -v bun || true)" == "$EXPECTED_PREFIX/bin/bun" ]] \
+    || { printf 'missing\n'; return 0; }
+  version="$(bun --version 2>/dev/null)" || { printf 'missing\n'; return 0; }
+  [[ -n "$version" ]] || { printf 'missing\n'; return 0; }
+  printf '%s\n' "$version"
+}
+
+bun_install_failed() {
+  local work_dir="$1"
+  local reason="$2"
+
+  rm -rf "$work_dir" "$EXPECTED_PREFIX/bin/.bun.new"
+  fail "installation failed: Bun runtime ($reason)"
+}
+
+install_bun_runtime() {
+  local release="$1"
+  local version
+  local url
+  local digest
+  local work_dir
+  local archive
+  local extracted
+  local observed
+
+  version="$(jq -er '.version' <<<"$release")" || fail "installation failed: Bun runtime"
+  url="$(jq -er '.url' <<<"$release")" || fail "installation failed: Bun runtime"
+  digest="$(jq -er '.digest' <<<"$release")" || fail "installation failed: Bun runtime"
+
+  work_dir="$(mktemp -d "$STATE_DIR/bun.XXXXXX")" \
+    || fail "installation failed: Bun runtime"
+  archive="$work_dir/bun.zip"
+
+  curl -fsSL -o "$archive" "$url" || bun_install_failed "$work_dir" "$url"
+  observed="$(sha256sum "$archive" | cut -d ' ' -f 1)" \
+    || bun_install_failed "$work_dir" "checksum"
+  [[ "$observed" == "$digest" ]] \
+    || bun_install_failed "$work_dir" "archive digest mismatch"
+  unzip -q -o -d "$work_dir" "$archive" || bun_install_failed "$work_dir" "archive"
+  extracted="$(find "$work_dir" -mindepth 2 -type f -name bun -print -quit)"
+  [[ -n "$extracted" ]] || bun_install_failed "$work_dir" "archive layout"
+  # Staged then renamed: replacing the path rather than writing through it keeps
+  # a bun that is mid-run on its original inode.
+  install -D -m 755 "$extracted" "$EXPECTED_PREFIX/bin/.bun.new" \
+    || bun_install_failed "$work_dir" "staging"
+  mv -f "$EXPECTED_PREFIX/bin/.bun.new" "$EXPECTED_PREFIX/bin/bun" \
+    || bun_install_failed "$work_dir" "replacement"
+  ln -sfn bun "$EXPECTED_PREFIX/bin/bunx" || bun_install_failed "$work_dir" "bunx"
+  rm -rf "$work_dir"
+}
+
 install_npm_component() {
   local component="$1"
   local package="$2"
@@ -266,10 +366,96 @@ require_stable_version() {
   is_stable_version "$version" || check_failure_component "$component"
 }
 
+normalize_version() {
+  local -a parts
+
+  IFS=. read -r -a parts <<<"$1"
+  printf '%s.%s.%s\n' "${parts[0]:-0}" "${parts[1]:-0}" "${parts[2]:-0}"
+}
+
+engine_floor() {
+  # Only `>=X[.Y[.Z]]` is understood. An unrecognized range yields no floor, so a
+  # range syntax this updater has never seen cannot wedge the whole toolchain.
+  local range="$1"
+
+  [[ "$range" =~ ^\>=[[:space:]]*([0-9]+(\.[0-9]+){0,2})$ ]] || return 0
+  normalize_version "${BASH_REMATCH[1]}"
+}
+
+version_satisfies_floor() {
+  local version
+  local floor="$2"
+
+  version="$(normalize_version "$1")"
+  [[ "$(printf '%s\n%s\n' "$version" "$floor" | sort -V | head -n 1)" == "$floor" ]]
+}
+
+node_installed_version() {
+  local version
+
+  version="$(node --version 2>/dev/null)" || return 1
+  version="${version#v}"
+  [[ -n "$version" ]] || return 1
+  printf '%s\n' "$version"
+}
+
+# Compares each harness's declared engines against the runtimes this update will
+# leave behind: the Bun about to be installed, and the Node the Home Manager
+# profile already supplies. Runs before anything is replaced, so an unsatisfiable
+# floor refuses the update instead of stranding the harnesses on a runtime that
+# cannot start them.
+check_runtime_engines() {
+  local bun_target="$1"
+  local entry
+  local component
+  local package
+  local engines
+  local runtime
+  local range
+  local floor
+  local version
+  local remedy
+  local runtime_component
+
+  for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
+    component="${entry%%|*}"
+    package="${entry#*|}"
+    engines="$(npm view "$package@latest" engines --json)" \
+      || { check_failure_component "$component"; return 1; }
+    [[ -n "$engines" ]] || continue
+    jq -e 'type == "object"' <<<"$engines" >/dev/null 2>&1 || continue
+    for runtime in bun node; do
+      range="$(jq -r --arg runtime "$runtime" '.[$runtime] // empty' <<<"$engines")" \
+        || { check_failure_component "$component"; return 1; }
+      [[ -n "$range" ]] || continue
+      floor="$(engine_floor "$range")"
+      [[ -n "$floor" ]] || continue
+      if [[ "$runtime" == "bun" ]]; then
+        runtime_component="Bun runtime"
+        version="$bun_target"
+        remedy="no Bun release satisfies it yet"
+      else
+        runtime_component="Node runtime"
+        version="$(node_installed_version)" \
+          || { check_failure_component "$runtime_component"; return 1; }
+        remedy="update the nixpkgs flake input to raise the profile's Node"
+      fi
+      version_satisfies_floor "$version" "$floor" && continue
+      # The component string is the only failure detail that reaches the
+      # operator, so the whole diagnosis travels in it.
+      check_failure_component \
+        "$runtime_component ($component needs $runtime $range, found $version; $remedy)"
+      return 1
+    done
+  done
+}
+
 check_toolchain() {
   local installed
   local aoe_current="missing"
   local aoe_latest
+  local bun_release
+  local bun_latest
   local bundled_codex_range
   local bundled_codex_versions
   local bundled_codex_latest
@@ -286,6 +472,12 @@ check_toolchain() {
     || { check_failure_component "AoE"; return 1; }
   command -v jq >/dev/null 2>&1 \
     || { check_failure_component "npm package inventory"; return 1; }
+
+  bun_release="$(resolve_bun_release)" \
+    || { check_failure_component "Bun runtime"; return 1; }
+  bun_latest="$(jq -er '.version' <<<"$bun_release")" \
+    || { check_failure_component "Bun runtime"; return 1; }
+  require_stable_version "Bun runtime" "$bun_latest" || return 1
 
   if command -v aoe >/dev/null 2>&1; then
     aoe_current="$(aoe --version)" \
@@ -356,6 +548,11 @@ check_toolchain() {
     || return 1
   require_stable_version "pi-acp adapter" "$pi_acp_latest" || return 1
 
+  check_runtime_engines "$bun_latest" || return 1
+
+  check_component "Bun runtime" \
+    "$(bun_installed_version)" \
+    "$bun_latest"
   check_component "AoE" \
     "$aoe_current" \
     "$aoe_latest"
@@ -579,6 +776,12 @@ if [[ "$update_if_needed" == true ]]; then
   write_activation_state "" "maintenance" "agent-tool update"
 fi
 
+# Bun first: it is the runtime the npm harnesses execute under, so installing it
+# ahead of them is what keeps a harness from landing on a Bun too old to run it.
+bun_release="$(resolve_bun_release)" \
+  || fail "installation failed: Bun runtime (release metadata)"
+install_bun_runtime "$bun_release"
+
 if ! aoe update --yes; then
   fail "installation failed: AoE"
 fi
@@ -604,7 +807,7 @@ install_npm_component "pi-acp adapter" "pi-acp@latest"
 hash -r 2>/dev/null || true
 
 for binary in \
-  aoe codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
+  aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
   expected_path="$EXPECTED_PREFIX/bin/$binary"
   actual_path="$(command -v "$binary" || true)"
   test "$actual_path" = "$expected_path" \

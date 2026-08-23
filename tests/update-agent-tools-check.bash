@@ -14,6 +14,12 @@ fail() {
   exit 1
 }
 
+# Engine declarations the npm registry serves by default: one Bun floor the
+# installed release clears, one Node floor the profile clears.
+DEFAULT_OMP_ENGINES='{"bun":">=1.0.0"}'
+DEFAULT_PI_ENGINES='{"node":">=20.0.0"}'
+readonly DEFAULT_OMP_ENGINES DEFAULT_PI_ENGINES
+
 resolved_command_path() {
   local command_name
   local command_path
@@ -33,7 +39,8 @@ resolved_command_path() {
 }
 
 COMMAND_PATH="$(resolved_command_path \
-  bash chmod flock grep jq mkdir mktemp mv rm sed tail)"
+  bash chmod cut find flock grep head install jq ln mkdir mktemp mv rm sed \
+  sha256sum sort tail unzip)"
 readonly COMMAND_PATH
 
 make_stubs() {
@@ -127,6 +134,38 @@ if [[ "$*" == "-fsSL https://api.github.com/repos/njbrake/agent-of-empires/relea
     exit 22
   fi
   printf '{"tag_name":"v%s"}\n' "$AOE_LATEST"
+  exit 0
+fi
+
+if [[ "$*" == "-fsSL https://api.github.com/repos/oven-sh/bun/releases/latest" ]]; then
+  printf 'curl bun release\n' >>"$QUERY_LOG"
+  if [[ "${BUN_RELEASE_FAIL:-0}" == "1" ]]; then
+    printf 'bun release registry unavailable\n' >&2
+    exit 22
+  fi
+  if [[ -n "${BUN_RELEASE_JSON:-}" ]]; then
+    printf '%s\n' "$BUN_RELEASE_JSON"
+    exit 0
+  fi
+  bun_digest="${BUN_DIGEST_OVERRIDE:-sha256:$(sha256sum "$HOME/bun-archive/bun.zip" | cut -d ' ' -f 1)}"
+  printf '{"tag_name":"bun-v%s","assets":[' "$BUN_LATEST"
+  printf '{"name":"bun-linux-x64-baseline.zip","browser_download_url":"https://example.invalid/baseline.zip","digest":"%s"},' \
+    "$bun_digest"
+  printf '{"name":"bun-linux-x64.zip","browser_download_url":"https://example.invalid/avx2.zip","digest":"%s"}' \
+    "$bun_digest"
+  printf ']}\n'
+  exit 0
+fi
+
+if [[ "$1" == "-fsSL" && "$2" == "-o" ]]; then
+  printf 'curl bun archive %s\n' "$4" >>"$QUERY_LOG"
+  printf 'bun install %s\n' "$4" >>"$COMMAND_LOG"
+  if [[ "${BUN_ARCHIVE_FAIL:-0}" == "1" ]]; then
+    printf 'bun archive unavailable\n' >&2
+    exit 22
+  fi
+  cp "$HOME/bun-archive/bun.zip" "$3"
+  : >"$HOME/bun-installed"
   exit 0
 fi
 
@@ -231,6 +270,16 @@ if [[ "$*" == "view @openai/codex@$BUNDLED_CODEX_RANGE version --json" ]]; then
   exit 0
 fi
 
+if [[ "$1" == "view" && "$3" == "engines" && "$4" == "--json" ]]; then
+  case "$2" in
+    '@oh-my-pi/pi-coding-agent@latest') engines="$OMP_ENGINES" ;;
+    '@earendil-works/pi-coding-agent@latest') engines="$PI_ENGINES" ;;
+    *) engines="$OTHER_ENGINES" ;;
+  esac
+  [[ -z "$engines" ]] || printf '%s\n' "$engines"
+  exit 0
+fi
+
 if [[ "$1" == "view" && "$3" == "version" ]]; then
   printf 'npm %s\n' "$*" >>"$QUERY_LOG"
   case "$2" in
@@ -318,9 +367,52 @@ printf 'date %s\n' "$*" >>"$COMMAND_LOG"
 exec "$TEST_REAL_DATE" "$@"
 STUB
 
+  printf '#!%s\n' "$REAL_BASH" >"$stub_dir/node"
+  cat >>"$stub_dir/node" <<'STUB'
+set -euo pipefail
+printf 'v%s\n' "$NODE_VERSION"
+STUB
+
+  make_bun_archive "$home"
+  # An ordinary workstation already has a Bun; tests that need it absent remove
+  # it, the way the transition off the Nix-provided one leaves the host.
+  cp "$home/bun-archive/bun-linux-x64-baseline/bun" "$home/.local/bin/bun"
+  chmod +x "$home/.local/bin/bun"
+  ln -sfn bun "$home/.local/bin/bunx"
+
   chmod +x "$home/.local/bin/aoe" "$stub_dir/curl" "$stub_dir/npm" \
-    "$stub_dir/systemctl" "$stub_dir/sleep" "$stub_dir/date"
+    "$stub_dir/systemctl" "$stub_dir/sleep" "$stub_dir/date" "$stub_dir/node"
 }
+
+# The updater unpacks whatever the release serves, so the fixture has to be a
+# real archive laid out the way Bun ships one: <archive-root>/bun.
+make_bun_archive() {
+  local home="$1"
+  local root="$home/bun-archive"
+
+  mkdir -p "$root/bun-linux-x64-baseline"
+  printf '#!%s\n' "$REAL_BASH" >"$root/bun-linux-x64-baseline/bun"
+  cat >>"$root/bun-linux-x64-baseline/bun" <<'STUB'
+set -euo pipefail
+
+if [[ "$*" == "--version" ]]; then
+  if [[ -e "$HOME/bun-installed" ]]; then
+    printf '%s\n' "$BUN_LATEST"
+  else
+    printf '%s\n' "$BUN_CURRENT"
+  fi
+  exit 0
+fi
+
+printf 'bun %s\n' "$*" >>"$COMMAND_LOG"
+exit 0
+STUB
+  chmod +x "$root/bun-linux-x64-baseline/bun"
+  ( cd "$root" && zip --quiet --recurse-paths bun.zip bun-linux-x64-baseline )
+  printf 'flags : fpu sse2 sse4_2 bmi1\n' >"$home/cpuinfo-baseline"
+  printf 'flags : fpu sse2 sse4_2 bmi1 avx2\n' >"$home/cpuinfo-avx2"
+}
+
 
 execute_tool() {
   local stdout_file="$1"
@@ -369,6 +461,17 @@ run_tool() {
     ACP_RESTART_FAIL="${ACP_RESTART_FAIL:-0}" \
     SYSTEMCTL_RESTART_FAIL="${SYSTEMCTL_RESTART_FAIL:-0}" \
     SYSTEMCTL_INACTIVE="${SYSTEMCTL_INACTIVE:-0}" \
+    BUN_CURRENT="${BUN_CURRENT:-1.4.0}" \
+    BUN_LATEST="${BUN_LATEST:-1.4.0}" \
+    BUN_RELEASE_FAIL="${BUN_RELEASE_FAIL:-0}" \
+    BUN_RELEASE_JSON="${BUN_RELEASE_JSON:-}" \
+    BUN_ARCHIVE_FAIL="${BUN_ARCHIVE_FAIL:-0}" \
+    BUN_DIGEST_OVERRIDE="${BUN_DIGEST_OVERRIDE:-}" \
+    NODE_VERSION="${NODE_VERSION:-24.14.1}" \
+    OMP_ENGINES="${OMP_ENGINES-$DEFAULT_OMP_ENGINES}" \
+    PI_ENGINES="${PI_ENGINES-$DEFAULT_PI_ENGINES}" \
+    OTHER_ENGINES="${OTHER_ENGINES-}" \
+    UPDATE_AGENT_TOOLS_CPUINFO="${UPDATE_AGENT_TOOLS_CPUINFO:-$home/cpuinfo-baseline}" \
     AOE_CURRENT="${AOE_CURRENT:-1.2.3}" \
     AOE_LATEST="${AOE_LATEST:-1.2.3}" \
     CODEX_CURRENT="${CODEX_CURRENT:-2.3.4}" \
@@ -530,7 +633,7 @@ test_machine_status_reports_unresolved_activation_failure_as_maintenance_needed(
     || fail "activation-failed machine status exited $status instead of $CHECK_STATUS_UPDATES_AVAILABLE"
   [[ ! -s "$test_dir/stdout" && ! -s "$test_dir/stderr" ]] \
     || fail "activation-failed machine status wrote output"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 10 ]] \
     || fail "activation-failed machine status did not perform fresh discovery"
   jq -e '
     .last_successful_check == "2026-07-14T00:00:00Z"
@@ -629,7 +732,7 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
   assert_harness_versions_checked "$test_dir/command-log"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
     || fail "outdated conditional update did not activate the whole toolchain"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 18 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 22 ]] \
     || fail "outdated conditional update did not perform discovery and verification"
   discovery_line="$(grep -n '^npm view @openai/codex@latest version$' \
     "$test_dir/command-log" | head -n 1 | cut -d: -f1)"
@@ -653,7 +756,7 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
     || fail "post-update cached freshness check failed: $(<"$test_dir/after-stderr")"
   [[ ! -s "$test_dir/after-stdout" && ! -s "$test_dir/after-stderr" ]] \
     || fail "post-update cached freshness check replayed a stale update notice"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 18 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 22 ]] \
     || fail "post-update not-due freshness check queried registries"
 }
 
@@ -673,7 +776,7 @@ test_conditional_update_requires_yes_for_unattended_acp_disruption() {
     <(printf 'update-agent-tools: 1 running ACP session would be disrupted; rerun workstation-update --yes to authorize replacement\n') \
     "$test_dir/stderr" \
     || fail "unattended conditional refusal was not actionable"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 10 ]] \
     || fail "unattended conditional refusal bypassed fresh discovery"
   if grep -Eq '^(aoe update|aoe acp restart|npm install|systemctl )' \
     "$test_dir/command-log"; then
@@ -695,7 +798,7 @@ test_conditional_update_yes_authorizes_only_acp_disruption() {
     run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed --yes \
     || fail "--yes conditional update failed: $(<"$test_dir/stderr")"
 
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 18 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 22 ]] \
     || fail "--yes conditional update bypassed discovery or verification"
   assert_complete_npm_refresh "$test_dir/command-log"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
@@ -757,7 +860,7 @@ test_conditional_update_retries_a_current_toolchain_after_activation_failure() {
   [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
     "$test_dir/command-log")" -eq 2 ]] \
     || fail "conditional recovery did not retry activation"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 36 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 44 ]] \
     || fail "conditional recovery did not freshly discover and verify both attempts"
   jq -e '
     .last_successful_check == "2026-07-14T01:00:00Z"
@@ -808,7 +911,7 @@ test_conditional_update_retries_after_pre_activation_failure_makes_versions_curr
   [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
     "$test_dir/command-log")" -eq 1 ]] \
     || fail "pre-activation recovery did not activate exactly once after verification passed"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 36 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 44 ]] \
     || fail "pre-activation recovery did not freshly discover and verify both attempts"
   jq -e '
     .last_successful_check == "2026-07-14T01:00:00Z"
@@ -865,13 +968,13 @@ test_due_check_runs_once_per_success_interval() {
   fi
   [[ "$(<"$test_dir/stdout-1")" == $'AoE: 1.2.2 -> 1.2.3\nRun: update-agent-tools' ]] \
     || fail "initial due check did not report the current result"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 10 ]] \
     || fail "initial due check did not perform all release queries"
 
   UPDATE_AGENT_TOOLS_NOW="2026-07-15T09:59:59Z" \
     run_tool "$test_dir" "$test_dir/stdout-2" "$test_dir/stderr-2" --check-if-due \
     || fail "not-yet-due check exited nonzero: $(<"$test_dir/stderr-2")"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 10 ]] \
     || fail "not-yet-due check queried a registry or release"
   [[ "$(<"$test_dir/stdout-2")" == $'AoE: 1.2.2 -> 1.2.3\nRun: update-agent-tools' ]] \
     || fail "not-yet-due check did not reuse the cached result"
@@ -879,7 +982,7 @@ test_due_check_runs_once_per_success_interval() {
   UPDATE_AGENT_TOOLS_NOW="2026-07-15T10:00:00Z" \
     run_tool "$test_dir" "$test_dir/stdout-3" "$test_dir/stderr-3" --check-if-due \
     || fail "due-again check exited nonzero: $(<"$test_dir/stderr-3")"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 18 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 20 ]] \
     || fail "due-again check did not perform fresh release queries"
 }
 
@@ -902,7 +1005,7 @@ test_internal_freshness_interface_reuses_cache_without_a_subordinate_action() {
     || fail 'internal freshness interface exposed a subordinate action'
   [[ ! -s "$test_dir/stderr" ]] \
     || fail "internal freshness interface wrote stderr: $(<"$test_dir/stderr")"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 10 ]] \
     || fail 'internal freshness interface bypassed the successful cache interval'
 }
 
@@ -1062,7 +1165,7 @@ test_concurrent_due_checks_are_serialized() {
   wait "$first_pid" || fail "first concurrent check exited nonzero"
   wait "$second_pid" || fail "second concurrent check exited nonzero"
 
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 9 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 10 ]] \
     || fail "concurrent due checks performed duplicate release queries"
   jq -e '.check_status == "success"' "$state_dir/state.json" >/dev/null \
     || fail "concurrent checks left invalid state"
@@ -1137,7 +1240,7 @@ test_failed_check_preserves_cache_and_retries_after_one_hour() {
   UPDATE_AGENT_TOOLS_NOW="2026-07-15T10:59:59Z" \
     run_tool "$test_dir" "$test_dir/stdout-3" "$test_dir/stderr-3" --check-if-due \
     || fail "pre-retry check exited nonzero"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 10 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 12 ]] \
     || fail "pre-retry check queried a registry or release"
   [[ ! -s "$test_dir/stdout-3" ]] \
     || fail "pre-retry check presented cached output as current"
@@ -1147,7 +1250,7 @@ test_failed_check_preserves_cache_and_retries_after_one_hour() {
   UPDATE_AGENT_TOOLS_NOW="2026-07-15T11:00:00Z" \
     run_tool "$test_dir" "$test_dir/stdout-4" "$test_dir/stderr-4" --check-if-due \
     || fail "one-hour retry exited nonzero: $(<"$test_dir/stderr-4")"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 19 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 22 ]] \
     || fail "one-hour retry did not perform fresh release queries"
 }
 
@@ -2082,6 +2185,159 @@ test_nested_codex_ignores_compatible_prereleases() {
     || fail "stable nested Codex check wrote stderr: $(<"$test_dir/stderr")"
 }
 
+test_outdated_bun_runtime_is_installed_before_the_harnesses() {
+  local bun_line
+  local npm_line
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  BUN_CURRENT="1.3.13" BUN_LATEST="1.4.0" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed \
+    || fail "outdated Bun update failed: $(<"$test_dir/stderr")"
+
+  grep -Fx 'bun install https://example.invalid/baseline.zip' \
+    "$test_dir/command-log" >/dev/null \
+    || fail "outdated Bun was not installed"
+  bun_line="$(grep -n '^bun install ' "$test_dir/command-log" \
+    | head -n 1 | cut -d: -f1)"
+  npm_line="$(grep -n '^npm install --global ' "$test_dir/command-log" \
+    | head -n 1 | cut -d: -f1)"
+  [[ "$bun_line" -lt "$npm_line" ]] \
+    || fail "Bun was installed after the harnesses that run under it"
+  [[ "$(HOME="$test_dir" BUN_CURRENT="1.3.13" BUN_LATEST="1.4.0" \
+    "$test_dir/.local/bin/bun" --version)" == "1.4.0" ]] \
+    || fail "installed Bun did not replace the outdated one"
+  [[ "$(readlink "$test_dir/.local/bin/bunx")" == "bun" ]] \
+    || fail "installed Bun did not provide bunx"
+}
+
+test_missing_bun_runtime_is_reported_and_installed() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  rm -f "$test_dir/.local/bin/bun" "$test_dir/.local/bin/bunx"
+
+  run_check "$test_dir" "$test_dir/stdout" "$test_dir/stderr" \
+    || fail "check with a missing Bun failed: $(<"$test_dir/stderr")"
+  diff -u \
+    <(printf 'Bun runtime: missing -> 1.4.0\nRun: update-agent-tools\n') \
+    "$test_dir/stdout" \
+    || fail "missing Bun was not reported as a component"
+
+  run_tool "$test_dir" "$test_dir/update-stdout" "$test_dir/update-stderr" \
+    --update-if-needed \
+    || fail "update with a missing Bun failed: $(<"$test_dir/update-stderr")"
+  [[ -x "$test_dir/.local/bin/bun" ]] \
+    || fail "update did not install the missing Bun"
+}
+
+test_bun_archive_digest_mismatch_stops_before_the_harnesses_change() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if BUN_DIGEST_OVERRIDE="sha256:$(printf '0%.0s' {1..64})" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes; then
+    fail "a mismatched Bun archive digest was accepted"
+  fi
+
+  diff -u \
+    <(printf 'update-agent-tools: installation failed: Bun runtime (archive digest mismatch)\n') \
+    "$test_dir/stderr" \
+    || fail "digest mismatch was not reported as an installation failure"
+  if grep -Eq '^(npm install|systemctl )' "$test_dir/command-log"; then
+    fail "digest mismatch still refreshed the harnesses"
+  fi
+  [[ ! -e "$test_dir/.local/bin/.bun.new" ]] \
+    || fail "digest mismatch left a staged Bun behind"
+}
+
+test_bun_archive_matches_the_host_instruction_set() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "pre-AVX2 update failed: $(<"$test_dir/stderr")"
+  grep -Fx 'curl bun archive https://example.invalid/baseline.zip' \
+    "$test_dir/query-log" >/dev/null \
+    || fail "a pre-AVX2 host did not receive the baseline Bun archive"
+
+  : >"$test_dir/query-log"
+  UPDATE_AGENT_TOOLS_CPUINFO="$test_dir/cpuinfo-avx2" \
+    run_tool "$test_dir" "$test_dir/avx2-stdout" "$test_dir/avx2-stderr" --yes \
+    || fail "AVX2 update failed: $(<"$test_dir/avx2-stderr")"
+  grep -Fx 'curl bun archive https://example.invalid/avx2.zip' \
+    "$test_dir/query-log" >/dev/null \
+    || fail "an AVX2 host did not receive the standard Bun archive"
+}
+
+test_harness_node_floor_above_the_profile_stops_before_mutation() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if PI_ENGINES='{"node":">=99.0.0"}' NODE_VERSION="24.14.1" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed; then
+    fail "an unsatisfiable Node floor was accepted"
+  fi
+
+  grep -Fq "discovery phase failed: Node runtime (Pi agent CLI needs node >=99.0.0, found 24.14.1; update the nixpkgs flake input to raise the profile's Node)" \
+    "$test_dir/stderr" \
+    || fail "unsatisfiable Node floor was not explained: $(<"$test_dir/stderr")"
+  if grep -Eq '^(bun install|npm install|aoe update|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "unsatisfiable Node floor still mutated the toolchain"
+  fi
+}
+
+test_harness_bun_floor_above_the_latest_release_stops_before_mutation() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if OMP_ENGINES='{"bun":">=99.0.0"}' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed; then
+    fail "a Bun floor no release satisfies was accepted"
+  fi
+
+  grep -Fq 'discovery phase failed: Bun runtime (Oh My Pi CLI needs bun >=99.0.0, found 1.4.0; no Bun release satisfies it yet)' \
+    "$test_dir/stderr" \
+    || fail "unsatisfiable Bun floor was not explained: $(<"$test_dir/stderr")"
+  if grep -Eq '^(bun install|npm install|aoe update|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "unsatisfiable Bun floor still mutated the toolchain"
+  fi
+}
+
+# A floor the updater cannot parse must not become a refusal: an unreadable range
+# is the registry's novelty, not evidence that the runtime is too old.
+test_unparsable_engine_range_does_not_block_the_update() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  OMP_ENGINES='{"bun":"^99.0.0"}' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "an unparsable engine range blocked the update: $(<"$test_dir/stderr")"
+  assert_complete_npm_refresh "$test_dir/command-log"
+}
+
 # shellcheck source=tests/lib/suite-dispatch.bash
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
@@ -2138,6 +2394,13 @@ readonly test_cases=(
   test_post_activation_failure_retains_failure_without_rollback
   test_activation_failure_is_recovered_by_a_full_rerun
   test_standalone_and_bundled_codex_remain_separate_on_update
+  test_outdated_bun_runtime_is_installed_before_the_harnesses
+  test_missing_bun_runtime_is_reported_and_installed
+  test_bun_archive_digest_mismatch_stops_before_the_harnesses_change
+  test_bun_archive_matches_the_host_instruction_set
+  test_harness_node_floor_above_the_profile_stops_before_mutation
+  test_harness_bun_floor_above_the_latest_release_stops_before_mutation
+  test_unparsable_engine_range_does_not_block_the_update
 )
 
 suite_dispatch 'update-agent-tools --check' "$@"

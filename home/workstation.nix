@@ -3,19 +3,7 @@
 let
   # Host tools update-agent-tools shells out to that neither home.packages nor
   # Home Manager's activation PATH provides.
-  updaterHostTools = lib.makeBinPath [ pkgs.util-linux pkgs.curl ];
-  # Pinned ahead of nixpkgs: the Oh My Pi CLI (omp) refuses to start on Bun
-  # older than 1.3.14 and nixos-unstable still ships 1.3.13. The baseline
-  # archive is what keeps the pre-AVX2 Xeon workstation able to run Bun at all.
-  bunVersion = "1.4.0";
-  bunBaseline = pkgs.bun.overrideAttrs (_: {
-    pname = "bun-baseline";
-    version = bunVersion;
-    src = pkgs.fetchurl {
-      url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-linux-x64-baseline.zip";
-      hash = "sha256-GE+0WV8NQBohfPfHjBvEMLqDMU2reouUgFurv3+nCX8=";
-    };
-  });
+  updaterHostTools = lib.makeBinPath [ pkgs.util-linux pkgs.curl pkgs.unzip ];
 in
 {
   home.username = "faviann";
@@ -25,7 +13,6 @@ in
   programs.home-manager.enable = true;
 
   home.packages = with pkgs; [
-    bunBaseline
     dotnetSdk
     nodejs
     uv
@@ -58,13 +45,17 @@ in
     lib.hm.dag.entryAfter [ "reloadSystemd" "installPackages" ] ''
       # Activation runs with a curated store-only PATH holding just coreutils and
       # friends, so system directories are absent. The updater's remaining host
-      # tools — flock for its lock, curl for the AoE release check — come from
-      # the store rather than from whatever the host happens to install.
+      # tools — flock for its lock, curl for the AoE release check, unzip for the
+      # Bun archive — come from the store rather than from whatever the host
+      # happens to install.
       export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH"
 
+      # bun is listed because the updater owns it: nixpkgs lags Bun releases badly
+      # enough that a harness engine floor can outrun it, so a switch that finds
+      # no bun must hand off rather than leave the harnesses without a runtime.
       _agent_tools_missing=false
       for _agent_tool in \
-        aoe codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
+        aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
         if ! command -v "$_agent_tool" >/dev/null 2>&1; then
           _agent_tools_missing=true
           break
