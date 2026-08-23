@@ -43,6 +43,13 @@ let
     glob = "~/.codex/archived_sessions/*.jsonl"
     watch_root = "~/.codex/archived_sessions"
 
+    [[ingest.sources]]
+    name = "claude"
+    harness = "claude-code"
+    enabled = true
+    glob = "~/.claude/projects/**/*.jsonl"
+    watch_root = "~/.claude/projects"
+
     [runtime]
     root_dir = "${moraineRoot}"
     service_bin_dir = "${morainePackage}/bin"
@@ -88,7 +95,10 @@ in
   # foreground wrapper keeps this unit alive only while that complete stack is
   # healthy, so one restart policy accurately represents the operator surface.
   systemd.user.services.moraine = {
-    Unit.Description = "Workstation-local Moraine producer";
+    Unit = {
+      Description = "Workstation-local Moraine producer";
+      X-Restart-Triggers = [ config.home.file.${moraineConfigRelative}.source ];
+    };
 
     Service = {
       Type = "simple";

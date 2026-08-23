@@ -132,10 +132,10 @@ expected_cases() {
     workstation-moraine.bash)
       printf '%s\n' \
         test_moraine_profile_uses_one_integrity_pinned_release_bundle \
-        test_moraine_configures_active_and_archived_codex_sources_with_backfill \
+        test_moraine_configures_codex_and_claude_sources_with_backfill \
         test_moraine_config_keeps_redaction_and_the_default_local_topology \
         test_moraine_service_owns_and_restarts_the_upstream_stack \
-        test_codex_mcp_registration_is_declarative_and_uses_pinned_stdio
+        test_moraine_leaves_user_codex_configuration_unmanaged
       ;;
     workstation-skills-bootstrap.bash)
       printf '%s\n' \
