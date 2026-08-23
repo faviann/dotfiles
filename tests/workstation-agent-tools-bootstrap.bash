@@ -177,8 +177,8 @@ test_bootstrap_handoff_runs_after_the_profile_exists() {
 }
 
 # The updater's other dependencies come from the profile (npm) or Home Manager's
-# own activation PATH (jq, sed, date, mktemp); these two have no other source.
-readonly updater_host_tools=(flock curl unzip)
+# own activation PATH (jq, sed, date, mktemp); these have no other source.
+readonly updater_host_tools=(flock curl unzip find)
 
 test_updater_host_tools_are_reachable_from_the_bootstrap_handoff() {
   local test_dir
@@ -203,6 +203,23 @@ STUB
     || fail "handoff ran the updater without $(cat "$test_dir/command-log.missing" 2>/dev/null || printf 'its host tools') on PATH"
 }
 
+# systemctl cannot be probed by running it: Home Manager's activation PATH
+# replaces the environment's own and drops the system directories, and no build
+# sandbox has a systemd to find. The rendering is the assertable part.
+test_bootstrap_handoff_keeps_system_directories_for_systemctl() {
+  local path_line
+
+  path_line="$(activation_script | grep '^export PATH=')" \
+    || fail "the bootstrap handoff no longer exports a PATH"
+
+  [[ "$path_line" == *':/usr/local/bin:/usr/bin:/bin"' ]] \
+    || fail "the handoff PATH lost the system directories systemctl comes from: $path_line"
+  # $PATH stays literal: this asserts the rendered text, not an expansion.
+  # shellcheck disable=SC2016
+  [[ "$path_line" == *'/bin:$PATH:/usr/local/bin'* ]] \
+    || fail "the system directories must come after everything the store supplies"
+}
+
 # shellcheck source=tests/lib/suite-dispatch.bash
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
@@ -212,6 +229,7 @@ readonly test_cases=(
   test_missing_new_harnesses_are_repaired_by_the_bootstrap_handoff
   test_bootstrap_handoff_runs_after_the_profile_exists
   test_updater_host_tools_are_reachable_from_the_bootstrap_handoff
+  test_bootstrap_handoff_keeps_system_directories_for_systemctl
   test_failed_install_fails_the_bootstrap_handoff
 )
 

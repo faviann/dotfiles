@@ -113,6 +113,7 @@ workstation-update
 
 The managed unit contains:
 
+- the Bun runtime the harnesses execute under
 - Agent of Empires (`aoe`)
 - the standalone Codex CLI (`@openai/codex`)
 - Claude Code (`@anthropic-ai/claude-code`)
@@ -123,6 +124,13 @@ The managed unit contains:
 - the `claude-agent-acp` adapter
   (`@agentclientprotocol/claude-agent-acp`)
 - the `pi-acp` adapter
+
+Bun is fetched from its upstream GitHub release rather than from nixpkgs,
+which lags Bun badly enough that a harness can declare an engine floor newer
+than the Bun the profile would supply. Keeping it in the same unit as the
+harnesses is what makes the runtime and its dependents move together; the
+updater refuses before changing anything if a harness declares a floor the
+runtime cannot meet.
 
 `codex-acp` also contains its own compatible Codex runtime. That bundled
 runtime is distinct from the standalone Codex CLI: updating `@openai/codex`

@@ -165,7 +165,7 @@ if [[ "$1" == "-fsSL" && "$2" == "-o" ]]; then
     exit 22
   fi
   cp "$HOME/bun-archive/bun.zip" "$3"
-  : >"$HOME/bun-installed"
+  printf '%s\n' "$BUN_LATEST" >"$HOME/bun-installed"
   exit 0
 fi
 
@@ -396,8 +396,8 @@ make_bun_archive() {
 set -euo pipefail
 
 if [[ "$*" == "--version" ]]; then
-  if [[ -e "$HOME/bun-installed" ]]; then
-    printf '%s\n' "$BUN_LATEST"
+  if [[ -s "$HOME/bun-installed" ]]; then
+    cat "$HOME/bun-installed"
   else
     printf '%s\n' "$BUN_CURRENT"
   fi
@@ -732,7 +732,7 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
   assert_harness_versions_checked "$test_dir/command-log"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
     || fail "outdated conditional update did not activate the whole toolchain"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 22 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 21 ]] \
     || fail "outdated conditional update did not perform discovery and verification"
   discovery_line="$(grep -n '^npm view @openai/codex@latest version$' \
     "$test_dir/command-log" | head -n 1 | cut -d: -f1)"
@@ -756,7 +756,7 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
     || fail "post-update cached freshness check failed: $(<"$test_dir/after-stderr")"
   [[ ! -s "$test_dir/after-stdout" && ! -s "$test_dir/after-stderr" ]] \
     || fail "post-update cached freshness check replayed a stale update notice"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 22 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 21 ]] \
     || fail "post-update not-due freshness check queried registries"
 }
 
@@ -798,7 +798,7 @@ test_conditional_update_yes_authorizes_only_acp_disruption() {
     run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed --yes \
     || fail "--yes conditional update failed: $(<"$test_dir/stderr")"
 
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 22 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 21 ]] \
     || fail "--yes conditional update bypassed discovery or verification"
   assert_complete_npm_refresh "$test_dir/command-log"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
@@ -860,7 +860,7 @@ test_conditional_update_retries_a_current_toolchain_after_activation_failure() {
   [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
     "$test_dir/command-log")" -eq 2 ]] \
     || fail "conditional recovery did not retry activation"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 44 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 42 ]] \
     || fail "conditional recovery did not freshly discover and verify both attempts"
   jq -e '
     .last_successful_check == "2026-07-14T01:00:00Z"
@@ -911,7 +911,7 @@ test_conditional_update_retries_after_pre_activation_failure_makes_versions_curr
   [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
     "$test_dir/command-log")" -eq 1 ]] \
     || fail "pre-activation recovery did not activate exactly once after verification passed"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 44 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 42 ]] \
     || fail "pre-activation recovery did not freshly discover and verify both attempts"
   jq -e '
     .last_successful_check == "2026-07-14T01:00:00Z"
@@ -2243,7 +2243,8 @@ test_bun_archive_digest_mismatch_stops_before_the_harnesses_change() {
   trap 'rm -rf "$test_dir"' RETURN
   make_stubs "$test_dir/stubs"
 
-  if BUN_DIGEST_OVERRIDE="sha256:$(printf '0%.0s' {1..64})" \
+  if BUN_CURRENT="1.3.13" BUN_LATEST="1.4.0" \
+    BUN_DIGEST_OVERRIDE="sha256:$(printf '0%.0s' {1..64})" \
     run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes; then
     fail "a mismatched Bun archive digest was accepted"
   fi
@@ -2255,8 +2256,21 @@ test_bun_archive_digest_mismatch_stops_before_the_harnesses_change() {
   if grep -Eq '^(npm install|systemctl )' "$test_dir/command-log"; then
     fail "digest mismatch still refreshed the harnesses"
   fi
+  assert_no_bun_residue "$test_dir"
+}
+
+# The download is the largest thing this updater writes, so a failure that keeps
+# its work directory would leak ~100MB per attempt.
+assert_no_bun_residue() {
+  local test_dir="$1"
+  local residue
+
+  residue="$(find "$test_dir/state/update-agent-tools" -maxdepth 1 -name 'bun.*' \
+    -print -quit 2>/dev/null || true)"
+  [[ -z "$residue" ]] \
+    || fail "a failed Bun install left its work directory behind: $residue"
   [[ ! -e "$test_dir/.local/bin/.bun.new" ]] \
-    || fail "digest mismatch left a staged Bun behind"
+    || fail "a failed Bun install left a staged binary behind"
 }
 
 test_bun_archive_matches_the_host_instruction_set() {
@@ -2266,14 +2280,15 @@ test_bun_archive_matches_the_host_instruction_set() {
   trap 'rm -rf "$test_dir"' RETURN
   make_stubs "$test_dir/stubs"
 
-  run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+  BUN_CURRENT="1.3.13" BUN_LATEST="1.4.0" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
     || fail "pre-AVX2 update failed: $(<"$test_dir/stderr")"
   grep -Fx 'curl bun archive https://example.invalid/baseline.zip' \
     "$test_dir/query-log" >/dev/null \
     || fail "a pre-AVX2 host did not receive the baseline Bun archive"
 
   : >"$test_dir/query-log"
-  UPDATE_AGENT_TOOLS_CPUINFO="$test_dir/cpuinfo-avx2" \
+  BUN_LATEST="1.4.1" UPDATE_AGENT_TOOLS_CPUINFO="$test_dir/cpuinfo-avx2" \
     run_tool "$test_dir" "$test_dir/avx2-stdout" "$test_dir/avx2-stderr" --yes \
     || fail "AVX2 update failed: $(<"$test_dir/avx2-stderr")"
   grep -Fx 'curl bun archive https://example.invalid/avx2.zip' \
@@ -2336,6 +2351,115 @@ test_unparsable_engine_range_does_not_block_the_update() {
     run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
     || fail "an unparsable engine range blocked the update: $(<"$test_dir/stderr")"
   assert_complete_npm_refresh "$test_dir/command-log"
+}
+
+# The bootstrap handoff in home/workstation.nix runs --yes, which never reaches
+# discovery. A floor enforced only there would let exactly that path replace the
+# harnesses first and refuse afterwards.
+test_engine_floor_refuses_a_direct_update_before_any_change() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if OMP_ENGINES='{"bun":">=99.0.0"}' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes; then
+    fail "a direct update accepted a Bun floor no release satisfies"
+  fi
+
+  grep -Fq 'update refused before any change: Bun runtime (Oh My Pi CLI needs bun >=99.0.0, found 1.4.0; no Bun release satisfies it yet)' \
+    "$test_dir/stderr" \
+    || fail "direct update refusal was not explained: $(<"$test_dir/stderr")"
+  if grep -Eq '^(bun install|npm install|aoe update|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "a direct update mutated the toolchain despite an unmeetable floor"
+  fi
+}
+
+test_current_bun_is_not_redownloaded() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "update with a current Bun failed: $(<"$test_dir/stderr")"
+
+  if grep -q '^bun install ' "$test_dir/command-log"; then
+    fail "a current Bun was downloaded again"
+  fi
+  grep -Fx 'Bun runtime 1.4.0 is current' "$test_dir/stdout" >/dev/null \
+    || fail "a skipped Bun install was not reported"
+  assert_complete_npm_refresh "$test_dir/command-log"
+}
+
+test_bun_release_metadata_failure_is_a_failed_check() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if BUN_RELEASE_FAIL=1 \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed; then
+    fail "an unreachable Bun release was accepted"
+  fi
+  grep -Fq 'discovery phase failed: Bun runtime' "$test_dir/stderr" \
+    || fail "unreachable Bun release did not name its component: $(<"$test_dir/stderr")"
+
+  : >"$test_dir/stderr"
+  if BUN_RELEASE_JSON='{"tag_name":"bun-v1.4.0","assets":[{"name":"bun-linux-x64-baseline.zip","browser_download_url":"https://example.invalid/baseline.zip"}]}' \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed; then
+    fail "a Bun release without a digest was accepted"
+  fi
+  grep -Fq 'discovery phase failed: Bun runtime' "$test_dir/stderr" \
+    || fail "a digest-less Bun release did not name its component: $(<"$test_dir/stderr")"
+  if grep -Eq '^(bun install|npm install|aoe update|systemctl )' \
+    "$test_dir/command-log"; then
+    fail "unusable Bun release metadata still mutated the toolchain"
+  fi
+}
+
+test_bun_archive_download_failure_stops_before_the_harnesses_change() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+
+  if BUN_CURRENT="1.3.13" BUN_LATEST="1.4.0" BUN_ARCHIVE_FAIL=1 \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes; then
+    fail "an unreachable Bun archive was accepted"
+  fi
+
+  grep -Fq 'installation failed: Bun runtime (https://example.invalid/baseline.zip)' \
+    "$test_dir/stderr" \
+    || fail "archive download failure was not reported: $(<"$test_dir/stderr")"
+  if grep -Eq '^(npm install|aoe update|systemctl )' "$test_dir/command-log"; then
+    fail "a failed Bun download still refreshed the harnesses"
+  fi
+  assert_no_bun_residue "$test_dir"
+}
+
+# Only a signal can leave one of these behind, so the sweep is the sole thing
+# standing between an interrupted download and unbounded state growth.
+test_abandoned_bun_work_directories_are_swept() {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "$test_dir"' RETURN
+  make_stubs "$test_dir/stubs"
+  mkdir -p "$test_dir/state/update-agent-tools/bun.abandoned"
+  printf 'leaked\n' >"$test_dir/state/update-agent-tools/bun.abandoned/bun.zip"
+
+  BUN_CURRENT="1.3.13" BUN_LATEST="1.4.0" \
+    run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --yes \
+    || fail "update after an interrupted download failed: $(<"$test_dir/stderr")"
+
+  [[ ! -e "$test_dir/state/update-agent-tools/bun.abandoned" ]] \
+    || fail "an abandoned Bun work directory survived the next install"
 }
 
 # shellcheck source=tests/lib/suite-dispatch.bash
@@ -2401,6 +2525,11 @@ readonly test_cases=(
   test_harness_node_floor_above_the_profile_stops_before_mutation
   test_harness_bun_floor_above_the_latest_release_stops_before_mutation
   test_unparsable_engine_range_does_not_block_the_update
+  test_engine_floor_refuses_a_direct_update_before_any_change
+  test_current_bun_is_not_redownloaded
+  test_bun_release_metadata_failure_is_a_failed_check
+  test_bun_archive_download_failure_stops_before_the_harnesses_change
+  test_abandoned_bun_work_directories_are_swept
 )
 
 suite_dispatch 'update-agent-tools --check' "$@"

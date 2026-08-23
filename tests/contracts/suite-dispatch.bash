@@ -88,7 +88,12 @@ expected_cases() {
         test_bun_archive_matches_the_host_instruction_set \
         test_harness_node_floor_above_the_profile_stops_before_mutation \
         test_harness_bun_floor_above_the_latest_release_stops_before_mutation \
-        test_unparsable_engine_range_does_not_block_the_update
+        test_unparsable_engine_range_does_not_block_the_update \
+        test_engine_floor_refuses_a_direct_update_before_any_change \
+        test_current_bun_is_not_redownloaded \
+        test_bun_release_metadata_failure_is_a_failed_check \
+        test_bun_archive_download_failure_stops_before_the_harnesses_change \
+        test_abandoned_bun_work_directories_are_swept
       ;;
     workstation-agent-tools-bootstrap.bash)
       printf '%s\n' \
@@ -96,6 +101,7 @@ expected_cases() {
         test_complete_toolchain_is_not_refreshed_during_bootstrap \
         test_bootstrap_handoff_runs_after_the_profile_exists \
         test_updater_host_tools_are_reachable_from_the_bootstrap_handoff \
+        test_bootstrap_handoff_keeps_system_directories_for_systemctl \
         test_failed_install_fails_the_bootstrap_handoff
       ;;
     workstation-collie-forwarder.bash)

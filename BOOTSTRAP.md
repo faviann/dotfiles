@@ -145,8 +145,11 @@ workstation-update
 `workstation-update` is the only routine maintenance command. It validates the
 chezmoi source as a clean, canonical `main` checkout, fetches and fast-forwards
 it to `origin/main`, previews and applies required dotfile changes, and then
-updates AoE; the standalone Codex, Claude Code, Pi, OpenCode, and Oh My Pi CLIs; and the
-`codex-acp`, `claude-agent-acp`, and `pi-acp` adapters as one unit. The Codex
+updates the Bun runtime; AoE; the standalone Codex, Claude Code, Pi, OpenCode,
+and Oh My Pi CLIs; and the `codex-acp`, `claude-agent-acp`, and `pi-acp`
+adapters as one unit. Bun comes from its upstream release rather than from
+nixpkgs, so it moves together with the harnesses that declare engine floors
+against it. The Codex
 runtime bundled inside `codex-acp` is separate from the standalone Codex CLI,
 so both scopes are checked.
 

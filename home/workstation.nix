@@ -3,7 +3,12 @@
 let
   # Host tools update-agent-tools shells out to that neither home.packages nor
   # Home Manager's activation PATH provides.
-  updaterHostTools = lib.makeBinPath [ pkgs.util-linux pkgs.curl pkgs.unzip ];
+  updaterHostTools = lib.makeBinPath [
+    pkgs.util-linux
+    pkgs.curl
+    pkgs.unzip
+    pkgs.findutils
+  ];
 in
 {
   home.username = "faviann";
@@ -45,10 +50,14 @@ in
     lib.hm.dag.entryAfter [ "reloadSystemd" "installPackages" ] ''
       # Activation runs with a curated store-only PATH holding just coreutils and
       # friends, so system directories are absent. The updater's remaining host
-      # tools — flock for its lock, curl for the AoE release check, unzip for the
-      # Bun archive — come from the store rather than from whatever the host
-      # happens to install.
-      export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH"
+      # tools — flock for its lock, curl for the AoE release check, unzip and find
+      # for the Bun archive — come from the store rather than from whatever the
+      # host happens to install.
+      #
+      # The system directories go last, after everything the store supplies, for
+      # systemctl alone: the updater restarts a unit in this host's user session,
+      # so it needs that session's own systemd rather than a store copy of one.
+      export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH:/usr/local/bin:/usr/bin:/bin"
 
       # bun is listed because the updater owns it: nixpkgs lags Bun releases badly
       # enough that a harness engine floor can outrun it, so a switch that finds

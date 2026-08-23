@@ -288,11 +288,9 @@ bun_installed_version() {
 }
 
 bun_install_failed() {
-  local work_dir="$1"
-  local reason="$2"
-
-  rm -rf "$work_dir" "$EXPECTED_PREFIX/bin/.bun.new"
-  fail "installation failed: Bun runtime ($reason)"
+  # Cleanup belongs to install_bun_runtime's EXIT trap, which also covers the
+  # signals no explicit failure path can reach.
+  fail "installation failed: Bun runtime ($1)"
 }
 
 install_bun_runtime() {
@@ -305,30 +303,44 @@ install_bun_runtime() {
   local extracted
   local observed
 
-  version="$(jq -er '.version' <<<"$release")" || fail "installation failed: Bun runtime"
+  version="$(jq -er '.version' <<<"$release")" \
+    || fail "installation failed: Bun runtime"
   url="$(jq -er '.url' <<<"$release")" || fail "installation failed: Bun runtime"
   digest="$(jq -er '.digest' <<<"$release")" || fail "installation failed: Bun runtime"
 
+  # A run killed mid-download leaves ~100MB of archive and extracted tree behind,
+  # and nothing else ever visits these paths, so sweep before adding another.
+  rm -rf "${STATE_DIR:?}"/bun.*
   work_dir="$(mktemp -d "$STATE_DIR/bun.XXXXXX")" \
     || fail "installation failed: Bun runtime"
+  # Covers the signals the explicit failure paths cannot: the trap is cleared on
+  # the way out so a later exit does not delete an unrelated path.
+  trap 'rm -rf "$work_dir" "$EXPECTED_PREFIX/bin/.bun.new"' EXIT
   archive="$work_dir/bun.zip"
 
-  curl -fsSL -o "$archive" "$url" || bun_install_failed "$work_dir" "$url"
+  curl -fsSL -o "$archive" "$url" || bun_install_failed "$url"
   observed="$(sha256sum "$archive" | cut -d ' ' -f 1)" \
-    || bun_install_failed "$work_dir" "checksum"
+    || bun_install_failed "checksum"
   [[ "$observed" == "$digest" ]] \
-    || bun_install_failed "$work_dir" "archive digest mismatch"
-  unzip -q -o -d "$work_dir" "$archive" || bun_install_failed "$work_dir" "archive"
+    || bun_install_failed "archive digest mismatch"
+  unzip -q -o -d "$work_dir" "$archive" || bun_install_failed "archive"
   extracted="$(find "$work_dir" -mindepth 2 -type f -name bun -print -quit)"
-  [[ -n "$extracted" ]] || bun_install_failed "$work_dir" "archive layout"
+  [[ -n "$extracted" ]] || bun_install_failed "archive layout"
   # Staged then renamed: replacing the path rather than writing through it keeps
   # a bun that is mid-run on its original inode.
   install -D -m 755 "$extracted" "$EXPECTED_PREFIX/bin/.bun.new" \
-    || bun_install_failed "$work_dir" "staging"
+    || bun_install_failed "staging"
   mv -f "$EXPECTED_PREFIX/bin/.bun.new" "$EXPECTED_PREFIX/bin/bun" \
-    || bun_install_failed "$work_dir" "replacement"
-  ln -sfn bun "$EXPECTED_PREFIX/bin/bunx" || bun_install_failed "$work_dir" "bunx"
+    || bun_install_failed "replacement"
+  ln -sfn bun "$EXPECTED_PREFIX/bin/bunx" || bun_install_failed "bunx"
+  # Proves the archive actually held the Bun the release advertised, and that it
+  # runs on this host at all, while the failure is still about Bun alone.
+  observed="$("$EXPECTED_PREFIX/bin/bun" --version 2>/dev/null)" \
+    || bun_install_failed "installed Bun does not run"
+  [[ "$observed" == "$version" ]] \
+    || bun_install_failed "installed Bun reports $observed, expected $version"
   rm -rf "$work_dir"
+  trap - EXIT
 }
 
 install_npm_component() {
@@ -401,9 +413,10 @@ node_installed_version() {
 
 # Compares each harness's declared engines against the runtimes this update will
 # leave behind: the Bun about to be installed, and the Node the Home Manager
-# profile already supplies. Runs before anything is replaced, so an unsatisfiable
-# floor refuses the update instead of stranding the harnesses on a runtime that
-# cannot start them.
+# profile already supplies. Reports through runtime_engine_failure rather than
+# printing, because discovery and the install phase phrase their refusals
+# differently.
+runtime_engine_failure=""
 check_runtime_engines() {
   local bun_target="$1"
   local entry
@@ -420,13 +433,16 @@ check_runtime_engines() {
   for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
     component="${entry%%|*}"
     package="${entry#*|}"
-    engines="$(npm view "$package@latest" engines --json)" \
-      || { check_failure_component "$component"; return 1; }
+    # Being unable to read a floor is not the same as violating one. A registry
+    # that will not answer here will not answer the install either, and that
+    # failure names the component; refusing on it as well would let one blip
+    # block the whole toolchain.
+    engines="$(npm view "$package@latest" engines --json 2>/dev/null)" || continue
     [[ -n "$engines" ]] || continue
     jq -e 'type == "object"' <<<"$engines" >/dev/null 2>&1 || continue
     for runtime in bun node; do
       range="$(jq -r --arg runtime "$runtime" '.[$runtime] // empty' <<<"$engines")" \
-        || { check_failure_component "$component"; return 1; }
+        || continue
       [[ -n "$range" ]] || continue
       floor="$(engine_floor "$range")"
       [[ -n "$floor" ]] || continue
@@ -437,17 +453,18 @@ check_runtime_engines() {
       else
         runtime_component="Node runtime"
         version="$(node_installed_version)" \
-          || { check_failure_component "$runtime_component"; return 1; }
+          || { runtime_engine_failure="$runtime_component"; return 1; }
         remedy="update the nixpkgs flake input to raise the profile's Node"
       fi
       version_satisfies_floor "$version" "$floor" && continue
       # The component string is the only failure detail that reaches the
       # operator, so the whole diagnosis travels in it.
-      check_failure_component \
-        "$runtime_component ($component needs $runtime $range, found $version; $remedy)"
+      runtime_engine_failure="$runtime_component ($component needs $runtime $range, found $version; $remedy)"
       return 1
     done
   done
+
+  return 0
 }
 
 check_toolchain() {
@@ -548,7 +565,8 @@ check_toolchain() {
     || return 1
   require_stable_version "pi-acp adapter" "$pi_acp_latest" || return 1
 
-  check_runtime_engines "$bun_latest" || return 1
+  check_runtime_engines "$bun_latest" \
+    || { check_failure_component "$runtime_engine_failure"; return 1; }
 
   check_component "Bun runtime" \
     "$(bun_installed_version)" \
@@ -778,9 +796,23 @@ fi
 
 # Bun first: it is the runtime the npm harnesses execute under, so installing it
 # ahead of them is what keeps a harness from landing on a Bun too old to run it.
+#
+# The guard runs here rather than only in discovery because --yes and the bare
+# invocation never reach check_toolchain before mutating: the Home Manager
+# bootstrap handoff uses --yes, so a floor checked only at discovery would leave
+# exactly that path replacing the harnesses first and refusing afterwards.
 bun_release="$(resolve_bun_release)" \
   || fail "installation failed: Bun runtime (release metadata)"
-install_bun_runtime "$bun_release"
+bun_target="$(jq -er '.version' <<<"$bun_release")" \
+  || fail "installation failed: Bun runtime (release metadata)"
+check_runtime_engines "$bun_target" \
+  || fail "update refused before any change: $runtime_engine_failure"
+
+if [[ "$(bun_installed_version)" == "$bun_target" ]]; then
+  printf 'Bun runtime %s is current\n' "$bun_target"
+else
+  install_bun_runtime "$bun_release"
+fi
 
 if ! aoe update --yes; then
   fail "installation failed: AoE"

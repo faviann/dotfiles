@@ -2,9 +2,11 @@
 
 This is the operator runbook and evidence shape for the Collie pilot on the
 workstation. Collie is installed through herdr, owns its generated service, and
-binds only to loopback. Dotfiles supplies Bun and the socket-activated
-`collie-origin-forwarder` from port 8788 to `127.0.0.1:8787`; it does not own
-Collie's plugin, configuration, state, service, or update lifecycle.
+binds only to loopback. Dotfiles supplies Bun through `update-agent-tools`,
+which installs it into `~/.local/bin` rather than the Nix profile, and the
+socket-activated `collie-origin-forwarder` from port 8788 to
+`127.0.0.1:8787`; it does not own Collie's plugin, configuration, state,
+service, or update lifecycle.
 
 ## Version record
 
