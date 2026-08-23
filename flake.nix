@@ -144,6 +144,7 @@
           ./dot_local/bin/executable_update-agent-tools
           ./dot_local/bin/executable_workstation-login
           ./dot_local/bin/executable_workstation-update
+          ./scripts/moraine-service
           ./scripts/run-shellcheck
           ./scripts/run-tests
           ./scripts/update-dotnet-sdk
