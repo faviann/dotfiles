@@ -688,10 +688,11 @@ head_commit="$(git -C "$source_repository" rev-parse HEAD)" \
   || fail 'history phase failed: main does not match origin/main'
 
 apply_required=0
+record_applied_commit_required=0
 if [[ ! -e "$APPLIED_COMMIT_FILE" ]]; then
   ensure_bitwarden_session
   if chezmoi verify; then
-    record_applied_commit
+    record_applied_commit_required=1
   else
     apply_required=1
   fi
@@ -718,19 +719,26 @@ if (( apply_required == 1 )); then
     || fail 'apply phase failed: chezmoi apply'
   chezmoi verify --exclude scripts \
     || fail 'verification phase failed: chezmoi targets'
-  record_applied_commit
+  record_applied_commit_required=1
 fi
 
 if (( dotfiles_changed == 1 )); then
   printf 'Dotfiles: updated\n'
+else
+  printf 'Dotfiles: current\n'
+fi
+
+if (( dotfiles_changed == 1 || record_applied_commit_required == 1 )); then
   printf 'Workstation configuration: checking...\n'
   # workstation-setup is installed by Ansible, not managed by chezmoi, so it
   # resolves from PATH rather than from a managed location.
   workstation-setup \
     || fail 'workstation-configuration phase failed: workstation-setup'
   printf 'Workstation configuration: ready\n'
-else
-  printf 'Dotfiles: current\n'
+fi
+
+if (( record_applied_commit_required == 1 )); then
+  record_applied_commit
 fi
 
 agent_tools="$HOME/.local/bin/update-agent-tools"
