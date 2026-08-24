@@ -13,7 +13,9 @@ shell_inputs=(
   "$REPO_ROOT"/tests/contracts/*.bash
   "$REPO_ROOT"/tests/lib/*.bash
   "$REPO_ROOT/scripts/run-shellcheck"
+  "$REPO_ROOT/scripts/moraine-service"
   "$REPO_ROOT/scripts/run-tests"
+  "$REPO_ROOT/scripts/update-dotnet-sdk"
 )
 template_inputs=("$REPO_ROOT"/.chezmoiscripts/*.sh.tmpl)
 

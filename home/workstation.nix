@@ -1,16 +1,62 @@
-{ pkgs, lib, config, hermesPackage, ... }:
+{ pkgs, lib, config, dotnetSdk, hermesPackage, morainePackage, ... }:
 
 let
   # Host tools update-agent-tools shells out to that neither home.packages nor
   # Home Manager's activation PATH provides.
-  updaterHostTools = lib.makeBinPath [ pkgs.util-linux pkgs.curl ];
-  bunBaseline = pkgs.bun.overrideAttrs (oldAttrs: {
-    pname = "bun-baseline";
-    src = pkgs.fetchurl {
-      url = "https://github.com/oven-sh/bun/releases/download/bun-v${oldAttrs.version}/bun-linux-x64-baseline.zip";
-      hash = "sha256-nYokKSpwaAkCBdqsCloiP19pc29Sh+N7+I07QDHtx1A=";
-    };
-  });
+  updaterHostTools = lib.makeBinPath [
+    pkgs.util-linux
+    pkgs.curl
+    pkgs.unzip
+    pkgs.findutils
+  ];
+  moraineRootRelative = ".moraine";
+  moraineRoot = "~/${moraineRootRelative}";
+  moraineConfigRelative = "${moraineRootRelative}/config.toml";
+  moraineConfigPath = "%h/${moraineConfigRelative}";
+  moraineControl = "${morainePackage}/bin/moraine --config ${moraineConfigPath}";
+  moraineService = pkgs.writeShellApplication {
+    name = "moraine-service";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.jq
+    ];
+    text = builtins.readFile ../scripts/moraine-service;
+  };
+  moraineConfig = ''
+    [identity]
+    author = "faviann@gmail.com"
+
+    [ingest]
+    backfill_on_start = true
+
+    [[ingest.sources]]
+    name = "codex-active"
+    harness = "codex"
+    enabled = true
+    glob = "~/.codex/sessions/**/*.jsonl"
+    watch_root = "~/.codex/sessions"
+
+    [[ingest.sources]]
+    name = "codex-archived"
+    harness = "codex"
+    enabled = true
+    glob = "~/.codex/archived_sessions/*.jsonl"
+    watch_root = "~/.codex/archived_sessions"
+
+    [[ingest.sources]]
+    # Do not use upstream's setup-owned `claude` signature: v0.7.3 treats an
+    # exact match as legacy generated config and injects newer default sources.
+    name = "claude-projects"
+    harness = "claude-code"
+    enabled = true
+    glob = "~/.claude/projects/**/*.jsonl"
+    watch_root = "~/.claude/projects"
+
+    [runtime]
+    root_dir = "${moraineRoot}"
+    service_bin_dir = "${morainePackage}/bin"
+    managed_clickhouse_dir = "${moraineRoot}/clickhouse/current"
+  '';
 in
 {
   home.username = "faviann";
@@ -20,7 +66,7 @@ in
   programs.home-manager.enable = true;
 
   home.packages = with pkgs; [
-    bunBaseline
+    dotnetSdk
     nodejs
     uv
     gh
@@ -29,11 +75,14 @@ in
     fd
     fzf
     hermesPackage
+    morainePackage
   ];
 
   home.sessionPath = [
     "$HOME/.local/bin"
   ];
+
+  home.file.${moraineConfigRelative}.text = moraineConfig;
 
   home.activation.removeLegacyAoeUnits = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
     rm -f \
@@ -44,6 +93,26 @@ in
 
   systemd.user.startServices = "sd-switch";
 
+  # Upstream owns installation, readiness, migrations, and child startup. The
+  # foreground wrapper keeps this unit alive only while that complete stack is
+  # healthy, so one restart policy accurately represents the operator surface.
+  systemd.user.services.moraine = {
+    Unit = {
+      Description = "Workstation-local Moraine producer";
+      X-Restart-Triggers = [ config.home.file.${moraineConfigRelative}.source ];
+    };
+
+    Service = {
+      Type = "simple";
+      ExecStart = "${moraineService}/bin/moraine-service ${morainePackage}/bin/moraine ${moraineConfigPath}";
+      ExecStop = "${moraineControl} down";
+      Restart = "on-failure";
+      RestartSec = 5;
+    };
+
+    Install.WantedBy = [ "default.target" ];
+  };
+
   # installPackages is what creates the profile this handoff reads from. Ordered
   # only after reloadSystemd, the handoff ran while ~/.nix-profile was still a
   # dangling symlink, so every home.packages tool the updater needs — npm, jq —
@@ -52,13 +121,21 @@ in
     lib.hm.dag.entryAfter [ "reloadSystemd" "installPackages" ] ''
       # Activation runs with a curated store-only PATH holding just coreutils and
       # friends, so system directories are absent. The updater's remaining host
-      # tools — flock for its lock, curl for the AoE release check — come from
-      # the store rather than from whatever the host happens to install.
-      export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH"
+      # tools — flock for its lock, curl for the AoE release check, unzip and find
+      # for the Bun archive — come from the store rather than from whatever the
+      # host happens to install.
+      #
+      # The system directories go last, after everything the store supplies, for
+      # systemctl alone: the updater restarts a unit in this host's user session,
+      # so it needs that session's own systemd rather than a store copy of one.
+      export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH:/usr/local/bin:/usr/bin:/bin"
 
+      # bun is listed because the updater owns it: nixpkgs lags Bun releases badly
+      # enough that a harness engine floor can outrun it, so a switch that finds
+      # no bun must hand off rather than leave the harnesses without a runtime.
       _agent_tools_missing=false
       for _agent_tool in \
-        aoe codex claude pi codex-acp claude-agent-acp pi-acp; do
+        aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
         if ! command -v "$_agent_tool" >/dev/null 2>&1; then
           _agent_tools_missing=true
           break

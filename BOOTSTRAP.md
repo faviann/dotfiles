@@ -47,8 +47,13 @@ and validates the expected tools. Chezmoi installs AoE first. Home Manager then
 installs the stable base tools, including Node/npm, `uv`, `gh`, and Hermes,
 loads the AoE user units, and hands off to `update-agent-tools --yes` if any
 managed agent command is missing. That handoff installs the standalone Codex,
-Claude Code, and Pi CLIs plus the `codex-acp`, `claude-agent-acp`, and `pi-acp`
-adapters. No package lookup or additional homelab/Ansible change is required.
+Claude Code, Pi, OpenCode, and Oh My Pi CLIs plus the `codex-acp`,
+`claude-agent-acp`, and `pi-acp` adapters. No package lookup or additional
+homelab/Ansible change is required.
+
+Pi and Oh My Pi intentionally coexist during evaluation. Pi remains available
+as `pi` with state in `~/.pi`; OMP is a separate `omp` command with its own
+default `~/.omp` state. OMP does not replace Pi or `pi-acp`.
 
 AoE's host-level `acp.allow_agent_install` setting stays disabled; dotfiles is
 the package owner. The bootstrap update is part of `workstation-setup`, not an
@@ -140,8 +145,11 @@ workstation-update
 `workstation-update` is the only routine maintenance command. It validates the
 chezmoi source as a clean, canonical `main` checkout, fetches and fast-forwards
 it to `origin/main`, previews and applies required dotfile changes, and then
-updates AoE; the standalone Codex, Claude Code, and Pi CLIs; and the
-`codex-acp`, `claude-agent-acp`, and `pi-acp` adapters as one unit. The Codex
+updates the Bun runtime; AoE; the standalone Codex, Claude Code, Pi, OpenCode,
+and Oh My Pi CLIs; and the `codex-acp`, `claude-agent-acp`, and `pi-acp`
+adapters as one unit. Bun comes from its upstream release rather than from
+nixpkgs, so it moves together with the harnesses that declare engine floors
+against it. The Codex
 runtime bundled inside `codex-acp` is separate from the standalone Codex CLI,
 so both scopes are checked.
 

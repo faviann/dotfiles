@@ -9,6 +9,17 @@ fail() {
   exit 1
 }
 
+readonly behavioral_suites=(
+  workstation-login.bash
+  chezmoi-target-inventory.bash
+  update-agent-tools-check.bash
+  workstation-agent-tools-bootstrap.bash
+  workstation-collie-forwarder.bash
+  workstation-moraine.bash
+  workstation-skills-bootstrap.bash
+  workstation-update.bash
+)
+
 expected_cases() {
   case "$1" in
     workstation-login.bash)
@@ -81,19 +92,35 @@ expected_cases() {
         test_pre_activation_registry_failure_names_the_managed_component \
         test_post_activation_failure_retains_failure_without_rollback \
         test_activation_failure_is_recovered_by_a_full_rerun \
-        test_standalone_and_bundled_codex_remain_separate_on_update
+        test_standalone_and_bundled_codex_remain_separate_on_update \
+        test_outdated_bun_runtime_is_installed_before_the_harnesses \
+        test_missing_bun_runtime_is_reported_and_installed \
+        test_bun_archive_digest_mismatch_stops_before_the_harnesses_change \
+        test_bun_archive_matches_the_host_instruction_set \
+        test_harness_node_floor_above_the_profile_stops_before_mutation \
+        test_harness_bun_floor_above_the_latest_release_stops_before_mutation \
+        test_unparsable_engine_range_does_not_block_the_update \
+        test_engine_floor_refuses_a_direct_update_before_any_change \
+        test_current_bun_is_not_redownloaded \
+        test_bun_release_metadata_failure_is_a_failed_check \
+        test_bun_archive_download_failure_stops_before_the_harnesses_change \
+        test_abandoned_bun_work_directories_are_swept \
+        test_unreadable_engine_metadata_refuses_before_mutation \
+        test_absent_engine_declaration_does_not_block_the_update
       ;;
     workstation-agent-tools-bootstrap.bash)
       printf '%s\n' \
         test_missing_tools_are_installed_by_the_bootstrap_handoff \
         test_complete_toolchain_is_not_refreshed_during_bootstrap \
+        test_missing_new_harnesses_are_repaired_by_the_bootstrap_handoff \
         test_bootstrap_handoff_runs_after_the_profile_exists \
         test_updater_host_tools_are_reachable_from_the_bootstrap_handoff \
+        test_bootstrap_handoff_keeps_system_directories_for_systemctl \
         test_failed_install_fails_the_bootstrap_handoff
       ;;
     workstation-collie-forwarder.bash)
       printf '%s\n' \
-        test_workstation_profile_selects_bun_baseline_for_pre_avx2_cpu \
+        test_workstation_profile_includes_dotnet_10_lts_sdk \
         test_collie_origin_socket_listens_on_the_portal_origin_port \
         test_collie_origin_socket_activates_with_normal_user_sockets \
         test_collie_origin_forwarder_connects_to_the_loopback_bridge \
@@ -101,6 +128,14 @@ expected_cases() {
         test_aoe_serve_pulls_up_its_origin_socket \
         test_collie_service_drop_in_pulls_up_its_origin_socket \
         test_existing_aoe_forwarder_rendering_is_unchanged
+      ;;
+    workstation-moraine.bash)
+      printf '%s\n' \
+        test_moraine_profile_uses_one_integrity_pinned_release_bundle \
+        test_moraine_configures_codex_and_claude_sources_with_backfill \
+        test_moraine_config_keeps_redaction_and_the_default_local_topology \
+        test_moraine_service_owns_and_restarts_the_upstream_stack \
+        test_moraine_leaves_user_codex_configuration_unmanaged
       ;;
     workstation-skills-bootstrap.bash)
       printf '%s\n' \
@@ -139,6 +174,10 @@ expected_cases() {
         test_agent_discovery_failure_preserves_applied_dotfiles_for_retry \
         test_concurrent_update_is_rejected_without_queueing \
         test_outdated_agent_tools_use_the_latest_verified_updater \
+        test_dotfiles_work_delegates_workstation_configuration_to_setup \
+        test_source_only_change_still_delegates_workstation_configuration \
+        test_current_workstation_does_not_delegate_workstation_configuration \
+        test_workstation_configuration_failure_stops_before_agent_tools \
         test_agent_update_failure_retries_without_reapplying_dotfiles \
         test_unsupported_arguments_fail_before_maintenance \
         test_dotfiles_failure_prevents_agent_tool_checks \
@@ -165,14 +204,7 @@ test_every_suite_lists_all_case_names() {
 
   all_cases="$(mktemp)"
   trap 'rm -f "$all_cases"' RETURN
-  for suite in \
-    workstation-login.bash \
-    chezmoi-target-inventory.bash \
-    update-agent-tools-check.bash \
-    workstation-agent-tools-bootstrap.bash \
-    workstation-collie-forwarder.bash \
-    workstation-skills-bootstrap.bash \
-    workstation-update.bash; do
+  for suite in "${behavioral_suites[@]}"; do
     listed_cases="$(bash "$REPO_ROOT/tests/$suite" --list)" \
       || fail "$suite --list exited nonzero"
     diff -u \
@@ -198,6 +230,7 @@ test_every_suite_preserves_no_argument_full_run() {
     'update-agent-tools-check.bash|PASS: update-agent-tools --check' \
     'workstation-agent-tools-bootstrap.bash|PASS: workstation agent-tool bootstrap handoff' \
     'workstation-collie-forwarder.bash|PASS: workstation Collie runtime and origin forwarder' \
+    'workstation-moraine.bash|PASS: workstation-local Moraine producer' \
     'workstation-skills-bootstrap.bash|PASS: workstation skills bootstrap' \
     'workstation-update.bash|PASS: workstation update'; do
     IFS='|' read -r suite pass_line <<<"$specification"
@@ -221,6 +254,7 @@ test_every_suite_runs_one_exact_named_case() {
     'update-agent-tools-check.bash|test_machine_status_reports_current_by_exit_status_without_output|PASS: update-agent-tools --check' \
     'workstation-agent-tools-bootstrap.bash|test_failed_install_fails_the_bootstrap_handoff|PASS: workstation agent-tool bootstrap handoff' \
     'workstation-collie-forwarder.bash|test_collie_origin_socket_listens_on_the_portal_origin_port|PASS: workstation Collie runtime and origin forwarder' \
+    'workstation-moraine.bash|test_moraine_config_keeps_redaction_and_the_default_local_topology|PASS: workstation-local Moraine producer' \
     'workstation-skills-bootstrap.bash|test_non_lxc_render_is_a_noop|PASS: workstation skills bootstrap' \
     'workstation-update.bash|test_unsupported_arguments_fail_before_maintenance|PASS: workstation update'; do
     IFS='|' read -r suite test_case pass_line <<<"$specification"
@@ -252,14 +286,7 @@ assert_dispatch_fails_with() {
 test_unknown_and_malformed_invocations_fail_clearly() {
   local suite
 
-  for suite in \
-    workstation-login.bash \
-    chezmoi-target-inventory.bash \
-    update-agent-tools-check.bash \
-    workstation-agent-tools-bootstrap.bash \
-    workstation-collie-forwarder.bash \
-    workstation-skills-bootstrap.bash \
-    workstation-update.bash; do
+  for suite in "${behavioral_suites[@]}"; do
     assert_dispatch_fails_with \
       "$suite" 'ERROR: unknown test case:' \
       --case definitely_not_a_test_case

@@ -89,10 +89,20 @@ part of daily operation.
 ## Workstation Home Manager
 
 The `workstation` Home Manager flake installs user tooling for the Debian LXC
-workstation: Node.js/npm, `uv`, `gh`, `jq`, `ripgrep`, `fd`, `fzf`, and
-Hermes. Hermes is installed from `github:NousResearch/hermes-agent` as a
-normal non-NixOS package; provider credentials and runtime configuration stay
-in `~/.hermes`.
+workstation: the .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, `jq`, `ripgrep`,
+`fd`, `fzf`, Hermes, and Moraine. Hermes is installed from
+`github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
+credentials and runtime configuration stay in `~/.hermes`.
+
+The .NET policy floats within major 10 while each published workstation
+generation remains reproducible. A dedicated `dotnet-nixpkgs` flake input
+isolates the SDK from the workstation's other Nix packages. The daily and
+manually dispatchable `Update .NET 10 SDK` GitHub workflow invokes
+`scripts/update-dotnet-sdk`, which advances only that input, rejects a major
+change or downgrade, executes the SDK, builds the real Home Manager activation
+package, and runs `nix flake check`. A validated version change is published
+and merged through one automation PR; a failure leaves `main` on its last
+known-good SDK.
 
 Dotfiles and the complete AoE agent toolchain are maintained through one
 operator-facing command:
@@ -103,19 +113,39 @@ workstation-update
 
 The managed unit contains:
 
+- the Bun runtime the harnesses execute under
 - Agent of Empires (`aoe`)
 - the standalone Codex CLI (`@openai/codex`)
 - Claude Code (`@anthropic-ai/claude-code`)
 - Pi (`@earendil-works/pi-coding-agent`)
+- OpenCode (`opencode-ai`)
+- Oh My Pi (`@oh-my-pi/pi-coding-agent`)
 - the `codex-acp` adapter (`@agentclientprotocol/codex-acp`)
 - the `claude-agent-acp` adapter
   (`@agentclientprotocol/claude-agent-acp`)
 - the `pi-acp` adapter
 
+Bun is fetched from its upstream GitHub release rather than from nixpkgs,
+which lags Bun badly enough that a harness can declare an engine floor newer
+than the Bun the profile would supply. Keeping it in the same unit as the
+harnesses is what makes the runtime and its dependents move together; the
+updater refuses before changing anything if a harness declares a floor the
+runtime cannot meet, or if it cannot read one.
+
+The archive is checked against the digest the release API publishes alongside
+the download URL. That detects a truncated or corrupted download, not a
+compromised release: the digest and the archive come from the same source, and
+no independently pinned hash survives outside it.
+
 `codex-acp` also contains its own compatible Codex runtime. That bundled
 runtime is distinct from the standalone Codex CLI: updating `@openai/codex`
 does not update the runtime used by structured Codex sessions. The updater
 checks both scopes and refreshes `codex-acp` to maintain its bundled runtime.
+
+Pi and Oh My Pi intentionally coexist while OMP is evaluated as a separate
+harness. The `pi` command continues to use `~/.pi`; the distinct `omp` command
+uses its own default `~/.omp` state. OMP does not replace Pi or the existing
+`pi-acp` adapter.
 
 Home Manager provides Node/npm and writes the npm prefix as
 `/home/faviann/.local`; all npm-managed commands resolve from `~/.local/bin`.
@@ -126,6 +156,39 @@ directly while developing dotfiles:
 ```bash
 home-manager build --flake /home/aperture/repos/dotfiles#workstation
 ```
+
+## Workstation Moraine
+
+The workstation profile pins one Moraine v0.7.3 release bundle and installs its
+matching CLI, ingest, monitor-compatibility alias, and MCP executables. There is
+intentionally no separate monitor unit; the unified MCP/backend executable owns
+the monitor HTTP listener as well as the MCP socket.
+
+Home Manager owns `~/.moraine/config.toml` as a read-only Nix-managed file.
+Persistent ingestion state, ClickHouse data, logs, sockets, and process state
+remain under `~/.moraine`. Do not use `moraine setup` or another config-writing
+command to mutate the managed file; change this module and apply a new Home
+Manager generation instead. The enabled sources backfill and watch active Codex
+sessions recursively, archived sessions in Codex's flat archive directory, and
+standard Claude Code project transcripts under `~/.claude/projects`. The
+deployment-owned Claude source is named `claude-projects`, avoiding upstream
+setup migrations that append unrelated default harnesses. Claude job timelines
+under `~/.claude/jobs` are intentionally excluded. Moraine's default built-in
+redaction runs before local storage.
+
+The single `moraine.service` user unit is the operator surface for the local
+stack. Upstream `moraine up` owns managed ClickHouse readiness, database
+migrations, ingest, and unified-backend startup. The foreground unit monitors
+aggregate Moraine health and restarts the complete stack on failure. Default
+Moraine topology keeps the HTTP listener on `127.0.0.1:8080` and its per-user
+MCP Unix socket at mode 0600; there is no non-loopback listener. Applying a Home
+Manager generation restarts the service when the managed Moraine configuration
+changes, so ingestion reloads newly declared sources.
+
+The workstation profile does not manage `~/.codex/config.toml` or register a
+Codex MCP server. Moraine's local producer and query backend operate without a
+Codex MCP registration; that integration can be added later if the workstation
+needs Codex to query Moraine directly.
 
 ## Workstation Agent of Empires
 
@@ -154,11 +217,18 @@ package installation; the AoE dashboard does not.
 chezmoi source as a clean, canonical `main` checkout, fetches and fast-forwards
 it to `origin/main`, previews and applies dotfile changes when required, then
 delegates workstation configuration to `workstation-setup` whenever dotfiles
-work occurred, and finally refreshes AoE, all three standalone CLIs, and all
+work occurred, and finally refreshes AoE, all five standalone CLIs, and all
 three ACP adapters as one unit. `workstation-setup` owns workstation
 configuration freshness, comparing and activating the Home Manager build; it is
 installed by Ansible rather than by chezmoi. Agent tools use latest stable
 releases and do not retrieve or display release notes.
+
+`workstation-update` never rewrites `flake.lock`. .NET release discovery and
+publication happen upstream through the dedicated GitHub workflow; the normal
+SSH notice and `workstation-update` then deliver that validated commit through
+the same dotfiles and `workstation-setup` path as any other workstation change.
+For maintainer recovery or an on-demand refresh, run
+`scripts/update-dotnet-sdk` from a clean canonical checkout.
 
 The command refuses unsafe source states such as local content, a non-canonical
 origin, the wrong branch or upstream, and ahead or diverged history. It does
@@ -208,12 +278,13 @@ instead says that maintenance is blocked and must be resolved before the
 command is run. A hard 15-second deadline bounds the check, and failure or
 timeout never prevents the shell from opening.
 
-Login never installs updates. There is no background timer or scheduler, and
-local shells, remote commands, and non-interactive shells do not run the login
-check. Workstations without the completed setup marker also skip it. Each
-eligible SSH login warns when maintenance is actionable; healthy state remains
-silent. The login profile deliberately does not source `.bashrc`, so unrelated
-interactive-shell configuration is not pulled into the login boundary.
+Login never installs updates. There is no workstation-side background timer or
+scheduler, and local shells, remote commands, and non-interactive shells do not
+run the login check. Workstations without the completed setup marker also skip
+it. Each eligible SSH login warns when maintenance is actionable; healthy state
+remains silent. The login profile deliberately does not source `.bashrc`, so
+unrelated interactive-shell configuration is not pulled into the login
+boundary.
 
 ## Workstation herdr
 
