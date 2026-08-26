@@ -999,6 +999,7 @@ test_managed_npm_inventory_drives_install_and_version_checks() {
   local expected_entry
   local install_dir
   local package
+  local unstable_dir
   local -a expected_inventory=(
     'Codex CLI (standalone)|@openai/codex'
     'Claude Code CLI|@anthropic-ai/claude-code'
@@ -1012,9 +1013,11 @@ test_managed_npm_inventory_drives_install_and_version_checks() {
 
   install_dir="$(mktemp -d)"
   check_dir="$(mktemp -d)"
-  trap 'rm -rf "$install_dir" "$check_dir"' RETURN
+  unstable_dir="$(mktemp -d)"
+  trap 'rm -rf "$install_dir" "$check_dir" "$unstable_dir"' RETURN
   make_stubs "$install_dir/stubs"
   make_stubs "$check_dir/stubs"
+  make_stubs "$unstable_dir/stubs"
 
   run_tool "$install_dir" "$install_dir/stdout" "$install_dir/stderr" --yes \
     || fail "managed npm inventory update failed: $(<"$install_dir/stderr")"
@@ -1030,6 +1033,19 @@ test_managed_npm_inventory_drives_install_and_version_checks() {
       "$check_dir/command-log")" -eq 1 ]] \
       || fail "managed npm inventory did not version-check $expected_entry in one metadata query"
   done
+
+  if CLAUDE_LATEST='3.4.5-beta.1' \
+    run_tool \
+      "$unstable_dir" \
+      "$unstable_dir/stdout" \
+      "$unstable_dir/stderr" \
+      --update-if-needed; then
+    fail "managed npm inventory accepted an unstable Claude Code CLI version"
+  fi
+  grep -Fx \
+    'update-agent-tools: discovery phase failed: Claude Code CLI; correct the problem, then rerun workstation-update' \
+    "$unstable_dir/stderr" >/dev/null \
+    || fail "managed npm inventory did not attribute an unstable version to Claude Code CLI"
 }
 
 test_due_check_runs_once_per_success_interval() {
