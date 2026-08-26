@@ -1007,6 +1007,7 @@ test_managed_npm_inventory_drives_install_and_version_checks() {
   local check_dir
   local expected_entry
   local install_dir
+  local managed_query_count
   local package
   local unstable_dir
   local -a expected_inventory=(
@@ -1041,6 +1042,14 @@ test_managed_npm_inventory_drives_install_and_version_checks() {
     [[ "$(grep -Fxc "npm view $package@latest version engines --json" \
       "$check_dir/command-log")" -eq 1 ]] \
       || fail "managed npm inventory did not version-check $expected_entry in one metadata query"
+    managed_query_count="$(
+      grep -F "npm view $package@latest " "$check_dir/command-log" \
+        | grep -Fvx \
+          'npm view @agentclientprotocol/codex-acp@latest dependencies.@openai/codex' \
+        | wc -l
+    )"
+    [[ "$managed_query_count" -eq 1 ]] \
+      || fail "managed npm inventory queried $expected_entry $managed_query_count times"
   done
 
   if CLAUDE_LATEST='3.4.5-beta.1' \
