@@ -103,7 +103,8 @@ test_herdr_service_is_staged_without_target_or_activation() {
 
   jq -e '
     ((.Install.WantedBy // []) == []) and
-    ((.Install.RequiredBy // []) == [])
+    ((.Install.RequiredBy // []) == []) and
+    ((.Install.UpheldBy // []) == [])
   ' <<<"$rendered_service" >/dev/null \
     || fail 'Herdr service is enabled in a user target'
   jq -e \
@@ -124,6 +125,7 @@ test_herdr_staging_does_not_take_over_the_detached_server_or_panes() {
   jq -e '
     ((.Install.WantedBy // []) == []) and
     ((.Install.RequiredBy // []) == []) and
+    ((.Install.UpheldBy // []) == []) and
     ((.Unit.Requires // []) == []) and
     ((.Unit.BindsTo // []) == []) and
     ((.Unit.PartOf // []) == []) and
