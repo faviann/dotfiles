@@ -85,6 +85,7 @@ test_herdr_service_leaves_normal_termination_to_herdr() {
     (.Service.Type == "simple") and
     (.Service.ExecStart == ["/home/faviann/.local/bin/herdr server"]) and
     (.Service | has("ExecStop") | not) and
+    (.Service | has("ExecStopPost") | not) and
     (.Service | has("PIDFile") | not) and
     (.Service | has("NotifyAccess") | not)
   ' <<<"$rendered_service" >/dev/null \
@@ -100,7 +101,10 @@ test_herdr_service_is_staged_without_target_or_activation() {
   rendered_activation="$(rendered_workstation_activation)" \
     || fail 'could not render the workstation activation configuration'
 
-  jq -e '(.Install.WantedBy // []) == []' <<<"$rendered_service" >/dev/null \
+  jq -e '
+    ((.Install.WantedBy // []) == []) and
+    ((.Install.RequiredBy // []) == [])
+  ' <<<"$rendered_service" >/dev/null \
     || fail 'Herdr service is enabled in a user target'
   jq -e \
     '[to_entries[] | select(.value | test("herdr.*(start|enable)|(start|enable).*herdr"; "i"))] == []' \
@@ -118,11 +122,13 @@ test_herdr_staging_does_not_take_over_the_detached_server_or_panes() {
     || fail 'could not render the workstation activation configuration'
 
   jq -e '
-    (.Install.WantedBy // []) == [] and
+    ((.Install.WantedBy // []) == []) and
+    ((.Install.RequiredBy // []) == []) and
     ((.Unit.Requires // []) == []) and
     ((.Unit.BindsTo // []) == []) and
     ((.Unit.PartOf // []) == []) and
     (.Service | has("ExecStop") | not) and
+    (.Service | has("ExecStopPost") | not) and
     (.Service | has("ExecReload") | not) and
     (.Service | has("KillSignal") | not) and
     ([.Service | .. | strings | select(test("--daemon|pid.file|migrat|pane|session"; "i"))] == [])
