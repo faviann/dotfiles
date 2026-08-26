@@ -278,10 +278,33 @@ if [[ "$*" == "view @openai/codex@$BUNDLED_CODEX_RANGE version --json" ]]; then
   exit 0
 fi
 
-if [[ "$1" == "view" && "$3" == "engines" \
-  && "${NPM_ENGINES_FAIL_PACKAGE:-}" == "$2" ]]; then
+if [[ "$1" == "view" && "${NPM_ENGINES_FAIL_PACKAGE:-}" == "$2" \
+  && ( "$3" == "engines" || "$4" == "engines" ) ]]; then
   printf 'npm registry unavailable\n' >&2
   exit 1
+fi
+
+if [[ "$1" == "view" && "$3" == "version" && "$4" == "engines" \
+  && "$5" == "--json" ]]; then
+  printf 'npm %s\n' "$*" >>"$QUERY_LOG"
+  case "$2" in
+    '@openai/codex@latest') version="$CODEX_LATEST"; engines="$OTHER_ENGINES" ;;
+    '@anthropic-ai/claude-code@latest') version="$CLAUDE_LATEST"; engines="$OTHER_ENGINES" ;;
+    '@earendil-works/pi-coding-agent@latest') version="$PI_LATEST"; engines="$PI_ENGINES" ;;
+    'opencode-ai@latest') version="$OPENCODE_LATEST"; engines="$OTHER_ENGINES" ;;
+    '@oh-my-pi/pi-coding-agent@latest') version="$OMP_LATEST"; engines="$OMP_ENGINES" ;;
+    '@agentclientprotocol/codex-acp@latest') version="$CODEX_ACP_LATEST"; engines="$OTHER_ENGINES" ;;
+    '@agentclientprotocol/claude-agent-acp@latest') version="$CLAUDE_ACP_LATEST"; engines="$OTHER_ENGINES" ;;
+    'pi-acp@latest') version="$PI_ACP_LATEST"; engines="$OTHER_ENGINES" ;;
+    *) printf 'unexpected npm package: %s\n' "$2" >&2; exit 64 ;;
+  esac
+  if [[ -n "$engines" ]]; then
+    jq -cn --arg version "$version" --argjson engines "$engines" \
+      '{version: $version, engines: $engines}'
+  else
+    jq -cn --arg version "$version" '{version: $version}'
+  fi
+  exit 0
 fi
 
 if [[ "$1" == "view" && "$3" == "engines" && "$4" == "--json" ]]; then
@@ -748,9 +771,9 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
   assert_harness_versions_checked "$test_dir/command-log"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
     || fail "outdated conditional update did not activate the whole toolchain"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 21 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 29 ]] \
     || fail "outdated conditional update did not perform discovery and verification"
-  discovery_line="$(grep -n '^npm view @openai/codex@latest version$' \
+  discovery_line="$(grep -n '^npm view @openai/codex@latest version engines --json$' \
     "$test_dir/command-log" | head -n 1 | cut -d: -f1)"
   inspection_line="$(grep -n '^aoe ps --acp --dead --json$' \
     "$test_dir/command-log" | head -n 1 | cut -d: -f1)"
@@ -772,7 +795,7 @@ test_conditional_update_refreshes_the_whole_toolchain_when_outdated() {
     || fail "post-update cached freshness check failed: $(<"$test_dir/after-stderr")"
   [[ ! -s "$test_dir/after-stdout" && ! -s "$test_dir/after-stderr" ]] \
     || fail "post-update cached freshness check replayed a stale update notice"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 21 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 29 ]] \
     || fail "post-update not-due freshness check queried registries"
 }
 
@@ -814,7 +837,7 @@ test_conditional_update_yes_authorizes_only_acp_disruption() {
     run_tool "$test_dir" "$test_dir/stdout" "$test_dir/stderr" --update-if-needed --yes \
     || fail "--yes conditional update failed: $(<"$test_dir/stderr")"
 
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 21 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 29 ]] \
     || fail "--yes conditional update bypassed discovery or verification"
   assert_complete_npm_refresh "$test_dir/command-log"
   grep -Fx 'systemctl --user restart aoe-serve.service' "$test_dir/command-log" >/dev/null \
@@ -876,7 +899,7 @@ test_conditional_update_retries_a_current_toolchain_after_activation_failure() {
   [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
     "$test_dir/command-log")" -eq 2 ]] \
     || fail "conditional recovery did not retry activation"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 42 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 58 ]] \
     || fail "conditional recovery did not freshly discover and verify both attempts"
   jq -e '
     .last_successful_check == "2026-07-14T01:00:00Z"
@@ -927,7 +950,7 @@ test_conditional_update_retries_after_pre_activation_failure_makes_versions_curr
   [[ "$(grep -c '^systemctl --user restart aoe-serve.service$' \
     "$test_dir/command-log")" -eq 1 ]] \
     || fail "pre-activation recovery did not activate exactly once after verification passed"
-  [[ "$(wc -l <"$test_dir/query-log")" -eq 42 ]] \
+  [[ "$(wc -l <"$test_dir/query-log")" -eq 58 ]] \
     || fail "pre-activation recovery did not freshly discover and verify both attempts"
   jq -e '
     .last_successful_check == "2026-07-14T01:00:00Z"
@@ -968,6 +991,44 @@ assert_harness_versions_checked() {
   for harness in opencode omp pi; do
     grep -Fx "$harness --version" "$command_log" >/dev/null \
       || fail "complete update did not verify $harness --version"
+  done
+}
+
+test_managed_npm_inventory_drives_install_and_version_checks() {
+  local check_dir
+  local expected_entry
+  local install_dir
+  local package
+  local -a expected_inventory=(
+    'Codex CLI (standalone)|@openai/codex'
+    'Claude Code CLI|@anthropic-ai/claude-code'
+    'Pi agent CLI|@earendil-works/pi-coding-agent'
+    'OpenCode CLI|opencode-ai'
+    'Oh My Pi CLI|@oh-my-pi/pi-coding-agent'
+    'codex-acp adapter|@agentclientprotocol/codex-acp'
+    'claude-agent-acp adapter|@agentclientprotocol/claude-agent-acp'
+    'pi-acp adapter|pi-acp'
+  )
+
+  install_dir="$(mktemp -d)"
+  check_dir="$(mktemp -d)"
+  trap 'rm -rf "$install_dir" "$check_dir"' RETURN
+  make_stubs "$install_dir/stubs"
+  make_stubs "$check_dir/stubs"
+
+  run_tool "$install_dir" "$install_dir/stdout" "$install_dir/stderr" --yes \
+    || fail "managed npm inventory update failed: $(<"$install_dir/stderr")"
+  run_check "$check_dir" "$check_dir/stdout" "$check_dir/stderr" \
+    || fail "managed npm inventory check failed: $(<"$check_dir/stderr")"
+
+  for expected_entry in "${expected_inventory[@]}"; do
+    package="${expected_entry#*|}"
+    [[ "$(grep -Fxc "npm install --global $package@latest" \
+      "$install_dir/command-log")" -eq 1 ]] \
+      || fail "managed npm inventory did not install $expected_entry exactly once"
+    [[ "$(grep -Fxc "npm view $package@latest version engines --json" \
+      "$check_dir/command-log")" -eq 1 ]] \
+      || fail "managed npm inventory did not version-check $expected_entry in one metadata query"
   done
 }
 
@@ -2107,7 +2168,8 @@ test_standalone_and_bundled_codex_remain_separate_on_update() {
     || fail "standalone Codex was not installed independently"
   grep -Fx 'npm install --global @agentclientprotocol/codex-acp@latest' "$test_dir/command-log" >/dev/null \
     || fail "codex-acp was not installed independently"
-  grep -Fx 'npm view @openai/codex@latest version' "$test_dir/command-log" >/dev/null \
+  grep -Fx 'npm view @openai/codex@latest version engines --json' \
+    "$test_dir/command-log" >/dev/null \
     || fail "standalone Codex version was not verified independently"
   grep -Fx 'npm view @openai/codex@^2.3.0 version --json' "$test_dir/command-log" >/dev/null \
     || fail "codex-acp bundled runtime was not verified against its adapter-compatible range"
@@ -2521,6 +2583,7 @@ test_absent_engine_declaration_does_not_block_the_update() {
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
 readonly test_cases=(
+  test_managed_npm_inventory_drives_install_and_version_checks
   test_machine_status_reports_current_by_exit_status_without_output
   test_machine_status_reports_outdated_by_exit_status_without_output
   test_machine_status_reports_discovery_failure_and_preserves_freshness_state
