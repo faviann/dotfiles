@@ -251,6 +251,17 @@ in
     Install.WantedBy = [ "default.target" ];
   };
 
+  # This is the final supervised shape, staged without Install.WantedBy or an
+  # activation hook so applying Home Manager cannot cut over the detached server.
+  systemd.user.services.herdr.Service = {
+    Type = "simple";
+    Environment =
+      "PATH=/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin";
+    ExecStart = "/home/faviann/.local/bin/herdr server";
+    Restart = "on-failure";
+    RestartSec = 5;
+    WorkingDirectory = "/home/faviann";
+  };
   programs.openclaw = {
     enable = true;
     stateDir = "${config.home.homeDirectory}/.openclaw";
