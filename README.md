@@ -300,8 +300,11 @@ over HTTP, while herdr is a TUI.
   run from inside a herdr pane; detach from the session first.
 - Configuration: `~/.config/herdr/config.toml` is optional and unmanaged. herdr
   writes to it itself, so chezmoi does not own it.
-- No services: herdr listens on a Unix socket only. It has no dashboard and no
-  LAN port, so it declares no user units.
+- Supervision staging: Home Manager installs the final foreground
+  `herdr.service` shape, but the unit has no user-target enablement and applying
+  the configuration does not start it. Activation is deferred to the scheduled
+  cutover because server shutdown ends pane processes. Until that cutover, the
+  existing detached server and its active panes remain in place.
 
 The manual, loopback-only Collie evaluation that uses herdr is documented in
 the [Collie pilot runbook](docs/collie-pilot-runbook.md). Collie's plugin,

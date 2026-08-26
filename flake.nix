@@ -122,6 +122,10 @@
           aoeLanProxySocket = workstationHomeConfiguration.config.systemd.user.sockets.aoe-lan-proxy;
           aoeLanProxyService = workstationHomeConfiguration.config.systemd.user.services.aoe-lan-proxy;
           aoeServeService = workstationHomeConfiguration.config.systemd.user.services.aoe-serve;
+          herdrService = workstationHomeConfiguration.config.systemd.user.services.herdr;
+          workstationActivation = builtins.mapAttrs (
+            _: entry: entry.data or ""
+          ) workstationHomeConfiguration.config.home.activation;
           collieServiceDropIn =
             workstationHomeConfiguration.config.xdg.configFile
             ."systemd/user/collie.service.d/10-origin-forwarder.conf".text;
