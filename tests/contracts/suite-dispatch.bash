@@ -41,6 +41,7 @@ expected_cases() {
       ;;
     update-agent-tools-check.bash)
       printf '%s\n' \
+        test_managed_npm_inventory_drives_install_and_version_checks \
         test_machine_status_reports_current_by_exit_status_without_output \
         test_machine_status_reports_outdated_by_exit_status_without_output \
         test_machine_status_reports_discovery_failure_and_preserves_freshness_state \

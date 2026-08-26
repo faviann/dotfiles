@@ -425,6 +425,41 @@ node_installed_version() {
 # printing, because discovery and the install phase phrase their refusals
 # differently.
 runtime_engine_failure=""
+managed_npm_metadata_failure=""
+declare -A managed_npm_latest_versions=()
+declare -A managed_npm_engines=()
+
+load_managed_npm_metadata() {
+  local require_versions="$1"
+  local entry
+  local component
+  local package
+  local metadata
+  local version
+  local engines
+
+  managed_npm_metadata_failure=""
+  managed_npm_latest_versions=()
+  managed_npm_engines=()
+  for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
+    component="${entry%%|*}"
+    package="${entry#*|}"
+    metadata="$(npm view "$package@latest" version engines --json 2>/dev/null)" \
+      || { managed_npm_metadata_failure="$component"; return 1; }
+    jq -e 'type == "object"' <<<"$metadata" >/dev/null 2>&1 \
+      || { managed_npm_metadata_failure="$component"; return 1; }
+    engines="$(jq -c '.engines // empty' <<<"$metadata" 2>/dev/null)" \
+      || { managed_npm_metadata_failure="$component"; return 1; }
+    managed_npm_engines["$package"]="$engines"
+    if [[ "$require_versions" == true ]]; then
+      version="$(jq -er '.version | select(type == "string" and length > 0)' \
+        <<<"$metadata" 2>/dev/null)" \
+        || { managed_npm_metadata_failure="$component"; return 1; }
+      managed_npm_latest_versions["$package"]="$version"
+    fi
+  done
+}
+
 check_runtime_engines() {
   local bun_target="$1"
   local entry
@@ -446,10 +481,10 @@ check_runtime_engines() {
     # warning there — which means skipping a package whose metadata failed to
     # load installs a harness that may not start, and the run then dies at the
     # post-install `$harness --version` with the harnesses already replaced.
-    # That is the incident this guard exists to prevent, so a failed lookup
-    # refuses. A rerun costs a minute; the alternative costs the toolchain.
-    engines="$(npm view "$package@latest" engines --json 2>/dev/null)" \
-      || { runtime_engine_failure="$component (engine metadata unavailable)"; return 1; }
+    # That is the incident this guard exists to prevent, so the metadata loader
+    # refuses before this check. A rerun costs a minute; the alternative costs
+    # the toolchain.
+    engines="${managed_npm_engines[$package]}"
     # An absent or malformed declaration is different: it is the package's
     # steady state, not a transient failure, so refusing would block updates
     # until an upstream author fixed it. Nothing to check means nothing to fail.
@@ -484,6 +519,10 @@ check_runtime_engines() {
 
 check_toolchain() {
   local installed
+  local entry
+  local component
+  local package
+  local latest
   local aoe_current="missing"
   local aoe_latest
   local bun_release
@@ -491,14 +530,6 @@ check_toolchain() {
   local bundled_codex_range
   local bundled_codex_versions
   local bundled_codex_latest
-  local claude_latest
-  local pi_latest
-  local opencode_latest
-  local omp_latest
-  local codex_acp_latest
-  local claude_acp_latest
-  local pi_acp_latest
-  local codex_latest
 
   command -v curl >/dev/null 2>&1 \
     || { check_failure_component "AoE"; return 1; }
@@ -529,8 +560,8 @@ check_toolchain() {
   jq -e 'type == "object"' <<<"$installed" >/dev/null \
     || { check_failure_component "npm package inventory"; return 1; }
 
-  codex_latest="$(npm view @openai/codex@latest version)" \
-    || { check_failure_component "Codex CLI (standalone)"; return 1; }
+  load_managed_npm_metadata true \
+    || { check_failure_component "$managed_npm_metadata_failure"; return 1; }
   bundled_codex_range="$(npm view \
     @agentclientprotocol/codex-acp@latest \
     'dependencies.@openai/codex')" \
@@ -554,31 +585,16 @@ check_toolchain() {
     | last
   ' <<<"$bundled_codex_versions")" \
     || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
-  claude_latest="$(npm view @anthropic-ai/claude-code@latest version)" \
-    || { check_failure_component "Claude Code CLI"; return 1; }
-  pi_latest="$(npm view @earendil-works/pi-coding-agent@latest version)" \
-    || { check_failure_component "Pi agent CLI"; return 1; }
-  opencode_latest="$(npm view opencode-ai@latest version)" \
-    || { check_failure_component "OpenCode CLI"; return 1; }
-  omp_latest="$(npm view @oh-my-pi/pi-coding-agent@latest version)" \
-    || { check_failure_component "Oh My Pi CLI"; return 1; }
-  codex_acp_latest="$(npm view @agentclientprotocol/codex-acp@latest version)" \
-    || { check_failure_component "codex-acp adapter"; return 1; }
-  claude_acp_latest="$(npm view @agentclientprotocol/claude-agent-acp@latest version)" \
-    || { check_failure_component "claude-agent-acp adapter"; return 1; }
-  pi_acp_latest="$(npm view pi-acp@latest version)" \
-    || { check_failure_component "pi-acp adapter"; return 1; }
-  require_stable_version "Codex CLI (standalone)" "$codex_latest" || return 1
   require_stable_version "Codex runtime (codex-acp)" "$bundled_codex_latest" \
     || return 1
-  require_stable_version "Claude Code CLI" "$claude_latest" || return 1
-  require_stable_version "Pi agent CLI" "$pi_latest" || return 1
-  require_stable_version "OpenCode CLI" "$opencode_latest" || return 1
-  require_stable_version "Oh My Pi CLI" "$omp_latest" || return 1
-  require_stable_version "codex-acp adapter" "$codex_acp_latest" || return 1
-  require_stable_version "claude-agent-acp adapter" "$claude_acp_latest" \
-    || return 1
-  require_stable_version "pi-acp adapter" "$pi_acp_latest" || return 1
+  for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
+    component="${entry%%|*}"
+    package="${entry#*|}"
+    require_stable_version \
+      "$component" \
+      "${managed_npm_latest_versions[$package]}" \
+      || return 1
+  done
 
   check_runtime_engines "$bun_latest" \
     || { check_failure_component "$runtime_engine_failure"; return 1; }
@@ -589,30 +605,16 @@ check_toolchain() {
   check_component "AoE" \
     "$aoe_current" \
     "$aoe_latest"
-  check_component "Codex CLI (standalone)" \
-    "$(jq -r '.dependencies["@openai/codex"].version // "missing"' <<<"$installed")" \
-    "$codex_latest"
-  check_component "Claude Code CLI" \
-    "$(jq -r '.dependencies["@anthropic-ai/claude-code"].version // "missing"' <<<"$installed")" \
-    "$claude_latest"
-  check_component "Pi agent CLI" \
-    "$(jq -r '.dependencies["@earendil-works/pi-coding-agent"].version // "missing"' <<<"$installed")" \
-    "$pi_latest"
-  check_component "OpenCode CLI" \
-    "$(jq -r '.dependencies["opencode-ai"].version // "missing"' <<<"$installed")" \
-    "$opencode_latest"
-  check_component "Oh My Pi CLI" \
-    "$(jq -r '.dependencies["@oh-my-pi/pi-coding-agent"].version // "missing"' <<<"$installed")" \
-    "$omp_latest"
-  check_component "codex-acp adapter" \
-    "$(jq -r '.dependencies["@agentclientprotocol/codex-acp"].version // "missing"' <<<"$installed")" \
-    "$codex_acp_latest"
-  check_component "claude-agent-acp adapter" \
-    "$(jq -r '.dependencies["@agentclientprotocol/claude-agent-acp"].version // "missing"' <<<"$installed")" \
-    "$claude_acp_latest"
-  check_component "pi-acp adapter" \
-    "$(jq -r '.dependencies["pi-acp"].version // "missing"' <<<"$installed")" \
-    "$pi_acp_latest"
+  for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
+    component="${entry%%|*}"
+    package="${entry#*|}"
+    latest="${managed_npm_latest_versions[$package]}"
+    check_component \
+      "$component" \
+      "$(jq -r --arg package "$package" \
+        '.dependencies[$package].version // "missing"' <<<"$installed")" \
+      "$latest"
+  done
   check_component "Codex runtime (codex-acp)" \
     "$(jq -r '.dependencies["@agentclientprotocol/codex-acp"].dependencies["@openai/codex"].version // "missing"' <<<"$installed")" \
     "$bundled_codex_latest"
@@ -820,6 +822,8 @@ bun_release="$(resolve_bun_release)" \
   || fail "installation failed: Bun runtime (release metadata)"
 bun_target="$(jq -er '.version' <<<"$bun_release")" \
   || fail "installation failed: Bun runtime (release metadata)"
+load_managed_npm_metadata false \
+  || fail "update refused before any change: $managed_npm_metadata_failure (engine metadata unavailable)"
 check_runtime_engines "$bun_target" \
   || fail "update refused before any change: $runtime_engine_failure"
 
@@ -840,16 +844,11 @@ for binary in codex claude pi opencode omp; do
   fi
 done
 
-install_npm_component "Codex CLI (standalone)" "@openai/codex@latest"
-install_npm_component "Claude Code CLI" "@anthropic-ai/claude-code@latest"
-install_npm_component "Pi agent CLI" "@earendil-works/pi-coding-agent@latest"
-install_npm_component "OpenCode CLI" "opencode-ai@latest"
-install_npm_component "Oh My Pi CLI" "@oh-my-pi/pi-coding-agent@latest"
-install_npm_component "codex-acp adapter" "@agentclientprotocol/codex-acp@latest"
-install_npm_component \
-  "claude-agent-acp adapter" \
-  "@agentclientprotocol/claude-agent-acp@latest"
-install_npm_component "pi-acp adapter" "pi-acp@latest"
+for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
+  component="${entry%%|*}"
+  package="${entry#*|}"
+  install_npm_component "$component" "$package@latest"
+done
 
 hash -r 2>/dev/null || true
 
