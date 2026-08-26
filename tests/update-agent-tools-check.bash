@@ -298,6 +298,14 @@ if [[ "$1" == "view" && "$3" == "version" && "$4" == "engines" \
     'pi-acp@latest') version="$PI_ACP_LATEST"; engines="$OTHER_ENGINES" ;;
     *) printf 'unexpected npm package: %s\n' "$2" >&2; exit 64 ;;
   esac
+  if [[ "${NPM_INVALID_VERSION_PACKAGE:-}" == "$2" ]]; then
+    if [[ -n "$engines" ]]; then
+      jq -cn --argjson engines "$engines" '{version: null, engines: $engines}'
+    else
+      jq -cn '{version: null}'
+    fi
+    exit 0
+  fi
   if [[ -n "$engines" ]]; then
     jq -cn --arg version "$version" --argjson engines "$engines" \
       '{version: $version, engines: $engines}'
@@ -485,6 +493,7 @@ run_tool() {
     CURL_FAIL="${CURL_FAIL:-0}" \
     CURL_GATE="${CURL_GATE:-}" \
     NPM_EMPTY_PACKAGE="${NPM_EMPTY_PACKAGE:-}" \
+    NPM_INVALID_VERSION_PACKAGE="${NPM_INVALID_VERSION_PACKAGE:-}" \
     NPM_ENGINES_FAIL_PACKAGE="${NPM_ENGINES_FAIL_PACKAGE:-}" \
     NPM_FAIL_PACKAGE_AFTER_INSTALL="${NPM_FAIL_PACKAGE_AFTER_INSTALL:-}" \
     NPM_FAIL_PACKAGE="${NPM_FAIL_PACKAGE:-}" \
@@ -1399,11 +1408,14 @@ test_malformed_aoe_release_is_a_failed_check() {
 }
 
 test_empty_npm_version_is_a_failed_check() {
+  local direct_dir
   local expected_failure
   local state_file
   local test_dir
+  direct_dir="$(mktemp -d)"
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
+  trap 'rm -rf "$direct_dir" "$test_dir"' RETURN
+  make_stubs "$direct_dir/stubs"
   make_stubs "$test_dir/stubs"
   state_file="$test_dir/state/update-agent-tools/state.json"
 
@@ -1429,6 +1441,20 @@ test_empty_npm_version_is_a_failed_check() {
     and .check_status == "failed"
   ' "$state_file" >/dev/null \
     || fail "empty npm version replaced the last known-good state"
+
+  if NPM_INVALID_VERSION_PACKAGE='@openai/codex@latest' \
+    run_tool \
+      "$direct_dir" \
+      "$direct_dir/stdout" \
+      "$direct_dir/stderr" \
+      --yes; then
+    fail "direct update accepted an invalid managed npm version"
+  fi
+  grep -Fx \
+    'update-agent-tools: pre-activation verification failed: Codex CLI (standalone)' \
+    "$direct_dir/stderr" >/dev/null \
+    || fail "direct update diagnosed a readable-engine invalid version in the wrong phase: $(<"$direct_dir/stderr")"
+  assert_complete_npm_refresh "$direct_dir/command-log"
 }
 
 test_npm_registry_failure_preserves_cache_and_retries_after_one_hour() {

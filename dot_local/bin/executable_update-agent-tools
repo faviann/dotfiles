@@ -430,6 +430,7 @@ declare -A managed_npm_latest_versions=()
 declare -A managed_npm_engines=()
 
 load_managed_npm_metadata() {
+  local require_versions="$1"
   local entry
   local component
   local package
@@ -445,13 +446,17 @@ load_managed_npm_metadata() {
     package="${entry#*|}"
     metadata="$(npm view "$package@latest" version engines --json 2>/dev/null)" \
       || { managed_npm_metadata_failure="$component"; return 1; }
-    version="$(jq -er '.version | select(type == "string" and length > 0)' \
-      <<<"$metadata" 2>/dev/null)" \
+    jq -e 'type == "object"' <<<"$metadata" >/dev/null 2>&1 \
       || { managed_npm_metadata_failure="$component"; return 1; }
     engines="$(jq -c '.engines // empty' <<<"$metadata" 2>/dev/null)" \
       || { managed_npm_metadata_failure="$component"; return 1; }
-    managed_npm_latest_versions["$package"]="$version"
     managed_npm_engines["$package"]="$engines"
+    if [[ "$require_versions" == true ]]; then
+      version="$(jq -er '.version | select(type == "string" and length > 0)' \
+        <<<"$metadata" 2>/dev/null)" \
+        || { managed_npm_metadata_failure="$component"; return 1; }
+      managed_npm_latest_versions["$package"]="$version"
+    fi
   done
 }
 
@@ -555,7 +560,7 @@ check_toolchain() {
   jq -e 'type == "object"' <<<"$installed" >/dev/null \
     || { check_failure_component "npm package inventory"; return 1; }
 
-  load_managed_npm_metadata \
+  load_managed_npm_metadata true \
     || { check_failure_component "$managed_npm_metadata_failure"; return 1; }
   bundled_codex_range="$(npm view \
     @agentclientprotocol/codex-acp@latest \
@@ -817,7 +822,7 @@ bun_release="$(resolve_bun_release)" \
   || fail "installation failed: Bun runtime (release metadata)"
 bun_target="$(jq -er '.version' <<<"$bun_release")" \
   || fail "installation failed: Bun runtime (release metadata)"
-load_managed_npm_metadata \
+load_managed_npm_metadata false \
   || fail "update refused before any change: $managed_npm_metadata_failure (engine metadata unavailable)"
 check_runtime_engines "$bun_target" \
   || fail "update refused before any change: $runtime_engine_failure"
