@@ -179,6 +179,8 @@ expected_cases() {
         test_source_only_change_still_delegates_workstation_configuration \
         test_current_workstation_does_not_delegate_workstation_configuration \
         test_workstation_configuration_failure_stops_before_agent_tools \
+        test_failed_workstation_configuration_without_marker_is_retried \
+        test_failed_workstation_configuration_is_retried_before_completion \
         test_agent_update_failure_retries_without_reapplying_dotfiles \
         test_unsupported_arguments_fail_before_maintenance \
         test_dotfiles_failure_prevents_agent_tool_checks \
