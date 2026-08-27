@@ -31,61 +31,6 @@ It includes ShellCheck, the test-runner contract, and every behavioral suite,
 so a standalone full `bash scripts/run-tests` immediately beforehand is
 redundant.
 
-## Supported AFK workflow
-
-Sandcastle v0.12.0 is installed as a root development dependency and its
-generated Codex, Docker, GitHub Issues simple loop lives in `.sandcastle/`.
-Restore the exact dependency tree and build the generated image with:
-
-```bash
-npm ci
-npx sandcastle docker build-image
-```
-
-Codex uses the workstation's existing ChatGPT subscription login. At launch,
-the workflow makes a mode-restricted temporary copy of
-`${CODEX_HOME:-~/.codex}/auth.json`, mounts only that staging directory
-read-only, copies the login into the fresh container's writable Codex home, and
-requires `codex login status` to pass before agent work begins. The live host
-Codex directory is never mounted. `OPENAI_KEY` and `OPENAI_API_KEY` are removed;
-there is no API-key fallback.
-
-GitHub authentication is separate. Put only `GH_TOKEN` in the ignored
-`.sandcastle/.env` and restrict the file to the current user:
-
-```bash
-install -m 600 .sandcastle/.env.example .sandcastle/.env
-```
-
-Then fill in `GH_TOKEN` with the workstation's GitHub credential. The token
-needs Issues read/write and Metadata read access for this repository.
-
-The stock `Sandcastle` label is the backlog. The generated loop chooses among
-eligible open issues, performs up to three one-issue iterations, commits and
-closes completed work, and locally merges its temporary branch into the current
-`HEAD`. Run only one Sandcastle process for this repository at a time; this is
-an operator rule, not an automated claim or process guard.
-
-Start the foreground repository command in the predictable window owned by the
-existing `main` tmux session:
-
-```bash
-tmux new-window -d -t main -n sandcastle-dotfiles \
-  -c "$(pwd)" 'npm run sandcastle'
-tmux set-window-option -t main:sandcastle-dotfiles remain-on-exit failed
-```
-
-Attach to `main` for live output. Timestamped logs under
-`.sandcastle/logs/`, retained failed worktrees, patches, and normal Codex
-session capture are the recovery evidence; tmux owns the live process but is
-not the durable result store.
-
-This supported AFK workflow deliberately stays close to Sandcastle upstream.
-The research notes under `docs/research/` describe the earlier disposable
-pilot harness and its proof-only controls; exact-one guards, explicit issue
-targets, proof scans, no-close/no-merge policy, and per-run teardown are not
-part of daily operation.
-
 ## Workstation Home Manager
 
 The `workstation` Home Manager flake installs user tooling for the Debian LXC
