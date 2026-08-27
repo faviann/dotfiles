@@ -25,14 +25,6 @@ flake.lock
 home/
 home/**
 
-# Repository-only Sandcastle tooling
-package.json
-package-lock.json
-node_modules/
-node_modules/**
-.sandcastle/
-.sandcastle/**
-
 {{- if .is_lxc }}
 .config/fish/
 .config/fish/**
