@@ -48,11 +48,14 @@ test_moraine_profile_uses_one_integrity_pinned_source_build() {
         {
           inherit (package) version;
           inherit (package.passthru.release)
+            interactiveQueryMemoryBytes
             releaseAssetHash
+            serverMemoryBytes
             rustToolchainVersion
             sourceHash
             sourceRevision
             sourceVersion;
+          userQueryMemoryBytes = package.passthru.release.userQueryMemoryBytes;
           source = "https://github.com/eric-tramel/moraine/commit/" + package.passthru.release.sourceRevision;
           storePath = builtins.unsafeDiscardStringContext (builtins.toString package);
           hasReleasePassthru = package.passthru ? release;
@@ -67,11 +70,14 @@ test_moraine_profile_uses_one_integrity_pinned_source_build() {
     (.sourceHash == "sha256-5ngGU2CjP8X+0rsL2wquvrMpvJK4Z4Gpl8AfiiqI/sM=") and
     (.releaseAssetHash == "sha256-JqjV/LL43yt1REfSyZBpYe/kHt7Y4ISqPfOB7C6ArX0=") and
     (.rustToolchainVersion == "1.96.0") and
+    (.interactiveQueryMemoryBytes == 8589934592) and
+    (.userQueryMemoryBytes == 17179869184) and
+    (.serverMemoryBytes == 51539607552) and
     (.source == "https://github.com/eric-tramel/moraine/commit/91cd7a13ba29cbaca8b1fbc2855864d3e87e54b9") and
     (.storePath | test("^/nix/store/[^/]+-moraine-0\\.7\\.3\\+g91cd7a13ba29$")) and
     (.hasReleasePassthru == true)
   ' <<<"$release" >/dev/null \
-    || fail 'workstation does not use the expected commit-pinned Moraine source build'
+    || fail 'workstation does not use the expected commit-pinned and locally patched Moraine source build'
 
   built_package="$(jq -r '.storePath' <<<"$release")"
   if [[ -z "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
