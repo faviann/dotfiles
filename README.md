@@ -112,6 +112,14 @@ hash-pinned v0.7.3 monitor assets. There is intentionally no separate monitor
 unit; the unified MCP/backend executable owns the monitor HTTP listener, native
 loopback `/mcp` endpoint, and private MCP socket.
 
+The package temporarily gives Moraine's interactive query profile 8 GiB, its
+ClickHouse user a 16 GiB aggregate limit, and managed ClickHouse a 48 GiB
+process limit on this 64 GiB host. This keeps session discovery usable while
+upstream issue #599's bounded summary query remains unresolved. Background
+queries retain upstream's 256 MiB ceiling. Remove
+`packages/moraine-managed-memory-headroom.patch` when a bounded upstream
+discovery path is pinned.
+
 Home Manager owns `~/.moraine/config.toml` as a read-only Nix-managed file.
 Persistent ingestion state, ClickHouse data, logs, sockets, and process state
 remain under `~/.moraine`. Do not use `moraine setup` or another config-writing

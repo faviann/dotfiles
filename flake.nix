@@ -109,11 +109,14 @@
           moraineRelease = {
             inherit (morainePackage) version;
             inherit (morainePackage.passthru.release)
+              interactiveQueryMemoryBytes
               releaseAssetHash
+              serverMemoryBytes
               rustToolchainVersion
               sourceHash
               sourceRevision
               sourceVersion
+              userQueryMemoryBytes
               ;
             source = "https://github.com/eric-tramel/moraine/commit/${morainePackage.passthru.release.sourceRevision}";
             storePath = "${morainePackage}";

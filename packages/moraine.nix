@@ -35,6 +35,12 @@ rustPlatform.buildRustPackage (_finalAttrs: {
     hash = sourceHash;
   };
 
+  # Temporary workaround for upstream issue #599. Session discovery expands a
+  # wide view before applying selective filters. Give local interactive queries
+  # 8 GiB, the Moraine ClickHouse user 16 GiB, and the managed server 48 GiB on
+  # this 64 GiB host while keeping background work at its upstream limit.
+  patches = [ ./moraine-managed-memory-headroom.patch ];
+
   cargoHash = "sha256-lnM4IQ20UnNAOkBQ20s95viS10S5Qxl79wYcBjJZJTM=";
 
   nativeBuildInputs = [ pkg-config ];
@@ -69,6 +75,9 @@ rustPlatform.buildRustPackage (_finalAttrs: {
       sourceVersion
       ;
     rustToolchainVersion = "1.96.0";
+    interactiveQueryMemoryBytes = 8589934592;
+    userQueryMemoryBytes = 17179869184;
+    serverMemoryBytes = 51539607552;
   };
 
   meta = {
