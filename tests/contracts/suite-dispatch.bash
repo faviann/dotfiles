@@ -132,7 +132,7 @@ expected_cases() {
       ;;
     workstation-moraine.bash)
       printf '%s\n' \
-        test_moraine_profile_uses_one_integrity_pinned_release_bundle \
+        test_moraine_profile_uses_one_integrity_pinned_source_build \
         test_moraine_configures_codex_and_claude_sources_with_backfill \
         test_moraine_config_keeps_redaction_and_the_default_local_topology \
         test_moraine_service_owns_and_restarts_the_upstream_stack \

@@ -28,7 +28,7 @@ rendered_moraine_config() {
     --apply 'text: builtins.fromTOML (builtins.unsafeDiscardStringContext text)'
 }
 
-test_moraine_profile_uses_one_integrity_pinned_release_bundle() {
+test_moraine_profile_uses_one_integrity_pinned_source_build() {
   local built_package
   local executable
   local release
@@ -47,33 +47,42 @@ test_moraine_profile_uses_one_integrity_pinned_release_bundle() {
         in
         {
           inherit (package) version;
-          hash = package.src.outputHash;
-          source = package.src.url;
+          inherit (package.passthru.release)
+            releaseAssetHash
+            rustToolchainVersion
+            sourceHash
+            sourceRevision
+            sourceVersion;
+          source = "https://github.com/eric-tramel/moraine/commit/" + package.passthru.release.sourceRevision;
           storePath = builtins.unsafeDiscardStringContext (builtins.toString package);
           hasReleasePassthru = package.passthru ? release;
         }
       '
-  )" || fail 'could not render the Moraine release package'
+  )" || fail 'could not render the Moraine source package'
 
   jq -e '
-    (.version == "0.7.3") and
-    (.hash == "sha256-JqjV/LL43yt1REfSyZBpYe/kHt7Y4ISqPfOB7C6ArX0=") and
-    (.source == "https://github.com/eric-tramel/moraine/releases/download/v0.7.3/moraine-bundle-x86_64-unknown-linux-gnu.tar.gz") and
-    (.storePath | test("^/nix/store/[^/]+-moraine-0\\.7\\.3$")) and
-    (.hasReleasePassthru == false)
+    (.version == "0.7.3+g91cd7a13ba29") and
+    (.sourceVersion == "0.7.3") and
+    (.sourceRevision == "91cd7a13ba29cbaca8b1fbc2855864d3e87e54b9") and
+    (.sourceHash == "sha256-5ngGU2CjP8X+0rsL2wquvrMpvJK4Z4Gpl8AfiiqI/sM=") and
+    (.releaseAssetHash == "sha256-JqjV/LL43yt1REfSyZBpYe/kHt7Y4ISqPfOB7C6ArX0=") and
+    (.rustToolchainVersion == "1.96.0") and
+    (.source == "https://github.com/eric-tramel/moraine/commit/91cd7a13ba29cbaca8b1fbc2855864d3e87e54b9") and
+    (.storePath | test("^/nix/store/[^/]+-moraine-0\\.7\\.3\\+g91cd7a13ba29$")) and
+    (.hasReleasePassthru == true)
   ' <<<"$release" >/dev/null \
-    || fail 'workstation does not use the expected single pinned Moraine release bundle'
+    || fail 'workstation does not use the expected commit-pinned Moraine source build'
 
   built_package="$(jq -r '.storePath' <<<"$release")"
   if [[ -z "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
     built_package="$(nix build --no-link --print-out-paths "$REPO_ROOT#moraine")" \
-      || fail 'could not build the pinned Moraine release bundle'
+      || fail 'could not build the pinned Moraine source package'
   fi
   [[ "$built_package" == "$(jq -r '.storePath' <<<"$release")" ]] \
-    || fail 'built Moraine package differs from the workstation release bundle'
+    || fail 'built Moraine package differs from the workstation source build'
   for executable in moraine moraine-ingest moraine-monitor moraine-mcp; do
     [[ -x "$built_package/bin/$executable" ]] \
-      || fail "Moraine release bundle does not install $executable"
+      || fail "Moraine source package does not install $executable"
   done
 }
 
@@ -122,12 +131,12 @@ test_moraine_config_keeps_redaction_and_the_default_local_topology() {
     (.identity.author == "faviann@gmail.com") and
     (has("redaction") | not) and
     ((.backend // {}) | has("auth_token") | not) and
-    (has("backend") | not) and
-    (has("monitor") | not) and
+    (.backend == { bind: "127.0.0.1" }) and
+    (.monitor == { port: 8080 }) and
     (has("mcp") | not) and
     (.runtime.root_dir == "~/.moraine") and
     (.runtime.managed_clickhouse_dir == "~/.moraine/clickhouse/current") and
-    (.runtime.service_bin_dir | test("^/nix/store/[^/]+-moraine-0\\.7\\.3/bin$")) and
+    (.runtime.service_bin_dir | test("^/nix/store/[^/]+-moraine-0\\.7\\.3\\+g91cd7a13ba29/bin$")) and
     (has("clickhouse") | not) and
     (has("backends") | not) and
     (has("routes") | not)
@@ -163,7 +172,7 @@ test_moraine_service_owns_and_restarts_the_upstream_stack() {
     (.service.Service.Type == "simple") and
     (.service.Service.Restart == "on-failure") and
     (.service.Service.RestartSec == 5) and
-    (.service.Service.ExecStart[0] | test("/bin/moraine-service /nix/store/[^/]+-moraine-0\\.7\\.3/bin/moraine %h/\\.moraine/config\\.toml$")) and
+    (.service.Service.ExecStart[0] | test("/bin/moraine-service /nix/store/[^/]+-moraine-0\\.7\\.3\\+g91cd7a13ba29/bin/moraine %h/\\.moraine/config\\.toml$")) and
     (.service.Service.ExecStop | test("/moraine --config %h/\\.moraine/config\\.toml down$")) and
     (.service.Install.WantedBy == ["default.target"])
   ' <<<"$topology" >/dev/null \
@@ -228,7 +237,7 @@ test_moraine_leaves_user_codex_configuration_unmanaged() {
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
 readonly test_cases=(
-  test_moraine_profile_uses_one_integrity_pinned_release_bundle
+  test_moraine_profile_uses_one_integrity_pinned_source_build
   test_moraine_configures_codex_and_claude_sources_with_backfill
   test_moraine_config_keeps_redaction_and_the_default_local_topology
   test_moraine_service_owns_and_restarts_the_upstream_stack
