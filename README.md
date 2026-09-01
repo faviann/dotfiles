@@ -104,10 +104,13 @@ home-manager build --flake /home/aperture/repos/dotfiles#workstation
 
 ## Workstation Moraine
 
-The workstation profile pins one Moraine v0.7.3 release bundle and installs its
-matching CLI, ingest, monitor-compatibility alias, and MCP executables. There is
-intentionally no separate monitor unit; the unified MCP/backend executable owns
-the monitor HTTP listener as well as the MCP socket.
+The workstation profile source-builds Moraine at commit `91cd7a13ba29`, the
+mainline merge of upstream PR #658 after v0.7.3, with the upstream Rust 1.96.0
+toolchain and locked Cargo closure. It installs matching CLI, ingest,
+monitor-compatibility alias, and MCP executables, while reusing the unchanged,
+hash-pinned v0.7.3 monitor assets. There is intentionally no separate monitor
+unit; the unified MCP/backend executable owns the monitor HTTP listener, native
+loopback `/mcp` endpoint, and private MCP socket.
 
 Home Manager owns `~/.moraine/config.toml` as a read-only Nix-managed file.
 Persistent ingestion state, ClickHouse data, logs, sockets, and process state
@@ -125,10 +128,11 @@ The single `moraine.service` user unit is the operator surface for the local
 stack. Upstream `moraine up` owns managed ClickHouse readiness, database
 migrations, ingest, and unified-backend startup. The foreground unit monitors
 aggregate Moraine health and restarts the complete stack on failure. Default
-Moraine topology keeps the HTTP listener on `127.0.0.1:8080` and its per-user
-MCP Unix socket at mode 0600; there is no non-loopback listener. Applying a Home
-Manager generation restarts the service when the managed Moraine configuration
-changes, so ingestion reloads newly declared sources.
+Moraine topology explicitly keeps the HTTP listener on `127.0.0.1:8080`, where
+the pinned build serves `POST /mcp`, and its per-user MCP Unix socket at mode
+0600; there is no non-loopback listener. Applying a Home Manager generation
+restarts the service when the managed Moraine configuration changes, so
+ingestion reloads newly declared sources.
 
 The workstation profile does not manage `~/.codex/config.toml` or register a
 Codex MCP server. Moraine's local producer and query backend operate without a

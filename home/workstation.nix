@@ -52,6 +52,12 @@ let
     glob = "~/.claude/projects/**/*.jsonl"
     watch_root = "~/.claude/projects"
 
+    [backend]
+    bind = "127.0.0.1"
+
+    [monitor]
+    port = 8080
+
     [runtime]
     root_dir = "${moraineRoot}"
     service_bin_dir = "${morainePackage}/bin"

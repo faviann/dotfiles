@@ -1,12 +1,22 @@
 {
   lib,
-  stdenvNoCC,
+  stdenv,
+  fetchFromGitHub,
   fetchurl,
-  autoPatchelfHook,
-  libgcc,
+  rustPlatform,
+  pkg-config,
 }:
 
 let
+  sourceVersion = "0.7.3";
+  sourceRevision = "91cd7a13ba29cbaca8b1fbc2855864d3e87e54b9";
+  sourceShortRevision = builtins.substring 0 12 sourceRevision;
+  sourceHash = "sha256-5ngGU2CjP8X+0rsL2wquvrMpvJK4Z4Gpl8AfiiqI/sM=";
+  releaseAssetHash = "sha256-JqjV/LL43yt1REfSyZBpYe/kHt7Y4ISqPfOB7C6ArX0=";
+  releaseAssets = fetchurl {
+    url = "https://github.com/eric-tramel/moraine/releases/download/v${sourceVersion}/moraine-bundle-x86_64-unknown-linux-gnu.tar.gz";
+    hash = releaseAssetHash;
+  };
   executables = [
     "moraine"
     "moraine-ingest"
@@ -14,37 +24,58 @@ let
     "moraine-mcp"
   ];
 in
-stdenvNoCC.mkDerivation (finalAttrs: {
+rustPlatform.buildRustPackage (_finalAttrs: {
   pname = "moraine";
-  version = "0.7.3";
+  version = "${sourceVersion}+g${sourceShortRevision}";
 
-  src = fetchurl {
-    url = "https://github.com/eric-tramel/moraine/releases/download/v${finalAttrs.version}/moraine-bundle-x86_64-unknown-linux-gnu.tar.gz";
-    hash = "sha256-JqjV/LL43yt1REfSyZBpYe/kHt7Y4ISqPfOB7C6ArX0=";
+  src = fetchFromGitHub {
+    owner = "eric-tramel";
+    repo = "moraine";
+    rev = sourceRevision;
+    hash = sourceHash;
   };
 
-  nativeBuildInputs = [ autoPatchelfHook ];
-  buildInputs = [ libgcc ];
+  cargoHash = "sha256-lnM4IQ20UnNAOkBQ20s95viS10S5Qxl79wYcBjJZJTM=";
 
-  sourceRoot = ".";
+  nativeBuildInputs = [ pkg-config ];
+
+  cargoBuildFlags = lib.concatMap (package: [ "-p" package ]) executables;
+  doCheck = false;
+
+  MORAINE_BUILD_GIT_SHA = sourceShortRevision;
 
   installPhase = ''
     runHook preInstall
 
-    mkdir -p "$out/web/monitor"
     for executable in ${lib.escapeShellArgs executables}; do
-      install -Dm755 "bin/$executable" "$out/bin/$executable"
+      install -Dm755 \
+        "target/${stdenv.hostPlatform.rust.rustcTarget}/release/$executable" \
+        "$out/bin/$executable"
     done
-    cp -R web/monitor/dist "$out/web/monitor/"
+
+    assets_dir="$(mktemp -d)"
+    tar -xzf ${releaseAssets} -C "$assets_dir"
+    mkdir -p "$out/web/monitor"
+    cp -R "$assets_dir/web/monitor/dist" "$out/web/monitor/"
 
     runHook postInstall
   '';
 
+  passthru.release = {
+    inherit
+      releaseAssetHash
+      sourceHash
+      sourceRevision
+      sourceVersion
+      ;
+    rustToolchainVersion = "1.96.0";
+  };
+
   meta = {
     description = "Local-first coding-agent observability and retrieval";
     homepage = "https://moraine.sh";
-    license = lib.licenses.mit;
+    license = lib.licenses.asl20;
     platforms = [ "x86_64-linux" ];
-    sourceProvenance = [ lib.sourceTypes.binaryNativeCode ];
+    sourceProvenance = [ lib.sourceTypes.fromSource ];
   };
 })

@@ -8,6 +8,10 @@
       url = "github:nix-community/home-manager/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     hermes-agent.url = "github:NousResearch/hermes-agent";
     nix-openclaw = {
       url = "github:openclaw/nix-openclaw";
@@ -20,6 +24,7 @@
     {
       nixpkgs,
       dotnet-nixpkgs,
+      fenix,
       home-manager,
       hermes-agent,
       nix-openclaw,
@@ -39,7 +44,18 @@
         inherit system;
       };
       dotnetSdk = dotnetPkgs.dotnet-sdk_10;
-      morainePackage = pkgs.callPackage ./packages/moraine.nix { };
+      moraineToolchain =
+        (fenix.packages.${system}.toolchainOf {
+          channel = "1.96.0";
+          sha256 = "sha256-mvUGEOHYJpn3ikC5hckneuGixaC+yGrkMM/liDIDgoU=";
+        }).minimalToolchain;
+      moraineRustPlatform = pkgs.makeRustPlatform {
+        cargo = moraineToolchain;
+        rustc = moraineToolchain;
+      };
+      morainePackage = pkgs.callPackage ./packages/moraine.nix {
+        rustPlatform = moraineRustPlatform;
+      };
       behavioralTestInputs = [
         pkgs.bash
         pkgs.chezmoi
@@ -92,8 +108,14 @@
             };
           moraineRelease = {
             inherit (morainePackage) version;
-            hash = morainePackage.src.outputHash;
-            source = morainePackage.src.url;
+            inherit (morainePackage.passthru.release)
+              releaseAssetHash
+              rustToolchainVersion
+              sourceHash
+              sourceRevision
+              sourceVersion
+              ;
+            source = "https://github.com/eric-tramel/moraine/commit/${morainePackage.passthru.release.sourceRevision}";
             storePath = "${morainePackage}";
             hasReleasePassthru = morainePackage.passthru ? release;
           };
