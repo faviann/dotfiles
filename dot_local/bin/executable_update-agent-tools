@@ -446,7 +446,14 @@ load_managed_npm_metadata() {
     package="${entry#*|}"
     metadata="$(npm view "$package@latest" version engines --json 2>/dev/null)" \
       || { managed_npm_metadata_failure="$component"; return 1; }
-    jq -e 'type == "object"' <<<"$metadata" >/dev/null 2>&1 \
+    # npm returns just the version string when the package has no engines.
+    # Normalize that successful response; failed reads and other shapes still
+    # refuse the update before any toolchain mutation.
+    metadata="$(jq -ce '
+      if type == "string" and length > 0 then {version: .}
+      elif type == "object" then .
+      else error("invalid package metadata") end
+    ' <<<"$metadata" 2>/dev/null)" \
       || { managed_npm_metadata_failure="$component"; return 1; }
     engines="$(jq -c '.engines // empty' <<<"$metadata" 2>/dev/null)" \
       || { managed_npm_metadata_failure="$component"; return 1; }
