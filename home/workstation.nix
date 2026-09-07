@@ -9,6 +9,11 @@ let
     pkgs.unzip
     pkgs.findutils
   ];
+  collieBootstrap = pkgs.writeShellApplication {
+    name = "collie-bootstrap";
+    runtimeInputs = [ pkgs.bash pkgs.coreutils pkgs.jq ];
+    text = builtins.readFile ../scripts/collie-bootstrap;
+  };
   moraineRootRelative = ".moraine";
   moraineRoot = "~/${moraineRootRelative}";
   moraineConfigRelative = "${moraineRootRelative}/config.toml";
@@ -200,6 +205,27 @@ in
     };
 
     Install.WantedBy = [ "sockets.target" ];
+  };
+
+  # Collie's generated unit is lost on an LXC rebuild. Resolve the persisted
+  # installation at each boot rather than retaining its generated executable paths.
+  systemd.user.services.collie-bootstrap = {
+    Unit = {
+      Description = "Regenerate and start the installed Collie bridge";
+      # Collie's start waits for a unit ordered After=default.target. Running
+      # before that target would deadlock the first boot after a rebuild.
+      After = [ "default.target" ];
+    };
+    Install.WantedBy = [ "default.target" ];
+    Service = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      Environment =
+        "PATH=/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin";
+      ExecStart = "${collieBootstrap}/bin/collie-bootstrap";
+      WorkingDirectory = "/home/faviann";
+      TimeoutStartSec = 300;
+    };
   };
 
   systemd.user.sockets.collie-origin-forwarder = {

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+registry="${XDG_CONFIG_HOME:-$HOME/.config}/herdr/plugins.json"
+if [[ ! -e "$registry" ]]; then
+  printf 'Collie is not installed; skipping bootstrap.\n'
+  exit 0
+fi
+
+# An absent plugin is optional; corrupt metadata or a stale install is an error.
+root="$(jq -er '
+  if type != "array" then error("expected a plugin registry array") else . end
+  | map(select(.plugin_id == "herdr.collie"))
+  | if length == 0 then ""
+    elif length != 1 then error("expected one Collie installation")
+    else .[0].plugin_root
+      | if type == "string" and startswith("/") then .
+        else error("expected an absolute Collie plugin_root") end
+    end
+' "$registry")"
+if [[ -z "$root" ]]; then
+  printf 'Collie is not installed; skipping bootstrap.\n'
+  exit 0
+fi
+if [[ ! -f "$root/scripts/collie-ctl.sh" ]]; then
+  printf 'Collie startup script is missing under %s\n' "$root" >&2
+  exit 1
+fi
+
+# Let the installed version regenerate its own unit and enable it idempotently.
+cd "$root"
+exec bash "$root/scripts/collie-ctl.sh" start

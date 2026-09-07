@@ -186,10 +186,87 @@ test_existing_aoe_forwarder_rendering_is_unchanged() {
     || fail 'existing AoE proxy service rendering changed'
 }
 
+# Exercise the handoff with a plugin fixture that owns its generated unit.
+collie_bootstrap_fixture() {
+  fixture_dir="$(mktemp -d)"
+  export XDG_CONFIG_HOME="$fixture_dir/config"
+  mkdir -p "$XDG_CONFIG_HOME/herdr" "$fixture_dir/plugin with spaces/scripts"
+  jq -n --arg root "$fixture_dir/plugin with spaces" \
+    '[{plugin_id: "herdr.collie", plugin_root: $root}]' \
+    >"$XDG_CONFIG_HOME/herdr/plugins.json"
+  cat >"$fixture_dir/plugin with spaces/scripts/collie-ctl.sh" <<'PLUGIN'
+set -eu
+[[ "$#" == 1 && "$1" == start ]]
+mkdir -p "$XDG_CONFIG_HOME/systemd/user/default.target.wants"
+printf '%s\n' "$PWD" >"$XDG_CONFIG_HOME/systemd/user/collie.service"
+ln -sf ../collie.service "$XDG_CONFIG_HOME/systemd/user/default.target.wants/collie.service"
+PLUGIN
+}
+
+test_collie_bootstrap_regenerates_a_missing_unit_from_the_current_registry() (
+  collie_bootstrap_fixture
+  trap 'rm -rf "$fixture_dir"' EXIT
+  bash "$REPO_ROOT/scripts/collie-bootstrap"
+  [[ -L "$XDG_CONFIG_HOME/systemd/user/default.target.wants/collie.service" ]] \
+    || fail 'bootstrap did not delegate unit creation and enablement'
+  bash "$REPO_ROOT/scripts/collie-bootstrap"
+  mv "$fixture_dir/plugin with spaces" "$fixture_dir/replacement plugin"
+  jq -n --arg root "$fixture_dir/replacement plugin" \
+    '[{plugin_id: "herdr.collie", plugin_root: $root}]' \
+    >"$XDG_CONFIG_HOME/herdr/plugins.json"
+  rm "$XDG_CONFIG_HOME/systemd/user/collie.service" \
+    "$XDG_CONFIG_HOME/systemd/user/default.target.wants/collie.service"
+  bash "$REPO_ROOT/scripts/collie-bootstrap"
+  [[ "$(cat "$XDG_CONFIG_HOME/systemd/user/collie.service")" == "$fixture_dir/replacement plugin" ]] \
+    || fail 'bootstrap reused an obsolete plugin root'
+)
+
+test_collie_bootstrap_skips_absent_installations_and_reports_broken_ones() (
+  collie_bootstrap_fixture
+  trap 'rm -rf "$fixture_dir"' EXIT
+  rm "$XDG_CONFIG_HOME/herdr/plugins.json"
+  bash "$REPO_ROOT/scripts/collie-bootstrap"
+  printf '[]' >"$XDG_CONFIG_HOME/herdr/plugins.json"
+  bash "$REPO_ROOT/scripts/collie-bootstrap"
+  [[ ! -e "$XDG_CONFIG_HOME/systemd/user/collie.service" ]] || fail 'absent plugin was started'
+  for registry in 'invalid' '{}' '[{"plugin_id":"herdr.collie"}]' \
+    '[{"plugin_id":"herdr.collie","plugin_root":"/missing"}]'; do
+    printf '%s' "$registry" >"$XDG_CONFIG_HOME/herdr/plugins.json"
+    if bash "$REPO_ROOT/scripts/collie-bootstrap"; then
+      fail 'invalid installation was silently accepted'
+    fi
+  done
+  jq -n --arg root "$fixture_dir/plugin with spaces" \
+    '[{plugin_id: "herdr.collie", plugin_root: $root}]' \
+    >"$XDG_CONFIG_HOME/herdr/plugins.json"
+  printf 'exit 42\n' >"$fixture_dir/plugin with spaces/scripts/collie-ctl.sh"
+  local_status=0
+  bash "$REPO_ROOT/scripts/collie-bootstrap" || local_status=$?
+  [[ "$local_status" == 42 ]] || fail 'plugin startup failure was swallowed'
+)
+
+test_collie_bootstrap_runs_after_the_user_target_without_coupling_herdr() {
+  local service
+  service="$(rendered_json '.collieBootstrapService' \
+    "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.services.collie-bootstrap")"
+  jq -e '
+    .Install.WantedBy == ["default.target"] and
+    .Unit.After == ["default.target"] and
+    (.Unit.Requires // []) == [] and
+    .Service.Type == "oneshot" and
+    .Service.RemainAfterExit == true and
+    (.Service.ExecStart[0] | endswith("/bin/collie-bootstrap")) and
+    (.Service.Environment[0] | contains("/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin"))
+  ' <<<"$service" >/dev/null || fail 'bootstrap has unsafe boot ordering or environment'
+}
+
 # shellcheck source=tests/lib/suite-dispatch.bash
 source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
 
 readonly test_cases=(
+  test_collie_bootstrap_regenerates_a_missing_unit_from_the_current_registry
+  test_collie_bootstrap_skips_absent_installations_and_reports_broken_ones
+  test_collie_bootstrap_runs_after_the_user_target_without_coupling_herdr
   test_workstation_profile_includes_dotnet_10_lts_sdk
   test_collie_origin_socket_listens_on_the_portal_origin_port
   test_collie_origin_socket_activates_with_normal_user_sockets

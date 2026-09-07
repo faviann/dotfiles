@@ -121,6 +121,9 @@ expected_cases() {
       ;;
     workstation-collie-forwarder.bash)
       printf '%s\n' \
+        test_collie_bootstrap_regenerates_a_missing_unit_from_the_current_registry \
+        test_collie_bootstrap_skips_absent_installations_and_reports_broken_ones \
+        test_collie_bootstrap_runs_after_the_user_target_without_coupling_herdr \
         test_workstation_profile_includes_dotnet_10_lts_sdk \
         test_collie_origin_socket_listens_on_the_portal_origin_port \
         test_collie_origin_socket_activates_with_normal_user_sockets \

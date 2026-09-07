@@ -275,7 +275,10 @@ Before a manual update, finish important pane work and use a terminal outside
 herdr. Run `systemctl --user stop herdr.service`, then `herdr update`, then
 `systemctl --user start herdr.service`. Avoid launching the interactive herdr
 client while the service is stopped: it can create an unmanaged detached server.
-Collie keeps its own service and reconnects when herdr returns.
+Collie keeps its own service and reconnects when herdr returns. Home Manager
+also runs `collie-bootstrap.service` at boot to regenerate that service from the
+persisted plugin installation after an LXC rebuild. See the
+[rebuild recovery procedure](docs/collie-pilot-runbook.md#recovery-after-an-lxc-rebuild).
 
 For the one-time migration and recovery evidence, see the
 [herdr supervision runbook](docs/herdr-supervision-runbook.md).

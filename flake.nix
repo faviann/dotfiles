@@ -140,6 +140,8 @@
             hasRegistrationActivation =
               workstationHomeConfiguration.config.home.activation ? configureMoraineCodexMcp;
           };
+          collieBootstrapService =
+            workstationHomeConfiguration.config.systemd.user.services.collie-bootstrap;
           collieOriginSocket =
             workstationHomeConfiguration.config.systemd.user.sockets.collie-origin-forwarder;
           collieOriginService =
@@ -165,6 +167,7 @@
           ./dot_local/bin/executable_update-agent-tools
           ./dot_local/bin/executable_workstation-login
           ./dot_local/bin/executable_workstation-update
+          ./scripts/collie-bootstrap
           ./scripts/moraine-service
           ./scripts/run-shellcheck
           ./scripts/run-tests
