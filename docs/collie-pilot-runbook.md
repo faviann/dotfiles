@@ -10,18 +10,22 @@ service, or update lifecycle.
 
 ## Version record
 
-The selected pilot target is Collie `0.28.0`. The upstream `v0.28.0` release
-and its `herdr-plugin.toml` both identify version `0.28.0`. The workstation
-record below comes from the installed plugin action rather than the upstream
-release alone.
+The workstation runs Collie `1.5.6`, upgraded from the original pilot target
+`0.28.0` on 2026-09-07. The record below comes from the installed plugin action
+rather than the upstream release alone.
 
 | Fact | Recorded value | Evidence |
 | --- | --- | --- |
-| Install source | `herdr plugin install AltanS/collie --ref v0.28.0 -y` | Herdr 0.8.0 command history/output |
-| Pilot target | `0.28.0` | upstream `v0.28.0` release and plugin manifest |
-| Installed Collie version | `0.28.0+2910f40` | `version` action and its Herdr command log |
-| Installed version observed at | `2026-08-12T17:23:55Z` | UTC timestamp captured with the action |
-| Resolved plugin revision | `2910f40278f3ca1646fc472dd3589da4a47776e4` | install preview/result for requested ref `v0.28.0` |
+| Install source | `herdr plugin install AltanS/collie --ref v1.5.6 -y` | Herdr 0.9.0 command history/output |
+| Pinned target | `1.5.6` | upstream `v1.5.6` release and plugin manifest |
+| Installed Collie version | `1.5.6+bc73318` | `version` action and its Herdr command log |
+| Installed version observed at | `2026-09-07T22:03:48Z` | UTC timestamp captured with the action |
+| Resolved plugin revision | `bc73318574cd1de858855a2414df9f66a362203c` | install preview/result for requested ref `v1.5.6` |
+
+The original pilot ran on `0.28.0+2910f40` (revision
+`2910f40278f3ca1646fc472dd3589da4a47776e4`), installed 2026-08-12 under Herdr
+0.8.0. The 2026-08-12 evidence tables further down are preserved as observed
+against that version and are not restated for `1.5.6`.
 
 Capture the installed artifact's answer, not the latest upstream release:
 
@@ -40,7 +44,7 @@ the final command is the version evidence to transcribe into the record.
 Install the plugin as the workstation user:
 
 ```bash
-herdr plugin install AltanS/collie --ref v0.28.0 -y
+herdr plugin install AltanS/collie --ref v1.5.6 -y
 ```
 
 Create or preserve the plugin-owned environment file, restrict it to the user,
@@ -53,7 +57,7 @@ chmod 600 "$collie_env"
 "${EDITOR:-vi}" "$collie_env"
 ```
 
-Before the Web Push phase, the mutable file contains these seven base pilot
+Before the Web Push phase, the mutable file contains these eight base pilot
 values:
 
 ```dotenv
@@ -64,7 +68,14 @@ COLLIE_PUBLIC_HOSTS=collie.admin.faviann.com
 COLLIE_ALLOWED_ORIGINS=https://collie.admin.faviann.com
 COLLIE_PUBLIC_URL=https://collie.admin.faviann.com
 COLLIE_STATE_DIR=/home/faviann/.local/state/collie
+COLLIE_MUX=herdr
 ```
+
+`COLLIE_MUX` is required from Collie 1.0 onwards on this workstation. Collie
+1.x refuses to start when more than one multiplexer is running and no
+multiplexer is named, and this machine runs both a herdr socket and a tmux
+server. Without it the `start` and `restart` actions fail with `no COLLIE_MUX
+is set, and 2 multiplexers are running`, leaving the previous bridge up.
 
 Check the complete file before starting Collie, then verify its mode:
 
@@ -87,8 +98,8 @@ depend on it.
 
 This phase extends the accepted Android PWA pilot. It changes only Collie's
 app-owned plugin checkout, mutable environment, and state. Run it against the
-pinned `0.28.0+2910f40` installation recorded above; do not update Collie as
-part of this procedure.
+pinned installation recorded above; do not update Collie as part of this
+procedure.
 
 ### Install the optional dependency
 
@@ -104,7 +115,7 @@ collie_plugin_root="$(
 )"
 test -f "$collie_plugin_root/herdr-plugin.toml"
 test "$(git -C "$collie_plugin_root" rev-parse HEAD)" = \
-  '2910f40278f3ca1646fc472dd3589da4a47776e4'
+  'bc73318574cd1de858855a2414df9f66a362203c'
 (cd "$collie_plugin_root" && bun add web-push)
 (cd "$collie_plugin_root" && bun -e '
   const mod = await import("web-push");
@@ -289,11 +300,12 @@ collie_plugin_root="$(
 ```
 
 Keep both output streams suppressed as shown, and do not redirect them to a
-persistent file: pinned Collie v0.28.0 can include a saved subscription endpoint
-in a per-endpoint send-failure message. Do not print or record subscription
-endpoints or keys.
+persistent file: Collie can include a saved subscription endpoint in a
+per-endpoint send-failure message. This was observed on `0.28.0` and has not
+been re-tested on `1.5.6`; treat the caution as standing. Do not print or
+record subscription endpoints or keys.
 
-The command's exit status is not proof of delivery. Pinned v0.28.0 can report a
+The command's exit status is not proof of delivery. Collie can report a
 per-endpoint send failure and still exit successfully. The required proof is
 the Android phone actually displaying title **Collie pilot Web Push** and body
 **Issue #71 end-to-end test**. Tap that notification and record that the
@@ -301,7 +313,7 @@ installed PWA opens at the canonical `https://collie.admin.faviann.com` origin.
 The test notification uses the special `test` pane ID, so landing at the origin
 root is expected.
 
-### Real lifecycle transition and the v0.28.0 limit
+### Real lifecycle transition and the notification-body limit
 
 Run this proof with no other agent already blocked or done, so Collie's
 single-agent notification shape is unambiguous:
@@ -316,16 +328,18 @@ single-agent notification shape is unambiguous:
 4. Tap the notification. Confirm that the PWA opens on the canonical origin at
    that agent's pane, then resolve the temporary prompt normally.
 
-For pinned Collie v0.28.0, the expected single-agent notification is title
-`<agent> needs you` (or `<agent> is done`) and body `<workspace> · <cwd>`.
-This proves the real transition, delivery, and agent deep-link. It does **not**
-prove that the notification contains the agent's message: v0.28.0's shipped
-`bridge/notifications.ts` has no blocking-message capture and deliberately
-uses workspace/cwd for the body. Record the issue criterion "notification
-containing agent message" as **blocked/unverified on pinned v0.28.0**, even
-when every other step succeeds. Do not substitute the manually supplied
-`push-test` body as evidence for this lifecycle criterion, and do not patch
-Collie upstream during this pilot.
+The expected single-agent notification is title `<agent> needs you` (or
+`<agent> is done`) and body `<workspace> · <cwd>`. This proves the real
+transition, delivery, and agent deep-link. It does **not** prove that the
+notification contains the agent's message: `bridge/notifications.ts` has no
+blocking-message capture and deliberately uses workspace/cwd for the body.
+This was true on `0.28.0` and is still true on `1.5.6`, where
+`bridge/notifications.ts:215` builds the body as
+`` `${a.workspaceLabel} · ${a.cwd}` ``. Record the issue criterion
+"notification containing agent message" as **blocked/unverified**, even when
+every other step succeeds. Do not substitute the manually supplied `push-test`
+body as evidence for this lifecycle criterion, and do not patch Collie
+upstream during this pilot.
 
 ### State locations for the persistence follow-up
 
@@ -459,7 +473,7 @@ systemd-run --user --unit=herdr-collie-pilot-a \
 ```
 
 Temporarily add these two lines to Collie's plugin-owned `.env`, preserving the
-seven pilot values, and restart Collie once so it adopts the isolated socket:
+eight pilot values, and restart Collie once so it adopts the isolated socket:
 
 ```dotenv
 HERDR_SOCKET_PATH=/home/faviann/.config/herdr/sessions/collie-pilot/herdr.sock
@@ -522,29 +536,80 @@ curl --fail --show-error --silent \
 stat --format='%a %U:%G %n' "$collie_env"
 ```
 
-For the original loopback proof, the environment returned to exactly the seven
-base pilot values above. After the Web Push phase it must instead retain those
-seven values plus the three `COLLIE_VAPID_*` entries. During the original
+For the original loopback proof, the environment returned to exactly the base
+pilot values above. After the Web Push phase it must instead retain those eight
+values plus the three `COLLIE_VAPID_*` entries. During the original
 pilot proof, reconnection occurred before this cleanup restart: the captured
 Collie PID stayed `2802133` and `NRestarts` stayed `0`.
 
 ## Manual update
 
 There is no timer or automatic update. Record the installed version before and
-after running the one operator action:
+after the operator action. Within a major version:
 
 ```bash
 herdr plugin action invoke update --plugin herdr.collie
 ```
 
+Crossing a major version is a separate, explicitly consented action:
+
+```bash
+herdr plugin action invoke update-major --plugin herdr.collie
+```
+
 The action updates the plugin checkout, rebuilds the UI, and restarts its own
 bridge. Repeat the version, health, service, and loopback evidence afterward.
+
+Two constraints apply to this workstation specifically.
+
+`update-major` exists only in the manifest of the version already installed.
+The `0.28.0` manifest shipped no such action, and `0.28.0`'s `update` predates
+the major boundary entirely: its `update_checkout()` fetched `origin HEAD` and
+detached onto the default branch tip, which would have landed the workstation
+on an untagged development commit rather than a release. The 2026-09-07
+upgrade therefore went through a pinned reinstall instead:
+
+```bash
+herdr plugin install AltanS/collie --ref v1.5.6 -y
+herdr plugin action invoke restart --plugin herdr.collie
+```
+
+A reinstall does not restart the service, so the restart action is required and
+not optional. Both the plugin config directory and `COLLIE_STATE_DIR` are
+outside the replaced checkout and survive untouched; this was verified by
+comparing `sha256sum` of `.env` and `push-subscriptions.json` before and after.
+
+A Herdr-managed checkout advances in place and has no `versions/` layout, so
+`update --rollback` is refused (Collie ADR 0006). To go back, reinstall the
+previous tag, remove the compiled binary that would otherwise survive the
+downgrade, rebuild, and restart:
+
+```bash
+herdr plugin install AltanS/collie --ref v0.28.0 -y
+collie_plugin_root="$(
+  herdr plugin list --plugin herdr.collie --json |
+    jq --exit-status --raw-output \
+      '.result.plugins[] | select(.plugin_id == "herdr.collie") | .plugin_root'
+)"
+rm -f "$collie_plugin_root/bin/collie"
+herdr plugin action invoke restart --plugin herdr.collie
+```
+
+## Device pairing
+
+Collie 1.x adds a per-device write credential (`collie pair`, `collie devices`).
+It is not configured here and is deliberately out of scope for this pilot. The
+write gate is active only while at least one device is paired, and no device is
+paired on this workstation, so read and write both behave as they did on
+`0.28.0`. Pairing nothing is therefore a supported state, not an oversight;
+revoking the last device would disable the gate again the same way.
 
 ## Excluded from this pilot
 
 Web Push enablement and manual Android acceptance are now part of this pilot.
-VAPID backup, rebuild persistence for VAPID/subscription state, status-only
-notification customization, automatic updates, upstream Collie changes,
+Device pairing, VAPID backup, rebuild persistence for VAPID/subscription state,
+status-only notification customization, automatic updates, upstream Collie
+changes,
 public Traefik changes, and Home Manager ownership of `collie.service` remain
 excluded. Collie's generated service, mutable `.env`, dependency checkout, and
 subscription state remain application-owned. This repository owns only the
