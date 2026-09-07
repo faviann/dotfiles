@@ -92,28 +92,21 @@ test_herdr_service_leaves_normal_termination_to_herdr() {
     || fail 'Herdr service overrides the foreground server graceful-termination contract'
 }
 
-test_herdr_service_is_staged_without_target_or_activation() {
-  local rendered_activation
+test_herdr_service_activates_with_the_normal_user_target() {
   local rendered_service
 
   rendered_service="$(rendered_herdr_service)" \
     || fail 'could not render the Herdr user service'
-  rendered_activation="$(rendered_workstation_activation)" \
-    || fail 'could not render the workstation activation configuration'
 
   jq -e '
-    ((.Install.WantedBy // []) == []) and
+    (.Install.WantedBy == ["default.target"]) and
     ((.Install.RequiredBy // []) == []) and
     ((.Install.UpheldBy // []) == [])
   ' <<<"$rendered_service" >/dev/null \
-    || fail 'Herdr service is enabled in a user target'
-  jq -e \
-    '[to_entries[] | select(.value | test("herdr.*(start|enable)|(start|enable).*herdr"; "i"))] == []' \
-    <<<"$rendered_activation" >/dev/null \
-    || fail 'workstation activation starts or enables Herdr'
+    || fail 'Herdr service does not activate under the normal user target'
 }
 
-test_herdr_staging_does_not_take_over_the_detached_server_or_panes() {
+test_herdr_supervision_has_no_automatic_migration_or_coupled_lifecycle() {
   local rendered_activation
   local rendered_service
 
@@ -123,7 +116,6 @@ test_herdr_staging_does_not_take_over_the_detached_server_or_panes() {
     || fail 'could not render the workstation activation configuration'
 
   jq -e '
-    ((.Install.WantedBy // []) == []) and
     ((.Install.RequiredBy // []) == []) and
     ((.Install.UpheldBy // []) == []) and
     ((.Unit.Requires // []) == []) and
@@ -135,27 +127,11 @@ test_herdr_staging_does_not_take_over_the_detached_server_or_panes() {
     (.Service | has("KillSignal") | not) and
     ([.Service | .. | strings | select(test("--daemon|pid.file|migrat|pane|session"; "i"))] == [])
   ' <<<"$rendered_service" >/dev/null \
-    || fail 'staged Herdr unit takes ownership of the detached server or its panes'
+    || fail 'Herdr unit adds a coupled lifecycle or custom pane management'
   jq -e \
     '[to_entries[] | select(.value | test("herdr"; "i"))] == []' \
     <<<"$rendered_activation" >/dev/null \
     || fail 'workstation activation contains a Herdr lifecycle or migration action'
-}
-
-test_workstation_herdr_documentation_explains_the_deferred_cutover() {
-  local herdr_section
-  local normalized_section
-
-  herdr_section="$(
-    sed -n '/^## Workstation herdr$/,$p' "$REPO_ROOT/README.md"
-  )" || fail 'could not read the Workstation herdr operating section'
-  normalized_section="${herdr_section//$'\n'/ }"
-
-  grep -Eiq 'activation[^.]*deferred[^.]*cutover|deferred[^.]*activation[^.]*cutover' \
-    <<<"$normalized_section" \
-    || fail 'Workstation herdr documentation does not defer activation to cutover'
-  grep -Fiq 'server shutdown ends pane processes' <<<"$normalized_section" \
-    || fail 'Workstation herdr documentation does not explain the pane-process risk'
 }
 
 # shellcheck source=tests/lib/suite-dispatch.bash
@@ -166,9 +142,8 @@ readonly test_cases=(
   test_herdr_service_has_a_deterministic_process_environment
   test_herdr_service_restarts_failures_after_a_bounded_delay
   test_herdr_service_leaves_normal_termination_to_herdr
-  test_herdr_service_is_staged_without_target_or_activation
-  test_herdr_staging_does_not_take_over_the_detached_server_or_panes
-  test_workstation_herdr_documentation_explains_the_deferred_cutover
+  test_herdr_service_activates_with_the_normal_user_target
+  test_herdr_supervision_has_no_automatic_migration_or_coupled_lifecycle
 )
 
-suite_dispatch 'workstation Herdr supervised-service staging' "$@"
+suite_dispatch 'workstation Herdr supervision' "$@"
