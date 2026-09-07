@@ -310,7 +310,8 @@ if [[ "$1" == "view" && "$3" == "version" && "$4" == "engines" \
     jq -cn --arg version "$version" --argjson engines "$engines" \
       '{version: $version, engines: $engines}'
   else
-    jq -cn --arg version "$version" '{version: $version}'
+    # npm collapses multi-field queries to a scalar when only version exists.
+    jq -cn --arg version "$version" '$version'
   fi
   exit 0
 fi
