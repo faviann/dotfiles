@@ -542,6 +542,55 @@ values plus the three `COLLIE_VAPID_*` entries. During the original
 pilot proof, reconnection occurred before this cleanup restart: the captured
 Collie PID stayed `2802133` and `NRestarts` stayed `0`.
 
+## Recovery after an LXC rebuild
+
+Home Manager enables `collie-bootstrap.service` at boot. It reads the current
+`herdr.collie` plugin root from `~/.config/herdr/plugins.json` and invokes that
+installation's `scripts/collie-ctl.sh start`. Collie remains responsible for
+regenerating and enabling `collie.service`; no generated executable path is
+persisted or copied into Home Manager.
+
+The bootstrap runs after `default.target` because Collie's own service is ordered
+after that target and its startup command waits for systemd. It has no Herdr
+service dependency. A missing registry or absent Collie entry is a successful
+skip; malformed metadata, a missing registered checkout, or a failed startup
+fails the bootstrap visibly. After repairing an installation, retry with:
+
+```bash
+systemctl --user restart collie-bootstrap.service
+systemctl --user status collie-bootstrap.service collie.service --no-pager
+```
+
+The oneshot remains active after success, so it does not continually undo a
+manual Collie stop. A new boot runs it again. Plugin installation after a skipped
+bootstrap requires the normal plugin start action or the retry above.
+
+This relies on the Herdr registry, checkout, and plugin configuration surviving
+the rebuild, and on the workstation profile and host systemd being provisioned.
+It does not add persistence for VAPID or subscription state.
+
+### Missing-unit recovery evidence — 2026-09-07 (#84)
+
+The generated Home Manager bootstrap unit was installed and enabled on the
+workstation directly, without activating unrelated Home Manager changes. Its
+built generation is protected from garbage collection by a root in the private
+proof directory below. The repository configuration owns subsequent deployment.
+
+- Disabled and stopped Collie, removed its generated unit, and reloaded systemd.
+  `LoadState=not-found`, an absent enable symlink, and a failed HTTP request to
+  port 8787 established the failure before recovery.
+- Started `collie-bootstrap.service`. Collie regenerated its unit, became enabled
+  and active, and returned HTTP 200 through both 8787 and the 8788 forwarder using
+  the configured Host header.
+- Repeated the bootstrap. Collie kept PID `340691`; Herdr kept PID `371`
+  throughout the test. The bootstrap finished successfully as `active (exited)`.
+- The focused Collie suite, `nix run .#shellcheck`, `nix flake check`, and
+  `systemd-analyze --user verify` of the generated bootstrap unit passed.
+
+Private unit backups and the result log are at
+`~/.local/state/collie-bootstrap-84.hLwb6s/`. This was a missing-unit simulation
+on the running LXC; a full rebuild and a phone-side access check remain untested.
+
 ## Manual update
 
 There is no timer or automatic update. Record the installed version before and
