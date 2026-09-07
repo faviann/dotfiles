@@ -257,8 +257,8 @@ in
     Install.WantedBy = [ "default.target" ];
   };
 
-  # This is the final supervised shape, staged without Install.WantedBy or an
-  # activation hook so applying Home Manager cannot cut over the detached server.
+  # Boot supervision assumes the one-time detached-server cutover is complete.
+  systemd.user.services.herdr.Install.WantedBy = [ "default.target" ];
   systemd.user.services.herdr.Service = {
     Type = "simple";
     Environment =

@@ -257,11 +257,28 @@ over HTTP, while herdr is a TUI.
   run from inside a herdr pane; detach from the session first.
 - Configuration: `~/.config/herdr/config.toml` is optional and unmanaged. herdr
   writes to it itself, so chezmoi does not own it.
-- Supervision staging: Home Manager installs the final foreground
-  `herdr.service` shape, but the unit has no user-target enablement and applying
-  the configuration does not start it. Activation is deferred to the scheduled
-  cutover because server shutdown ends pane processes. Until that cutover, the
-  existing detached server and its active panes remain in place.
+- Supervision: Home Manager enables the foreground `herdr.service` under
+  `default.target`. Existing user lingering starts it at boot without login.
+  Failures restart after five seconds; an intentional stop remains stopped.
+  Server shutdown ends pane processes. Restore is reconstructive: herdr reads
+  `~/.config/herdr/session.json` to rebuild its session, not resume live processes.
+
+```bash
+systemctl --user status herdr.service collie.service --no-pager
+journalctl --user -u herdr.service -u collie.service --since=-10m --no-pager
+systemctl --user stop herdr.service     # remains stopped until start or next boot
+systemctl --user start herdr.service
+systemctl --user restart herdr.service  # ends panes and reconstructs the session
+```
+
+Before a manual update, finish important pane work and use a terminal outside
+herdr. Run `systemctl --user stop herdr.service`, then `herdr update`, then
+`systemctl --user start herdr.service`. Avoid launching the interactive herdr
+client while the service is stopped: it can create an unmanaged detached server.
+Collie keeps its own service and reconnects when herdr returns.
+
+For the one-time migration and recovery evidence, see the
+[herdr supervision runbook](docs/herdr-supervision-runbook.md).
 
 The manual, loopback-only Collie evaluation that uses herdr is documented in
 the [Collie pilot runbook](docs/collie-pilot-runbook.md). Collie's plugin,
