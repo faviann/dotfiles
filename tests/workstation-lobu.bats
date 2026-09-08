@@ -99,12 +99,12 @@ run_bootstrap() {
     .service |
     (.Unit.ConditionPathExists == "%h/.config/lobu/credentials.json") and
     (.Service.Type == "simple") and
-    (.Service.ExecStart == ["/home/faviann/.local/bin/lobu daemon --api-url https://app.lobu.ai --no-interactive-session"]) and
+    (.Service.ExecStart == ["/home/faviann/.local/bin/lobu daemon --no-interactive-session"]) and
     (.Service.WorkingDirectory == "/home/faviann") and
-    (.Service.Environment == [
-      "HOME=/home/faviann",
-      "PATH=/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin"
-    ]) and
+    (.Service.Environment | index("HOME=/home/faviann") != null) and
+    (.Service.Environment | index("LOBU_CONTEXT=homelab") != null) and
+    (.Service.Environment | index("PATH=/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin") != null) and
+    (.Service.UnsetEnvironment == "LOBU_API_URL") and
     (.Service.UMask == "0077") and
     (.Service.Restart == "on-failure") and
     (.Service.RestartSec == 30) and
@@ -112,4 +112,28 @@ run_bootstrap() {
     (.Service.RestartMaxDelaySec == null) and
     (.Install.WantedBy == ["default.target"])
   ' <<<"$rendered" >/dev/null || fail 'unexpected Lobu service contract'
+}
+
+@test "test_lobu_service_requires_the_self_hosted_homelab_context" {
+  local fixture rendered condition
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/home/.config/lobu"
+  rendered="$(rendered_lobu)"
+  condition="$(jq -r '.service.Service.ExecCondition' <<<"$rendered")"
+  condition="${condition//%h/$fixture/home}"
+
+  run bash -c "$condition"
+  [[ "$status" != 0 ]] || fail 'missing context passed the service precondition'
+
+  printf '%s\n' \
+    '{"currentContext":"self-hosted","contexts":{"homelab":{"url":"https://app.lobu.ai/api/v1"},"self-hosted":{"url":"https://lobu.faviann.com/api/v1"}}}' \
+    >"$fixture/home/.config/lobu/config.json"
+  run bash -c "$condition"
+  [[ "$status" != 0 ]] || fail 'cloud homelab context passed the service precondition'
+
+  printf '%s\n' \
+    '{"currentContext":"lobu","contexts":{"lobu":{"url":"https://app.lobu.ai/api/v1"},"homelab":{"url":"https://lobu.faviann.com"}}}' \
+    >"$fixture/home/.config/lobu/config.json"
+  run bash -c "$condition"
+  [[ "$status" == 0 ]] || fail 'inactive homelab context failed the service precondition'
 }

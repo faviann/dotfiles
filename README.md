@@ -311,9 +311,11 @@ it does not provide VAPID or subscription-state persistence.
 
 ## Workstation Lobu
 
-[Lobu](https://app.lobu.ai) registers the workstation as a headless device and
-polls the managed control plane outward over HTTPS. No inbound route, listener,
-or reverse-proxy configuration is involved.
+[Lobu](https://lobu.faviann.com) registers the workstation as a headless device
+and polls the self-hosted control plane outward over HTTPS. The service selects
+the stable `homelab` context independently of the globally active CLI context and
+verifies its self-hosted origin before startup. No inbound route, listener, or
+reverse-proxy configuration is involved.
 
 - Install: Home Manager activation runs `scripts/lobu-bootstrap`, which installs
   `@lobu/cli` under `~/.local` when the CLI is missing. It preserves an existing
@@ -331,7 +333,10 @@ or reverse-proxy configuration is involved.
 Durable state under `~/.config/lobu` is owned by homelab-iac's persistent-home
 mapping, not by dotfiles. That mapping
 ([homelab-iac#271](https://github.com/faviann/homelab-iac/pull/271)) must be
-deployed before applying this configuration or running `lobu login`.
+deployed before applying this configuration or running `lobu login`. The
+self-hosted origin from
+[homelab-iac#275](https://github.com/faviann/homelab-iac/issues/275) must also be
+deployed and validated first.
 
 Use the [Lobu bootstrap and recovery runbook](docs/lobu-runbook.md) for rollout
 order, first deployment, service control, re-authentication, manual upgrades,

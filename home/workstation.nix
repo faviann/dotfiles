@@ -1,6 +1,8 @@
 { pkgs, lib, config, dotnetSdk, hermesPackage, morainePackage, ... }:
 
 let
+  lobuContextName = "homelab";
+  lobuControlPlaneOrigin = "https://lobu.faviann.com";
   lobuBootstrap = pkgs.writeShellApplication {
     name = "lobu-bootstrap";
     runtimeInputs = [ pkgs.nodejs ];
@@ -135,12 +137,28 @@ in
     };
     Service = {
       Type = "simple";
+      # The daemon resolves this named context directly. Verify its origin
+      # without making it the active interactive CLI context.
+      ExecCondition = lib.escapeShellArgs [
+        "${pkgs.jq}/bin/jq"
+        "-e"
+        "--arg"
+        "context"
+        lobuContextName
+        "--arg"
+        "origin"
+        lobuControlPlaneOrigin
+        ".contexts[$context].url == $origin"
+        "%h/.config/lobu/config.json"
+      ];
       Environment = [
         "HOME=${config.home.homeDirectory}"
+        "LOBU_CONTEXT=${lobuContextName}"
         "PATH=${config.home.homeDirectory}/.local/bin:${config.home.profileDirectory}/bin:/usr/local/bin:/usr/bin:/bin"
       ];
+      UnsetEnvironment = "LOBU_API_URL";
       WorkingDirectory = config.home.homeDirectory;
-      ExecStart = "${config.home.homeDirectory}/.local/bin/lobu daemon --api-url https://app.lobu.ai --no-interactive-session";
+      ExecStart = "${config.home.homeDirectory}/.local/bin/lobu daemon --no-interactive-session";
       # Longer than the local units' five seconds: a stale credential fails
       # every start, and the default rate limiter never trips at a flat
       # interval, so this is the actual request rate against the control plane
