@@ -1,8 +1,12 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 readonly REPO_ROOT
+
+setup() {
+  export TMPDIR="$BATS_TEST_TMPDIR"
+}
 REAL_BASH="$(command -v bash)"
 readonly REAL_BASH
 export REAL_BASH
@@ -106,10 +110,9 @@ run_hook() {
     "$REAL_BASH" "$script"
 }
 
-test_missing_checkout_is_cloned_and_reconciled() {
+@test "test_missing_checkout_is_cloned_and_reconciled" {
   local test_dir
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
 
   run_hook "$test_dir" || fail 'missing checkout recovery failed'
 
@@ -121,10 +124,9 @@ test_missing_checkout_is_cloned_and_reconciled() {
     || fail 'bootstrap did not clone and reconcile in order'
 }
 
-test_existing_checkout_is_preserved_and_idempotent() {
+@test "test_existing_checkout_is_preserved_and_idempotent" {
   local test_dir
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
 
   make_reconciler "$test_dir/home/repos/skills"
   run_hook "$test_dir" || fail 'existing checkout reconciliation failed'
@@ -138,10 +140,9 @@ test_existing_checkout_is_preserved_and_idempotent() {
   fi
 }
 
-test_invalid_existing_path_fails_without_reconciliation() {
+@test "test_invalid_existing_path_fails_without_reconciliation" {
   local test_dir
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
 
   mkdir -p "$test_dir/home/repos/skills"
   printf 'preserve me\n' >"$test_dir/home/repos/skills/marker"
@@ -155,12 +156,11 @@ test_invalid_existing_path_fails_without_reconciliation() {
     || fail 'reconciler ran for an invalid checkout'
 }
 
-test_clone_and_reconciler_failures_propagate() {
+@test "test_clone_and_reconciler_failures_propagate" {
   local clone_dir
   local reconcile_dir
   clone_dir="$(mktemp -d)"
   reconcile_dir="$(mktemp -d)"
-  trap 'rm -rf "$clone_dir" "$reconcile_dir"' RETURN
 
   if GIT_CLONE_FAIL=true run_hook "$clone_dir"; then
     fail 'clone failure was accepted'
@@ -174,10 +174,9 @@ test_clone_and_reconciler_failures_propagate() {
   fi
 }
 
-test_reconciler_cannot_read_the_unlocked_vault_session() {
+@test "test_reconciler_cannot_read_the_unlocked_vault_session" {
   local test_dir
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
 
   make_reconciler "$test_dir/home/repos/skills"
   BW_SESSION=vault-session-token run_hook "$test_dir" \
@@ -191,11 +190,10 @@ test_reconciler_cannot_read_the_unlocked_vault_session() {
     || fail 'reconciler inherited the unlocked vault session'
 }
 
-test_non_lxc_render_is_a_noop() {
+@test "test_non_lxc_render_is_a_noop" {
   local test_dir
   local script
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
   script="$test_dir/hook"
 
   render_hook false "$script"
@@ -207,17 +205,3 @@ test_non_lxc_render_is_a_noop() {
   [[ ! -e "$test_dir/home/repos/skills" ]] \
     || fail 'non-LXC no-op created a skills checkout'
 }
-
-# shellcheck source=tests/lib/suite-dispatch.bash
-source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
-
-readonly test_cases=(
-  test_missing_checkout_is_cloned_and_reconciled
-  test_existing_checkout_is_preserved_and_idempotent
-  test_invalid_existing_path_fails_without_reconciliation
-  test_clone_and_reconciler_failures_propagate
-  test_reconciler_cannot_read_the_unlocked_vault_session
-  test_non_lxc_render_is_a_noop
-)
-
-suite_dispatch 'workstation skills bootstrap' "$@"

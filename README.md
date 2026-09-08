@@ -6,13 +6,13 @@ See `BOOTSTRAP.md` for new machine setup.
 
 ## Repository validation
 
-Discover exact behavioral selectors, then run one case or suite during
-iteration:
+Behavioral tests use [Bats](https://bats-core.readthedocs.io/). Discover suites
+and cases, then run one case or suite in the Nix development environment:
 
 ```bash
-bash scripts/run-tests --list
-bash scripts/run-tests --case test_exact_case_name
-bash scripts/run-tests --suite workstation-update.bash
+rg '^@test ' tests
+nix develop -c bats --filter '^test_exact_case_name$' tests
+nix develop -c bats tests/workstation-update.bats
 ```
 
 Run focused shell analysis after changing Bash or shell templates:
@@ -27,9 +27,8 @@ Use the complete flake validation as the sole full closeout gate:
 nix flake check
 ```
 
-It includes ShellCheck, the test-runner contract, and every behavioral suite,
-so a standalone full `bash scripts/run-tests` immediately beforehand is
-redundant.
+It includes ShellCheck and every Bats suite in the declared Nix environment,
+so a standalone full behavioral run immediately beforehand is redundant.
 
 ## Workstation Home Manager
 
@@ -70,22 +69,23 @@ The managed unit contains:
   (`@agentclientprotocol/claude-agent-acp`)
 - the `pi-acp` adapter
 
-Bun is fetched from its upstream GitHub release rather than from nixpkgs,
-which lags Bun badly enough that a harness can declare an engine floor newer
-than the Bun the profile would supply. Keeping it in the same unit as the
-harnesses is what makes the runtime and its dependents move together; the
-updater refuses before changing anything if a harness declares a floor the
-runtime cannot meet, or if it cannot read one.
+[Bun's upstream installer](https://bun.sh/install) supplies its latest runtime,
+selects a CPU-compatible build (including baseline x64), and replaces the binary
+by renaming it into `~/.local/bin`. npm owns package versions, dependency
+resolution, integrity checks, and installation; `aoe update --yes` owns AoE's
+update. There is no repository-owned release discovery or version cache.
 
-The archive is checked against the digest the release API publishes alongside
-the download URL. That detects a truncated or corrupted download, not a
-compromised release: the digest and the archive come from the same source, and
-no independently pinned hash survives outside it.
+Before replacing executables, an npm dry run with
+[`--engine-strict`](https://docs.npmjs.com/cli/v11/using-npm/config/#engine-strict)
+checks package compatibility with Home Manager's Node runtime. This handles npm's
+supported engine ranges, including transitive dependencies. npm does not enforce
+Bun engines: the updater installs the latest Bun and runs Bun and the Bun-using
+harnesses before restarting services. If an upstream package needs a newer Node,
+update the nixpkgs input; installation failures leave running sessions alone.
 
-`codex-acp` also contains its own compatible Codex runtime. That bundled
-runtime is distinct from the standalone Codex CLI: updating `@openai/codex`
-does not update the runtime used by structured Codex sessions. The updater
-checks both scopes and refreshes `codex-acp` to maintain its bundled runtime.
+`codex-acp` also contains its own compatible Codex runtime. npm resolves that
+adapter's dependencies; updating `@openai/codex` alone does not update the runtime
+used by structured Codex sessions.
 
 Pi and Oh My Pi intentionally coexist while OMP is evaluated as a separate
 harness. The `pi` command continues to use `~/.pi`; the distinct `omp` command
@@ -154,13 +154,11 @@ Agent of Empires (`aoe`) is managed here as a user-level workstation tool, not i
 - Install: `.chezmoiscripts/run_once_install-aoe.sh.tmpl` uses the upstream installer until there is a clean Nix package path.
 - Bootstrap handoff: after chezmoi installs AoE and Home Manager provides
   Node/npm and loads the user units, Home Manager runs
-  `update-agent-tools --yes` when any managed command is missing. The existing
+  `update-agent-tools` when any managed command is missing. The existing
   `workstation-setup` handoff therefore installs the full toolchain without a
   separate package-discovery or Ansible step.
-- SSH login: `dot_bash_profile.tmpl` invokes the dedicated
-  `workstation-login` helper for eligible interactive SSH login shells. The
-  helper checks workstation freshness and then returns to a plain shell; tmux
-  and AoE remain available as explicit commands.
+- SSH login: `dot_bash_profile.tmpl` loads the Nix and Home Manager environment
+  and opens a plain shell. Maintenance, tmux, and AoE are explicit commands.
 - Shell choice: the workstation LXC is bash-based; `.chezmoiignore` excludes fish config on LXC hosts.
 - Dashboard: `home/workstation.nix` declares the `aoe-serve.service`, `aoe-lan-proxy.service`, and `aoe-lan-proxy.socket` user units. The socket exposes `0.0.0.0:4001` and proxies to the localhost service.
 - Reboot survival: Ansible enables lingering for the workstation user with `loginctl enable-linger <user>`.
@@ -170,20 +168,26 @@ package installation; the AoE dashboard does not.
 
 ### Workstation maintenance
 
-`workstation-update` is the only routine maintenance command. It validates the
-chezmoi source as a clean, canonical `main` checkout, fetches and fast-forwards
-it to `origin/main`, previews and applies dotfile changes when required, then
-delegates workstation configuration to `workstation-setup` whenever dotfiles
-work occurred, and finally refreshes AoE, all five standalone CLIs, and all
-three ACP adapters as one unit. `workstation-setup` owns workstation
-configuration freshness, comparing and activating the Home Manager build; it is
-installed by Ansible rather than by chezmoi. Agent tools use latest stable
-releases and do not retrieve or display release notes.
+Run `workstation-update` for routine maintenance. It validates the chezmoi
+source as a clean, canonical `main` checkout, fetches `origin/main`, and delegates
+the fast-forward to Git. It then previews, applies, and verifies chezmoi targets,
+calls `workstation-setup`, and refreshes the agent tools. Every invocation runs
+these reconciliation steps, including when the source commit is unchanged.
+This makes failed maintenance retryable without an applied-commit cache.
+`workstation-setup`, installed by Ansible, owns workstation configuration
+freshness and decides whether the Home Manager build needs activation.
+
+Git owns index, worktree, and ref updates through
+[`merge --ff-only --no-autostash --no-overwrite-ignore`](https://git-scm.com/docs/git-merge).
+Chezmoi owns target reconciliation and
+[conflict prompts](https://www.chezmoi.io/reference/commands/apply/).
+The wrapper forces neither source convergence nor target overwrites. Run it
+with exclusive use of the source checkout; its lock serializes maintenance
+commands, not arbitrary concurrent Git commands or editors.
 
 `workstation-update` never rewrites `flake.lock`. .NET release discovery and
-publication happen upstream through the dedicated GitHub workflow; the normal
-SSH notice and `workstation-update` then deliver that validated commit through
-the same dotfiles and `workstation-setup` path as any other workstation change.
+publication happen through the dedicated GitHub workflow; maintenance delivers
+that validated commit through the same path as other workstation changes.
 For maintainer recovery or an on-demand refresh, run
 `scripts/update-dotnet-sdk` from a clean canonical checkout.
 
@@ -203,45 +207,45 @@ Unattended runs must export a valid session before invoking the updater.
 Chezmoi lifecycle scripts run and must succeed during apply; post-apply
 verification checks durable targets without rerunning those actions.
 
-All installs, command and package-version checks, and `aoe acp doctor` must
-succeed before activation begins. The updater then restarts the AoE user
-service, replaces the ACP workers that were running at the start, and performs
-bounded service, ACP diagnostic, and worker-health checks. It records success
-only after those activation checks pass.
+All installations, harness execution checks, and `aoe acp doctor` must succeed
+before activation begins. The updater then restarts the AoE user service,
+replaces the ACP workers captured before consent, and performs bounded service,
+ACP diagnostic, and worker-health checks. Each captured session must have a new,
+live, current worker, with none of its old workers still alive.
 
-There is no automatic rollback. On failure, use the reported phase and
-component, `systemctl --user status aoe-serve.service`, and
+There is no automatic rollback. On failure, use the command's diagnostics,
+`systemctl --user status aoe-serve.service`, and
 `journalctl --user-unit aoe-serve.service` to correct the problem, then rerun
-`workstation-update`. Installation failures happen before process restarts;
-activation failures remain recorded until a successful rerun.
+`workstation-update`. Installation failures happen before process restarts.
+Success is reported only after activation checks pass; no separate status cache
+needs repairing.
 
 The lower-level `update-agent-tools` command remains available for targeted
 recovery when a dotfiles/source or workstation-configuration failure prevents
 `workstation-update` from reaching its agent-tool phase. Use it only to repair
 that agent-tool state, then return to `workstation-update` for routine
-maintenance. Home Manager also uses `update-agent-tools --yes` during initial
-bootstrap when managed commands are missing.
+maintenance. Home Manager also uses `update-agent-tools` during bootstrap when
+managed commands are missing. This does not authorize disrupting existing ACP
+workers: fresh workstations proceed unattended, while existing workers require
+consent. If activation cannot prompt, run `update-agent-tools --yes` explicitly
+to authorize the repair, then rerun `workstation-update`.
 
-### Login freshness notices
+### Login and maintenance ownership
 
-Eligible interactive SSH logins run a synchronous, non-mutating freshness
-check from the dotfiles-managed Bash login profile. Dotfiles and agent-tool
-sources cache successful checks for 24 hours and retry failed source checks
-after one hour; their cache ages are independent. Local blockers and incomplete
-maintenance are evaluated on every eligible login. Healthy or not-yet-due state
-is silent. Available updates and retryable maintenance produce one combined
-notice with exactly one `Run: workstation-update` action. A local blocker
-instead says that maintenance is blocked and must be resolved before the
-command is run. A hard 15-second deadline bounds the check, and failure or
-timeout never prevents the shell from opening.
+Login loads the shell environment and performs no network checks or updates.
+The former login freshness helper, release comparison caches, applied-commit
+marker, and background-check interface have been removed. Package managers
+resolve releases during explicit maintenance, chezmoi tracks target state, and
+`workstation-setup` checks configuration freshness. Existing cache files under
+`~/.local/state/workstation-update` and `~/.local/state/update-agent-tools` are
+unused; only the maintenance lock files remain active. Old installed
+`workstation-login` copies are no longer invoked and may be removed.
 
-Login never installs updates. There is no workstation-side background timer or
-scheduler, and local shells, remote commands, and non-interactive shells do not
-run the login check. Workstations without the completed setup marker also skip
-it. Each eligible SSH login warns when maintenance is actionable; healthy state
-remains silent. The login profile deliberately does not source `.bashrc`, so
-unrelated interactive-shell configuration is not pulled into the login
-boundary.
+This trades advance update notices and no-op detection for a smaller ownership
+boundary. An explicit maintenance run may reinstall current agent versions and
+restart their services, so choose an appropriate maintenance window. There is
+no workstation-side update scheduler. The login profile continues to load the
+required environment without sourcing unrelated `.bashrc` configuration.
 
 ## Workstation herdr
 

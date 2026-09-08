@@ -106,13 +106,13 @@ It supplies none of the session/service ownership features above.
 
 ## Existing workstation fit
 
-The repository keeps SSH login freshness separate from process ownership:
-eligible interactive logins run a bounded check and return to a plain shell.
+The repository keeps SSH login separate from maintenance and process ownership:
+logins load the workstation environment and return to a plain shell.
 The workstation declares AoE's web dashboard and LAN proxy as systemd user
 units with explicit `PATH`, restart, and socket policies; the documented
 Ansible setup enables user lingering. These are useful precedents for both
 options, but neither should be conflated with the Sandcastle run itself.
-[SSH login contract](../../README.md#login-freshness-notices),
+[SSH login contract](../../README.md#login-and-maintenance-ownership),
 [workstation user units](../../home/workstation.nix),
 [workstation operating contract](../../README.md#workstation-agent-of-empires)
 

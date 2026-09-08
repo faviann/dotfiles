@@ -45,7 +45,7 @@ It runs `chezmoi init/update`, applies the `#workstation` Home Manager flake,
 authenticates GitHub CLI from the `dotfiles/github-cli-token` Bitwarden item,
 and validates the expected tools. Chezmoi installs AoE first. Home Manager then
 installs the stable base tools, including Node/npm, `uv`, `gh`, and Hermes,
-loads the AoE user units, and hands off to `update-agent-tools --yes` if any
+loads the AoE user units, and hands off to `update-agent-tools` if any
 managed agent command is missing. That handoff installs the standalone Codex,
 Claude Code, Pi, OpenCode, and Oh My Pi CLIs plus the `codex-acp`,
 `claude-agent-acp`, and `pi-acp` adapters. No package lookup or additional
@@ -57,13 +57,16 @@ default `~/.omp` state. OMP does not replace Pi or `pi-acp`.
 
 AoE's host-level `acp.allow_agent_install` setting stays disabled; dotfiles is
 the package owner. The bootstrap update is part of `workstation-setup`, not an
-SSH-login installation or a background schedule.
+SSH-login installation or a background schedule. A fresh bootstrap has no ACP
+workers and needs no disruption consent. If repairing missing tools with active
+workers cannot prompt, run `update-agent-tools --yes` explicitly, then retry
+`workstation-setup`; bootstrap never supplies restart consent on your behalf.
 
 Chezmoi also recovers agent skills on the workstation. If `~/repos/skills` is
 absent, it clones `faviann/skills`; it never updates an existing checkout. The
 repository's reconciler restores supported harness links while leaving
 deprecated skills unlinked. Skill reconciliation runs during `chezmoi apply`,
-not during login-time freshness checks.
+never during shell login.
 
 Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
 has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
@@ -142,16 +145,13 @@ gh auth login --git-protocol ssh --skip-ssh-key
 workstation-update
 ```
 
-`workstation-update` is the only routine maintenance command. It validates the
+`workstation-update` is the routine maintenance command. It validates the
 chezmoi source as a clean, canonical `main` checkout, fetches and fast-forwards
-it to `origin/main`, previews and applies required dotfile changes, and then
-updates the Bun runtime; AoE; the standalone Codex, Claude Code, Pi, OpenCode,
-and Oh My Pi CLIs; and the `codex-acp`, `claude-agent-acp`, and `pi-acp`
-adapters as one unit. Bun comes from its upstream release rather than from
-nixpkgs, so it moves together with the harnesses that declare engine floors
-against it. The Codex
-runtime bundled inside `codex-acp` is separate from the standalone Codex CLI,
-so both scopes are checked.
+it to `origin/main`, previews and applies required dotfile changes, and verifies
+the resulting targets. It then always runs `workstation-setup` to reconcile
+Home Manager and the workstation configuration, followed by `update-agent-tools`
+to update the agent tools. Running setup every time delegates configuration
+freshness to the setup command that owns it.
 
 When a dotfile apply must render Bitwarden-backed templates, an interactive
 update reuses a valid `BW_SESSION` or prompts once to unlock the vault for the
@@ -162,24 +162,25 @@ The workflow refuses dirty, non-canonical, ahead, or diverged source state and
 does not reset or discard local work. Dotfile apply is previewed before it runs,
 and locally modified targets are not silently overwritten.
 
+The agent-tool phase uses the upstream Bun installer, npm's engine compatibility
+checks and batch installation for the eight harness and adapter packages, and
+`aoe update --yes`. Bun and the agent packages update together; the Codex runtime
+bundled inside `codex-acp` remains separate from the standalone Codex CLI.
+
 An interactive update asks once when running ACP sessions would be restarted
 and reports only the number affected. Automation must pass `--yes` to authorize
-that disruption; otherwise it refuses safely. Installation and pre-activation
-verification finish before the AoE service or ACP workers restart. Bounded
-service, ACP diagnostic, and worker-health checks must pass before success is
-recorded.
+that disruption; otherwise it refuses safely. Installation, command checks, and
+ACP diagnostics finish before the AoE service restarts. Only workers captured
+at the start are replaced. Bounded service and worker-health checks must pass
+before the command reports success.
 
-Interactive SSH login only checks freshness: it never installs. Successful
-dotfiles and agent-tool checks are cached independently for 24 hours, failed
-source checks retry after one hour, and local blockers or incomplete
-maintenance are evaluated every time. Current state is silent. Actionable state
-prints one combined notice rather than release notes. Available updates and
-retryable maintenance show one `Run: workstation-update` action; local blockers
-say that they must be resolved before running the command. The check has a hard
-15-second deadline and never prevents the shell from opening. The
-dotfiles-managed Bash login profile and `workstation-login` helper own this
-check; they do not source `.bashrc` or auto-launch tmux/AoE. There is no
-background scheduling or per-component update command.
+Shell login only loads the workstation PATH, Nix environment, and Home Manager
+session variables. It performs no network access or maintenance checks, starts
+no updater, and does not source `.bashrc` or auto-launch tmux/AoE. Run
+`workstation-update` explicitly when you want to reconcile and update the
+workstation. There is no background schedule or freshness cache to maintain.
+An older installation may retain `~/.local/bin/workstation-login`; the login
+profile no longer calls it, and you can remove that obsolete helper.
 
 Failed updates do not roll back automatically. Use the reported phase and
 component, inspect `systemctl --user status aoe-serve.service` and

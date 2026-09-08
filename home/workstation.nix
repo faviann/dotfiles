@@ -7,7 +7,6 @@ let
     pkgs.util-linux
     pkgs.curl
     pkgs.unzip
-    pkgs.findutils
   ];
   collieBootstrap = pkgs.writeShellApplication {
     name = "collie-bootstrap";
@@ -130,20 +129,9 @@ in
   # was missing and activation died on whichever one it probed first.
   home.activation.bootstrapAgentTools =
     lib.hm.dag.entryAfter [ "reloadSystemd" "installPackages" ] ''
-      # Activation runs with a curated store-only PATH holding just coreutils and
-      # friends, so system directories are absent. The updater's remaining host
-      # tools — flock for its lock, curl for the AoE release check, unzip and find
-      # for the Bun archive — come from the store rather than from whatever the
-      # host happens to install.
-      #
-      # The system directories go last, after everything the store supplies, for
-      # systemctl alone: the updater restarts a unit in this host's user session,
-      # so it needs that session's own systemd rather than a store copy of one.
+      # Supply installer tools from Nix; use the host systemctl for its user session.
       export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH:/usr/local/bin:/usr/bin:/bin"
 
-      # bun is listed because the updater owns it: nixpkgs lags Bun releases badly
-      # enough that a harness engine floor can outrun it, so a switch that finds
-      # no bun must hand off rather than leave the harnesses without a runtime.
       _agent_tools_missing=false
       for _agent_tool in \
         aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
@@ -158,7 +146,8 @@ in
           || { echo "Agent-tool bootstrap requires chezmoi to install AoE first" >&2; exit 1; }
         command -v update-agent-tools >/dev/null 2>&1 \
           || { echo "Agent-tool bootstrap requires the dotfiles updater" >&2; exit 1; }
-        update-agent-tools --yes
+        # Repairing a missing tool does not authorize disrupting existing workers.
+        run update-agent-tools
       fi
     '';
 

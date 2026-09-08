@@ -1,8 +1,12 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 readonly REPO_ROOT
+
+setup() {
+  export TMPDIR="$BATS_TEST_TMPDIR"
+}
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -34,7 +38,7 @@ rendered_raw() {
   nix eval --raw "$installable"
 }
 
-test_workstation_profile_includes_dotnet_10_lts_sdk() {
+@test "test_workstation_profile_includes_dotnet_10_lts_sdk" {
   local dotnet_sdk_package
 
   dotnet_sdk_package="$(
@@ -63,7 +67,7 @@ test_workstation_profile_includes_dotnet_10_lts_sdk() {
     || fail 'rendered workstation package profile does not include the .NET 10 LTS SDK'
 }
 
-test_collie_origin_socket_listens_on_the_portal_origin_port() {
+@test "test_collie_origin_socket_listens_on_the_portal_origin_port" {
   local listen_stream
 
   listen_stream="$(
@@ -75,7 +79,7 @@ test_collie_origin_socket_listens_on_the_portal_origin_port() {
     || fail "Collie origin socket listens on unexpected address: $listen_stream"
 }
 
-test_collie_origin_socket_activates_with_normal_user_sockets() {
+@test "test_collie_origin_socket_activates_with_normal_user_sockets" {
   local wanted_by
 
   wanted_by="$(
@@ -87,7 +91,7 @@ test_collie_origin_socket_activates_with_normal_user_sockets() {
     || fail "Collie origin socket has unexpected activation targets: $wanted_by"
 }
 
-test_collie_origin_forwarder_connects_to_the_loopback_bridge() {
+@test "test_collie_origin_forwarder_connects_to_the_loopback_bridge" {
   local exec_start
 
   exec_start="$(
@@ -99,7 +103,7 @@ test_collie_origin_forwarder_connects_to_the_loopback_bridge() {
     || fail "Collie origin forwarder has unexpected command: $exec_start"
 }
 
-test_collie_origin_forwarder_has_no_collie_service_dependency_or_fallback() {
+@test "test_collie_origin_forwarder_has_no_collie_service_dependency_or_fallback" {
   local rendered_service
 
   rendered_service="$(
@@ -116,7 +120,7 @@ test_collie_origin_forwarder_has_no_collie_service_dependency_or_fallback() {
     || fail 'Collie origin forwarder adds a Collie service dependency or fallback'
 }
 
-test_aoe_serve_pulls_up_its_origin_socket() {
+@test "test_aoe_serve_pulls_up_its_origin_socket" {
   local rendered_service
 
   rendered_service="$(
@@ -136,7 +140,7 @@ test_aoe_serve_pulls_up_its_origin_socket() {
     || fail 'aoe-serve does not softly pull up its origin socket'
 }
 
-test_collie_service_drop_in_pulls_up_its_origin_socket() {
+@test "test_collie_service_drop_in_pulls_up_its_origin_socket" {
   local rendered_drop_in
 
   rendered_drop_in="$(
@@ -159,7 +163,7 @@ test_collie_service_drop_in_pulls_up_its_origin_socket() {
   fi
 }
 
-test_existing_aoe_forwarder_rendering_is_unchanged() {
+@test "test_existing_aoe_forwarder_rendering_is_unchanged" {
   local rendered_socket
   local rendered_service
 
@@ -203,9 +207,8 @@ ln -sf ../collie.service "$XDG_CONFIG_HOME/systemd/user/default.target.wants/col
 PLUGIN
 }
 
-test_collie_bootstrap_regenerates_a_missing_unit_from_the_current_registry() (
+@test "test_collie_bootstrap_regenerates_a_missing_unit_from_the_current_registry" {
   collie_bootstrap_fixture
-  trap 'rm -rf "$fixture_dir"' EXIT
   bash "$REPO_ROOT/scripts/collie-bootstrap"
   [[ -L "$XDG_CONFIG_HOME/systemd/user/default.target.wants/collie.service" ]] \
     || fail 'bootstrap did not delegate unit creation and enablement'
@@ -219,11 +222,10 @@ test_collie_bootstrap_regenerates_a_missing_unit_from_the_current_registry() (
   bash "$REPO_ROOT/scripts/collie-bootstrap"
   [[ "$(cat "$XDG_CONFIG_HOME/systemd/user/collie.service")" == "$fixture_dir/replacement plugin" ]] \
     || fail 'bootstrap reused an obsolete plugin root'
-)
+}
 
-test_collie_bootstrap_skips_absent_installations_and_reports_broken_ones() (
+@test "test_collie_bootstrap_skips_absent_installations_and_reports_broken_ones" {
   collie_bootstrap_fixture
-  trap 'rm -rf "$fixture_dir"' EXIT
   rm "$XDG_CONFIG_HOME/herdr/plugins.json"
   bash "$REPO_ROOT/scripts/collie-bootstrap"
   printf '[]' >"$XDG_CONFIG_HOME/herdr/plugins.json"
@@ -243,9 +245,9 @@ test_collie_bootstrap_skips_absent_installations_and_reports_broken_ones() (
   local_status=0
   bash "$REPO_ROOT/scripts/collie-bootstrap" || local_status=$?
   [[ "$local_status" == 42 ]] || fail 'plugin startup failure was swallowed'
-)
+}
 
-test_collie_bootstrap_runs_after_the_user_target_without_coupling_herdr() {
+@test "test_collie_bootstrap_runs_after_the_user_target_without_coupling_herdr" {
   local service
   service="$(rendered_json '.collieBootstrapService' \
     "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.services.collie-bootstrap")"
@@ -259,22 +261,3 @@ test_collie_bootstrap_runs_after_the_user_target_without_coupling_herdr() {
     (.Service.Environment[0] | contains("/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin"))
   ' <<<"$service" >/dev/null || fail 'bootstrap has unsafe boot ordering or environment'
 }
-
-# shellcheck source=tests/lib/suite-dispatch.bash
-source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
-
-readonly test_cases=(
-  test_collie_bootstrap_regenerates_a_missing_unit_from_the_current_registry
-  test_collie_bootstrap_skips_absent_installations_and_reports_broken_ones
-  test_collie_bootstrap_runs_after_the_user_target_without_coupling_herdr
-  test_workstation_profile_includes_dotnet_10_lts_sdk
-  test_collie_origin_socket_listens_on_the_portal_origin_port
-  test_collie_origin_socket_activates_with_normal_user_sockets
-  test_collie_origin_forwarder_connects_to_the_loopback_bridge
-  test_collie_origin_forwarder_has_no_collie_service_dependency_or_fallback
-  test_aoe_serve_pulls_up_its_origin_socket
-  test_collie_service_drop_in_pulls_up_its_origin_socket
-  test_existing_aoe_forwarder_rendering_is_unchanged
-)
-
-suite_dispatch 'workstation Collie runtime and origin forwarder' "$@"

@@ -1,6 +1,4 @@
-# Routine workstation login behavior is owned by the dotfiles-managed command
-# below. Keep this adapter small so login does not inherit unrelated .bashrc
-# configuration.
+# Load the workstation environment without starting maintenance or sourcing .bashrc.
 export PATH="$HOME/.local/bin:$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
 
 if [ -r /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
@@ -14,25 +12,3 @@ if [ -r "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh" ]; then
 	# shellcheck disable=SC1091
 	. "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
 fi
-
-_workstation_login_freshness() {
-	case "$-" in
-		*i*) ;;
-		*) return ;;
-	esac
-	[[ -t 0 && -t 1 ]] || return
-	[[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]] || return
-	[[ -z "${SSH_ORIGINAL_COMMAND:-}" ]] || return
-	[[ -z "${WORKSTATION_LOGIN_FRESHNESS_RAN:-}" ]] || return
-	export WORKSTATION_LOGIN_FRESHNESS_RAN=1
-
-	if [[ ! -x "$HOME/.local/bin/workstation-login" ]]; then
-		printf '%s\n' \
-			'Workstation login freshness is unavailable. Run: workstation-update' >&2
-		return
-	fi
-	"$HOME/.local/bin/workstation-login" || printf '%s\n' \
-		'Workstation login freshness failed unexpectedly. Run: workstation-update' >&2
-}
-_workstation_login_freshness
-unset -f _workstation_login_freshness

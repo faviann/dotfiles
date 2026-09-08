@@ -14,18 +14,18 @@ This repository uses a single-context layout. See `docs/agents/domain.md`.
 
 ### Validation
 
-List behavioral suites and cases with `bash scripts/run-tests --list`. During
-iteration, run one exact case or one exact suite:
+Behavioral tests use Bats. Discover suites and cases with
+`rg '^@test ' tests`. During iteration, run one exact case or one suite in
+the declared development environment:
 
 ```bash
-bash scripts/run-tests --case test_exact_case_name
-bash scripts/run-tests --suite workstation-update.bash
+nix develop -c bats --filter '^test_exact_case_name$' tests
+nix develop -c bats tests/workstation-update.bats
 ```
 
 For Bash or shell-template work, run focused analysis with
 `nix run .#shellcheck`.
 
 The sole full closeout command is `nix flake check`. It runs focused shell
-analysis, the test-runner contract, and every behavioral suite in the declared
-Nix environment; do not run a redundant standalone full behavioral pass
-immediately beforehand.
+analysis and every behavioral suite in the declared Nix environment; do not
+run a redundant standalone full behavioral pass immediately beforehand.
