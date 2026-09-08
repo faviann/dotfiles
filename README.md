@@ -309,6 +309,32 @@ manual updates, origin isolation, Web Push, and
 The bootstrap regenerates the service from a surviving plugin installation;
 it does not provide VAPID or subscription-state persistence.
 
+## Workstation Lobu
+
+[Lobu](https://app.lobu.ai) registers the workstation as a headless device and
+polls the managed control plane outward over HTTPS. No inbound route, listener,
+or reverse-proxy configuration is involved.
+
+- Install: Home Manager activation runs `scripts/lobu-bootstrap`, which installs
+  `@lobu/cli` under `~/.local` when the CLI is missing. It preserves an existing
+  executable and never authenticates.
+- Updates: manual, outside `update-agent-tools`, and not version-pinned.
+- Credentials: `lobu login` is interactive and human-owned. No token, device
+  identifier, or generated credential is committed to this repository.
+- Supervision: Home Manager owns `lobu.service` under `default.target`, with
+  user lingering for boot startup and a five-second failure-restart delay.
+  Intentional stops remain stopped. Startup is gated on the presence of
+  `~/.config/lobu/credentials.json`, so the unit stays inactive until login.
+
+Durable state under `~/.config/lobu` is owned by homelab-iac's persistent-home
+mapping, not by dotfiles. Deploy
+[homelab-iac#270](https://github.com/faviann/homelab-iac/issues/270) before
+applying this configuration or running `lobu login`.
+
+Use the [Lobu bootstrap and recovery runbook](docs/lobu-runbook.md) for rollout
+order, first deployment, service control, re-authentication, manual upgrades,
+and deferred live validation.
+
 ## SSH key rotation
 
 The Bitwarden item and GitHub identity setup are defined in

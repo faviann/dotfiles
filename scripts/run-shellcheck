@@ -11,6 +11,7 @@ shell_inputs=(
   "$REPO_ROOT"/tests/*.bats
   "$REPO_ROOT/scripts/run-shellcheck"
   "$REPO_ROOT/scripts/collie-bootstrap"
+  "$REPO_ROOT/scripts/lobu-bootstrap"
   "$REPO_ROOT/scripts/moraine-service"
   "$REPO_ROOT/scripts/update-dotnet-sdk"
 )

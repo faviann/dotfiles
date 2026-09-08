@@ -1,6 +1,11 @@
 { pkgs, lib, config, dotnetSdk, hermesPackage, morainePackage, ... }:
 
 let
+  lobuBootstrap = pkgs.writeShellApplication {
+    name = "lobu-bootstrap";
+    runtimeInputs = [ pkgs.nodejs ];
+    text = builtins.readFile ../scripts/lobu-bootstrap;
+  };
   # Host tools update-agent-tools shells out to that neither home.packages nor
   # Home Manager's activation PATH provides.
   updaterHostTools = lib.makeBinPath [
@@ -102,6 +107,33 @@ in
   '';
 
   systemd.user.startServices = "sd-switch";
+
+  # The profile must exist before npm runs; install before sd-switch can start
+  # the daemon. Home Manager's run helper preserves activation dry-run behavior.
+  home.activation.bootstrapLobu =
+    lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "installPackages" ] ''
+      run ${lobuBootstrap}/bin/lobu-bootstrap
+    '';
+
+  systemd.user.services.lobu = {
+    Unit = {
+      Description = "Lobu workstation headless device";
+      ConditionPathExists = "%h/.config/lobu/credentials.json";
+    };
+    Service = {
+      Type = "simple";
+      Environment = [
+        "HOME=${config.home.homeDirectory}"
+        "PATH=${config.home.homeDirectory}/.local/bin:${config.home.profileDirectory}/bin:/usr/local/bin:/usr/bin:/bin"
+      ];
+      WorkingDirectory = config.home.homeDirectory;
+      ExecStart = "${config.home.homeDirectory}/.local/bin/lobu daemon --api-url https://app.lobu.ai --no-interactive-session";
+      Restart = "on-failure";
+      RestartSec = 5;
+      UMask = "0077";
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
 
   # Upstream owns installation, readiness, migrations, and child startup. The
   # foreground wrapper keeps this unit alive only while that complete stack is
