@@ -157,6 +157,20 @@
           collieServiceDropIn =
             workstationHomeConfiguration.config.xdg.configFile
             ."systemd/user/collie.service.d/10-origin-forwarder.conf".text;
+          artifactPublisher = {
+            text =
+              workstationHomeConfiguration.config.xdg.configFile
+              ."faviann-skills/artifacts.json".text;
+            target =
+              workstationHomeConfiguration.config.xdg.configFile
+              ."faviann-skills/artifacts.json".target;
+            managedPaths = builtins.filter
+              (path: builtins.match ".*faviann-skills/artifacts\\.json" path != null)
+              (builtins.attrNames workstationHomeConfiguration.config.home.file);
+            sessionVariables = builtins.attrNames
+              workstationHomeConfiguration.config.home.sessionVariables;
+            inherit (workstationHomeConfiguration.config.home) homeDirectory;
+          };
         }
       );
       shellcheckSource = nixpkgs.lib.fileset.toSource {
