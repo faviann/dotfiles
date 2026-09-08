@@ -3,7 +3,6 @@
 let
   lobuContextName = "homelab";
   lobuControlPlaneOrigin = "https://lobu.faviann.com";
-  lobuContextConfig = "%h/.config/lobu/config.json";
   lobuBootstrap = pkgs.writeShellApplication {
     name = "lobu-bootstrap";
     runtimeInputs = [ pkgs.nodejs ];
@@ -150,7 +149,7 @@ in
         "origin"
         lobuControlPlaneOrigin
         ".contexts[$context].url == $origin"
-        lobuContextConfig
+        "%h/.config/lobu/config.json"
       ];
       Environment = [
         "HOME=${config.home.homeDirectory}"

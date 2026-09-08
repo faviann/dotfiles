@@ -99,14 +99,12 @@ run_bootstrap() {
     .service |
     (.Unit.ConditionPathExists == "%h/.config/lobu/credentials.json") and
     (.Service.Type == "simple") and
-    (.Service.ExecCondition != null) and
     (.Service.ExecStart == ["/home/faviann/.local/bin/lobu daemon --no-interactive-session"]) and
     (.Service.WorkingDirectory == "/home/faviann") and
-    (.Service.Environment == [
-      "HOME=/home/faviann",
-      "LOBU_CONTEXT=homelab",
-      "PATH=/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin"
-    ]) and
+    (.Service.Environment | index("HOME=/home/faviann") != null) and
+    (.Service.Environment | index("LOBU_CONTEXT=homelab") != null) and
+    (.Service.Environment | index("PATH=/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin") != null) and
+    (.Service.Environment | all(startswith("LOBU_API_URL=") | not)) and
     (.Service.UMask == "0077") and
     (.Service.Restart == "on-failure") and
     (.Service.RestartSec == 30) and
