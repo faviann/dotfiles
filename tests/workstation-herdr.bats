@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 readonly REPO_ROOT
 
 fail() {
@@ -33,7 +33,7 @@ rendered_workstation_activation() {
     --apply 'activation: builtins.mapAttrs (_: entry: entry.data or "") activation'
 }
 
-test_herdr_service_runs_the_supported_foreground_server() {
+@test "test_herdr_service_runs_the_supported_foreground_server" {
   local rendered_service
 
   rendered_service="$(rendered_herdr_service)" \
@@ -45,7 +45,7 @@ test_herdr_service_runs_the_supported_foreground_server() {
     || fail 'Herdr does not execute the supported foreground server entrypoint directly'
 }
 
-test_herdr_service_has_a_deterministic_process_environment() {
+@test "test_herdr_service_has_a_deterministic_process_environment" {
   local rendered_service
 
   rendered_service="$(rendered_herdr_service)" \
@@ -62,7 +62,7 @@ test_herdr_service_has_a_deterministic_process_environment() {
     || fail 'Herdr service process environment is not deterministic and self-contained'
 }
 
-test_herdr_service_restarts_failures_after_a_bounded_delay() {
+@test "test_herdr_service_restarts_failures_after_a_bounded_delay" {
   local rendered_service
 
   rendered_service="$(rendered_herdr_service)" \
@@ -75,7 +75,7 @@ test_herdr_service_restarts_failures_after_a_bounded_delay() {
     || fail 'Herdr service does not use its bounded failure-restart policy'
 }
 
-test_herdr_service_leaves_normal_termination_to_herdr() {
+@test "test_herdr_service_leaves_normal_termination_to_herdr" {
   local rendered_service
 
   rendered_service="$(rendered_herdr_service)" \
@@ -92,7 +92,7 @@ test_herdr_service_leaves_normal_termination_to_herdr() {
     || fail 'Herdr service overrides the foreground server graceful-termination contract'
 }
 
-test_herdr_service_activates_with_the_normal_user_target() {
+@test "test_herdr_service_activates_with_the_normal_user_target" {
   local rendered_service
 
   rendered_service="$(rendered_herdr_service)" \
@@ -106,7 +106,7 @@ test_herdr_service_activates_with_the_normal_user_target() {
     || fail 'Herdr service does not activate under the normal user target'
 }
 
-test_herdr_supervision_has_no_automatic_migration_or_coupled_lifecycle() {
+@test "test_herdr_supervision_has_no_automatic_migration_or_coupled_lifecycle" {
   local rendered_activation
   local rendered_service
 
@@ -133,17 +133,3 @@ test_herdr_supervision_has_no_automatic_migration_or_coupled_lifecycle() {
     <<<"$rendered_activation" >/dev/null \
     || fail 'workstation activation contains a Herdr lifecycle or migration action'
 }
-
-# shellcheck source=tests/lib/suite-dispatch.bash
-source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
-
-readonly test_cases=(
-  test_herdr_service_runs_the_supported_foreground_server
-  test_herdr_service_has_a_deterministic_process_environment
-  test_herdr_service_restarts_failures_after_a_bounded_delay
-  test_herdr_service_leaves_normal_termination_to_herdr
-  test_herdr_service_activates_with_the_normal_user_target
-  test_herdr_supervision_has_no_automatic_migration_or_coupled_lifecycle
-)
-
-suite_dispatch 'workstation Herdr supervision' "$@"

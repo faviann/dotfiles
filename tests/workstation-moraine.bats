@@ -1,8 +1,12 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 readonly REPO_ROOT
+
+setup() {
+  export TMPDIR="$BATS_TEST_TMPDIR"
+}
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -28,7 +32,7 @@ rendered_moraine_config() {
     --apply 'text: builtins.fromTOML (builtins.unsafeDiscardStringContext text)'
 }
 
-test_moraine_profile_uses_one_integrity_pinned_source_build() {
+@test "test_moraine_profile_uses_one_integrity_pinned_source_build" {
   local built_package
   local executable
   local release
@@ -92,7 +96,7 @@ test_moraine_profile_uses_one_integrity_pinned_source_build() {
   done
 }
 
-test_moraine_configures_codex_and_claude_sources_with_backfill() {
+@test "test_moraine_configures_codex_and_claude_sources_with_backfill" {
   local config
 
   config="$(rendered_moraine_config)" \
@@ -127,7 +131,7 @@ test_moraine_configures_codex_and_claude_sources_with_backfill() {
     || fail 'Moraine does not declare only the deployment-owned Codex and Claude Code sources'
 }
 
-test_moraine_config_keeps_redaction_and_the_default_local_topology() {
+@test "test_moraine_config_keeps_redaction_and_the_default_local_topology" {
   local config
 
   config="$(rendered_moraine_config)" \
@@ -150,7 +154,7 @@ test_moraine_config_keeps_redaction_and_the_default_local_topology() {
     || fail 'Moraine weakens redaction, leaves its runtime root, or configures non-local topology'
 }
 
-test_moraine_service_owns_and_restarts_the_upstream_stack() {
+@test "test_moraine_service_owns_and_restarts_the_upstream_stack" {
   local fake_moraine
   local invocation_log
   local runner
@@ -185,7 +189,6 @@ test_moraine_service_owns_and_restarts_the_upstream_stack() {
     || fail 'Moraine service does not own the upstream stack lifecycle'
 
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
   invocation_log="$test_dir/invocations"
   fake_moraine="$test_dir/moraine"
   # The variables in these literal lines are evaluated by the fake executable.
@@ -220,7 +223,7 @@ test_moraine_service_owns_and_restarts_the_upstream_stack() {
     || fail 'Moraine service runner does not start upstream before monitoring stack health'
 }
 
-test_moraine_leaves_user_codex_configuration_unmanaged() {
+@test "test_moraine_leaves_user_codex_configuration_unmanaged" {
   local boundary
 
   boundary="$(
@@ -238,16 +241,3 @@ test_moraine_leaves_user_codex_configuration_unmanaged() {
   ' <<<"$boundary" >/dev/null \
     || fail 'Moraine takes ownership of user-managed Codex configuration'
 }
-
-# shellcheck source=tests/lib/suite-dispatch.bash
-source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
-
-readonly test_cases=(
-  test_moraine_profile_uses_one_integrity_pinned_source_build
-  test_moraine_configures_codex_and_claude_sources_with_backfill
-  test_moraine_config_keeps_redaction_and_the_default_local_topology
-  test_moraine_service_owns_and_restarts_the_upstream_stack
-  test_moraine_leaves_user_codex_configuration_unmanaged
-)
-
-suite_dispatch 'workstation-local Moraine producer' "$@"

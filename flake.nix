@@ -58,6 +58,7 @@
       };
       behavioralTestInputs = [
         pkgs.bash
+        pkgs.bats
         pkgs.chezmoi
         pkgs.coreutils
         pkgs.diffutils
@@ -67,9 +68,7 @@
         pkgs.gnused
         pkgs.jq
         pkgs.nix
-        pkgs.unzip
         pkgs.util-linux
-        pkgs.zip
       ];
       behavioralTestSource = nixpkgs.lib.fileset.toSource {
         root = ./.;
@@ -165,12 +164,10 @@
           ./dot_bash_profile.tmpl
           ./dot_bashrc.tmpl
           ./dot_local/bin/executable_update-agent-tools
-          ./dot_local/bin/executable_workstation-login
           ./dot_local/bin/executable_workstation-update
           ./scripts/collie-bootstrap
           ./scripts/moraine-service
           ./scripts/run-shellcheck
-          ./scripts/run-tests
           ./scripts/update-dotnet-sdk
           ./tests
         ];
@@ -236,19 +233,6 @@
           touch "$out"
         '';
 
-        test-runner = pkgs.runCommand "dotfiles-test-runner" {
-          nativeBuildInputs = behavioralTestInputs;
-        } ''
-          export HOME="$TMPDIR/home"
-          export XDG_CACHE_HOME="$TMPDIR/cache"
-          export XDG_CONFIG_HOME="$TMPDIR/config"
-          export XDG_STATE_HOME="$TMPDIR/state"
-          mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
-
-          ${pkgs.bash}/bin/bash ${behavioralTestSource}/tests/contracts/test-runner.bash
-          touch "$out"
-        '';
-
         behavioral-tests = pkgs.runCommand "dotfiles-behavioral-tests" {
           nativeBuildInputs = behavioralTestInputs;
           NIX_CONFIG = ''
@@ -265,7 +249,7 @@
           export XDG_STATE_HOME="$TMPDIR/state"
           mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
 
-          ${pkgs.bash}/bin/bash ${behavioralTestSource}/scripts/run-tests
+          bats --timing --print-output-on-failure ${behavioralTestSource}/tests
           touch "$out"
         '';
       };

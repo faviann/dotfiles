@@ -1,972 +1,120 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_PREFIX="$HOME/.local"
-AOE_LATEST_RELEASE_URL="https://api.github.com/repos/njbrake/agent-of-empires/releases/latest"
-BUN_LATEST_RELEASE_URL="https://api.github.com/repos/oven-sh/bun/releases/latest"
-# Packages whose engines are compared against the runtimes this workstation
-# supplies. Bun is the updater's own; Node comes from the Home Manager profile.
-MANAGED_NPM_ENGINE_COMPONENTS=(
-  "Codex CLI (standalone)|@openai/codex"
-  "Claude Code CLI|@anthropic-ai/claude-code"
-  "Pi agent CLI|@earendil-works/pi-coding-agent"
-  "OpenCode CLI|opencode-ai"
-  "Oh My Pi CLI|@oh-my-pi/pi-coding-agent"
-  "codex-acp adapter|@agentclientprotocol/codex-acp"
-  "claude-agent-acp adapter|@agentclientprotocol/claude-agent-acp"
-  "pi-acp adapter|pi-acp"
-)
-STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
-STATE_DIR="$STATE_HOME/update-agent-tools"
-STATE_FILE="$STATE_DIR/state.json"
-LOCK_FILE="$STATE_DIR/lock"
-readonly CHECK_STATUS_UPDATES_AVAILABLE=10
-
-freshness_check_mode=false
-if [[ "${1:-}" == '--freshness-check-if-due' && $# -eq 1 ]]; then
-  freshness_check_mode=true
-fi
-record_freshness_failure_mode=false
-if [[ "${1:-}" == '--record-freshness-failure' && $# -eq 1 ]]; then
-  record_freshness_failure_mode=true
-fi
-
 fail() {
   printf 'update-agent-tools: %s\n' "$*" >&2
   exit 1
 }
 
-mkdir -p "$STATE_DIR"
-command -v flock >/dev/null 2>&1 || fail "flock missing from PATH"
-exec 9>"$LOCK_FILE"
-if [[ "$freshness_check_mode" == true \
-  || "$record_freshness_failure_mode" == true ]]; then
-  flock --nonblock 9 \
-    || fail "freshness check unavailable: agent-tool maintenance is already running"
-else
-  flock 9
-fi
-
-now_epoch="$(date -u -d "${UPDATE_AGENT_TOOLS_NOW:-now}" +%s)" \
-  || fail "invalid current time"
-now_iso="$(date -u -d "@$now_epoch" +%Y-%m-%dT%H:%M:%SZ)"
-
-state_value() {
-  local field="$1"
-
-  if [[ -f "$STATE_FILE" ]]; then
-    jq -er ".$field // empty" "$STATE_FILE" 2>/dev/null || true
-  fi
-}
-
-write_check_state() {
-  local last_attempt="$1"
-  local last_successful_check="$2"
-  local cached_version_result="$3"
-  local check_status="$4"
-  local last_successful_activation
-  local activation_failure
-  local temporary_state
-
-  last_successful_activation="$(state_value last_successful_activation)"
-  activation_failure="null"
-  if [[ -f "$STATE_FILE" ]]; then
-    activation_failure="$(jq -c '.activation_failure // null' "$STATE_FILE" 2>/dev/null || printf 'null')"
-  fi
-  temporary_state="$(mktemp "$STATE_DIR/state.json.tmp.XXXXXX")"
-  chmod 600 "$temporary_state"
-  jq -n \
-    --arg last_attempt "$last_attempt" \
-    --arg last_successful_check "$last_successful_check" \
-    --arg cached_version_result "$cached_version_result" \
-    --arg check_status "$check_status" \
-    --arg last_successful_activation "$last_successful_activation" \
-    --argjson activation_failure "$activation_failure" \
-    '{
-      last_attempt: $last_attempt,
-      last_successful_check: (
-        if $last_successful_check == "" then null else $last_successful_check end
-      ),
-      cached_version_result: $cached_version_result,
-      check_status: $check_status,
-      last_successful_activation: (
-        if $last_successful_activation == "" then null
-        else $last_successful_activation end
-      ),
-      activation_failure: $activation_failure
-    }' >"$temporary_state"
-  mv -f "$temporary_state" "$STATE_FILE"
-}
-
-if [[ "$record_freshness_failure_mode" == true ]]; then
-  write_check_state \
-    "$now_iso" \
-    "$(state_value last_successful_check)" \
-    "$(state_value cached_version_result)" \
-    failed
-  exit 0
-fi
-
-command -v npm >/dev/null 2>&1 || fail "npm missing from PATH"
-
-actual_prefix="$(npm config get prefix)"
-test "$actual_prefix" = "$EXPECTED_PREFIX" \
-  || fail "npm prefix must be $EXPECTED_PREFIX, got $actual_prefix"
-
-write_activation_state() {
-  local successful_at="$1"
-  local failure_phase="$2"
-  local failure_component="$3"
-  local current_state='{}'
-  local temporary_state
-
-  if [[ -f "$STATE_FILE" ]]; then
-    current_state="$(jq -c . "$STATE_FILE")" \
-      || fail "state update failed: invalid state file"
-  fi
-  temporary_state="$(mktemp "$STATE_DIR/state.json.tmp.XXXXXX")"
-  chmod 600 "$temporary_state"
-  jq -n \
-    --argjson current_state "$current_state" \
-    --arg successful_at "$successful_at" \
-    --arg failure_phase "$failure_phase" \
-    --arg failure_component "$failure_component" \
-    --arg failed_at "$now_iso" \
-    '$current_state + {
-      last_successful_activation: (
-        if $successful_at == "" then $current_state.last_successful_activation
-        else $successful_at end
-      ),
-      activation_failure: (
-        if $failure_phase == "" then null
-        else {
-          phase: $failure_phase,
-          component: $failure_component,
-          failed_at: $failed_at
-        } end
-      )
-    }' >"$temporary_state"
-  mv -f "$temporary_state" "$STATE_FILE"
-}
-
-activation_fail() {
-  local phase="$1"
-  local component="$2"
-
-  write_activation_state "" "$phase" "$component"
-  fail "$phase failed: $component"
-}
-
-read_acp_workers() {
-  local workers
-
-  workers="$(aoe ps --acp --dead --json)" || return 1
-  jq -ce '
-    if type != "array" then error("expected an array") else . end
-    | map(
-        if (
-          (.session_id | type) == "string"
-          and (.session_id | length) > 0
-          and (.pid | type) == "number"
-          and (.alive | type) == "boolean"
-          and (.build_stale | type) == "boolean"
-        ) then {
-          session_id,
-          pid,
-          alive,
-          build_stale
-        } else error("invalid ACP worker") end
-      )
-  ' <<<"$workers"
-}
-
-captured_workers_replaced_and_healthy() {
-  local current_workers="$1"
-  local captured_workers="$2"
-
-  jq -e --argjson captured "$captured_workers" '
-    . as $current
-    | [
-        $captured[] as $before
-        | (
-            any(
-              $current[];
-              .session_id == $before.session_id
-              and .pid != $before.pid
-              and .alive == true
-              and .build_stale == false
-            )
-            and all(
-              $current[];
-              .session_id != $before.session_id
-              or .pid != $before.pid
-              or .alive != true
-            )
-          )
-      ]
-    | all
-  ' <<<"$current_workers" >/dev/null
-}
-
-wait_for_aoe_service() {
-  local health_attempt=1
-
-  while (( health_attempt <= 10 )); do
-    if systemctl --user is-active --quiet aoe-serve.service; then
-      return 0
-    fi
-    if (( health_attempt < 10 )); then
-      sleep 1
-    fi
-    health_attempt=$((health_attempt + 1))
-  done
-  return 1
-}
-
-wait_for_aoe_health() {
-  local health_attempt=1
-
-  aoe_health_component="AoE service"
-  while (( health_attempt <= 10 )); do
-    if systemctl --user is-active --quiet aoe-serve.service; then
-      aoe_health_component="AoE ACP diagnostics"
-      if aoe acp doctor; then
-        return 0
-      fi
-    else
-      aoe_health_component="AoE service"
-    fi
-    if (( health_attempt < 10 )); then
-      sleep 1
-    fi
-    health_attempt=$((health_attempt + 1))
-  done
-  return 1
-}
-
-bun_archive_name() {
-  # Bun's own npm installer never selects a baseline build, so a pre-AVX2 host
-  # would get an AVX2 binary that dies on its first instruction. Choosing the
-  # archive here is what lets the updater own Bun at all.
-  if grep -qw avx2 "${UPDATE_AGENT_TOOLS_CPUINFO:-/proc/cpuinfo}" 2>/dev/null; then
-    printf 'bun-linux-x64.zip\n'
-  else
-    printf 'bun-linux-x64-baseline.zip\n'
-  fi
-}
-
-resolve_bun_release() {
-  local archive
-  local release
-
-  archive="$(bun_archive_name)"
-  release="$(curl -fsSL "$BUN_LATEST_RELEASE_URL")" || return 1
-  jq -er --arg archive "$archive" '
-    (.tag_name // "" | sub("^bun-v"; "")) as $version
-    | (.assets // [] | map(select(.name == $archive)) | first) as $asset
-    | if ($version | test("^[0-9]+[.][0-9]+[.][0-9]+$"))
-        and $asset != null
-        and (($asset.browser_download_url // "") | length) > 0
-        and (($asset.digest // "") | test("^sha256:[0-9a-f]{64}$"))
-      then {
-        version: $version,
-        url: $asset.browser_download_url,
-        digest: ($asset.digest | sub("^sha256:"; ""))
-      }
-      else error("unusable bun release") end
-  ' <<<"$release"
-}
-
-bun_installed_version() {
-  local version
-
-  [[ "$(command -v bun || true)" == "$EXPECTED_PREFIX/bin/bun" ]] \
-    || { printf 'missing\n'; return 0; }
-  version="$(bun --version 2>/dev/null)" || { printf 'missing\n'; return 0; }
-  [[ -n "$version" ]] || { printf 'missing\n'; return 0; }
-  printf '%s\n' "$version"
-}
-
-bun_install_failed() {
-  # Cleanup belongs to install_bun_runtime's EXIT trap, which also covers the
-  # signals no explicit failure path can reach.
-  fail "installation failed: Bun runtime ($1)"
-}
-
-install_bun_runtime() {
-  local release="$1"
-  local version
-  local url
-  local digest
-  local work_dir
-  local archive
-  local extracted
-  local observed
-  local tool
-
-  version="$(jq -er '.version' <<<"$release")" \
-    || fail "installation failed: Bun runtime"
-  url="$(jq -er '.url' <<<"$release")" || fail "installation failed: Bun runtime"
-  digest="$(jq -er '.digest' <<<"$release")" || fail "installation failed: Bun runtime"
-
-  # The profile supplies these, but the updater is runnable outside it, and the
-  # repo's shape for a missing prerequisite is a named tool rather than a
-  # downstream failure that blames the archive.
-  for tool in curl unzip find sha256sum install; do
-    command -v "$tool" >/dev/null 2>&1 || fail "$tool missing from PATH"
-  done
-
-  # A run killed mid-download leaves ~100MB of archive and extracted tree behind,
-  # and nothing else ever visits these paths, so sweep before adding another.
-  rm -rf "${STATE_DIR:?}"/bun.*
-  work_dir="$(mktemp -d "$STATE_DIR/bun.XXXXXX")" \
-    || fail "installation failed: Bun runtime"
-  # Covers the signals the explicit failure paths cannot: the trap is cleared on
-  # the way out so a later exit does not delete an unrelated path.
-  trap 'rm -rf "$work_dir" "$EXPECTED_PREFIX/bin/.bun.new"' EXIT
-  archive="$work_dir/bun.zip"
-
-  curl -fsSL -o "$archive" "$url" || bun_install_failed "download of $url"
-  observed="$(sha256sum "$archive" | cut -d ' ' -f 1)" \
-    || bun_install_failed "checksum"
-  [[ "$observed" == "$digest" ]] \
-    || bun_install_failed "archive digest mismatch"
-  unzip -q -o -d "$work_dir" "$archive" || bun_install_failed "archive"
-  extracted="$(find "$work_dir" -mindepth 2 -type f -name bun -print -quit)"
-  [[ -n "$extracted" ]] || bun_install_failed "archive layout"
-  # Staged then renamed: replacing the path rather than writing through it keeps
-  # a bun that is mid-run on its original inode.
-  install -D -m 755 "$extracted" "$EXPECTED_PREFIX/bin/.bun.new" \
-    || bun_install_failed "staging"
-  mv -f "$EXPECTED_PREFIX/bin/.bun.new" "$EXPECTED_PREFIX/bin/bun" \
-    || bun_install_failed "replacement"
-  ln -sfn bun "$EXPECTED_PREFIX/bin/bunx" || bun_install_failed "bunx"
-  # Proves the archive actually held the Bun the release advertised, and that it
-  # runs on this host at all, while the failure is still about Bun alone.
-  observed="$("$EXPECTED_PREFIX/bin/bun" --version 2>/dev/null)" \
-    || bun_install_failed "installed Bun does not run"
-  [[ "$observed" == "$version" ]] \
-    || bun_install_failed "installed Bun reports $observed, expected $version"
-  rm -rf "$work_dir"
-  trap - EXIT
-}
-
-install_npm_component() {
-  local component="$1"
-  local package="$2"
-
-  if ! npm install --global "$package"; then
-    fail "installation failed: $component ($package)"
-  fi
-}
-
-check_component() {
-  local name="$1"
-  local current="$2"
-  local latest="$3"
-
-  if [[ "$current" != "$latest" ]]; then
-    printf '%s: %s -> %s\n' "$name" "$current" "$latest"
-  fi
-}
-
-is_stable_version() {
-  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+][0-9A-Za-z.-]+)?$ ]]
-}
-
-check_failure_component() {
-  printf 'update-agent-tools-check-component: %s\n' "$1" >&2
-  return 1
-}
-
-require_stable_version() {
-  local component="$1"
-  local version="$2"
-
-  is_stable_version "$version" || check_failure_component "$component"
-}
-
-normalize_version() {
-  local -a parts
-
-  IFS=. read -r -a parts <<<"$1"
-  printf '%s.%s.%s\n' "${parts[0]:-0}" "${parts[1]:-0}" "${parts[2]:-0}"
-}
-
-engine_floor() {
-  # Only `>=X[.Y[.Z]]` is understood. An unrecognized range yields no floor, so a
-  # range syntax this updater has never seen cannot wedge the whole toolchain.
-  local range="$1"
-
-  [[ "$range" =~ ^\>=[[:space:]]*([0-9]+(\.[0-9]+){0,2})$ ]] || return 0
-  normalize_version "${BASH_REMATCH[1]}"
-}
-
-version_satisfies_floor() {
-  local version
-  local floor="$2"
-
-  version="$(normalize_version "$1")"
-  [[ "$(printf '%s\n%s\n' "$version" "$floor" | sort -V | head -n 1)" == "$floor" ]]
-}
-
-node_installed_version() {
-  local version
-
-  version="$(node --version 2>/dev/null)" || return 1
-  version="${version#v}"
-  [[ -n "$version" ]] || return 1
-  printf '%s\n' "$version"
-}
-
-# Compares each harness's declared engines against the runtimes this update will
-# leave behind: the Bun about to be installed, and the Node the Home Manager
-# profile already supplies. Reports through runtime_engine_failure rather than
-# printing, because discovery and the install phase phrase their refusals
-# differently.
-runtime_engine_failure=""
-managed_npm_metadata_failure=""
-declare -A managed_npm_latest_versions=()
-declare -A managed_npm_engines=()
-
-load_managed_npm_metadata() {
-  local require_versions="$1"
-  local entry
-  local component
-  local package
-  local metadata
-  local version
-  local engines
-
-  managed_npm_metadata_failure=""
-  managed_npm_latest_versions=()
-  managed_npm_engines=()
-  for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
-    component="${entry%%|*}"
-    package="${entry#*|}"
-    metadata="$(npm view "$package@latest" version engines --json 2>/dev/null)" \
-      || { managed_npm_metadata_failure="$component"; return 1; }
-    # npm returns just the version string when the package has no engines.
-    # Normalize that successful response; failed reads and other shapes still
-    # refuse the update before any toolchain mutation.
-    metadata="$(jq -ce '
-      if type == "string" and length > 0 then {version: .}
-      elif type == "object" then .
-      else error("invalid package metadata") end
-    ' <<<"$metadata" 2>/dev/null)" \
-      || { managed_npm_metadata_failure="$component"; return 1; }
-    engines="$(jq -c '.engines // empty' <<<"$metadata" 2>/dev/null)" \
-      || { managed_npm_metadata_failure="$component"; return 1; }
-    managed_npm_engines["$package"]="$engines"
-    if [[ "$require_versions" == true ]]; then
-      version="$(jq -er '.version | select(type == "string" and length > 0)' \
-        <<<"$metadata" 2>/dev/null)" \
-        || { managed_npm_metadata_failure="$component"; return 1; }
-      managed_npm_latest_versions["$package"]="$version"
-    fi
-  done
-}
-
-check_runtime_engines() {
-  local bun_target="$1"
-  local entry
-  local component
-  local package
-  local engines
-  local runtime
-  local range
-  local floor
-  local version
-  local remedy
-  local runtime_component
-
-  for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
-    component="${entry%%|*}"
-    package="${entry#*|}"
-    # Unverifiable is not the same as satisfied. npm install does not enforce
-    # engines — engine-strict defaults to false, so a floor violation is only a
-    # warning there — which means skipping a package whose metadata failed to
-    # load installs a harness that may not start, and the run then dies at the
-    # post-install `$harness --version` with the harnesses already replaced.
-    # That is the incident this guard exists to prevent, so the metadata loader
-    # refuses before this check. A rerun costs a minute; the alternative costs
-    # the toolchain.
-    engines="${managed_npm_engines[$package]}"
-    # An absent or malformed declaration is different: it is the package's
-    # steady state, not a transient failure, so refusing would block updates
-    # until an upstream author fixed it. Nothing to check means nothing to fail.
-    [[ -n "$engines" ]] || continue
-    jq -e 'type == "object"' <<<"$engines" >/dev/null 2>&1 || continue
-    for runtime in bun node; do
-      range="$(jq -r --arg runtime "$runtime" '.[$runtime] // empty' <<<"$engines")" \
-        || continue
-      [[ -n "$range" ]] || continue
-      floor="$(engine_floor "$range")"
-      [[ -n "$floor" ]] || continue
-      if [[ "$runtime" == "bun" ]]; then
-        runtime_component="Bun runtime"
-        version="$bun_target"
-        remedy="no Bun release satisfies it yet"
-      else
-        runtime_component="Node runtime"
-        version="$(node_installed_version)" \
-          || { runtime_engine_failure="$runtime_component"; return 1; }
-        remedy="update the nixpkgs flake input to raise the profile's Node"
-      fi
-      version_satisfies_floor "$version" "$floor" && continue
-      # The component string is the only failure detail that reaches the
-      # operator, so the whole diagnosis travels in it.
-      runtime_engine_failure="$runtime_component ($component needs $runtime $range, found $version; $remedy)"
-      return 1
-    done
-  done
-
-  return 0
-}
-
-check_toolchain() {
-  local installed
-  local entry
-  local component
-  local package
-  local latest
-  local aoe_current="missing"
-  local aoe_latest
-  local bun_release
-  local bun_latest
-  local bundled_codex_range
-  local bundled_codex_versions
-  local bundled_codex_latest
-
-  command -v curl >/dev/null 2>&1 \
-    || { check_failure_component "AoE"; return 1; }
-  command -v jq >/dev/null 2>&1 \
-    || { check_failure_component "npm package inventory"; return 1; }
-
-  bun_release="$(resolve_bun_release)" \
-    || { check_failure_component "Bun runtime"; return 1; }
-  bun_latest="$(jq -er '.version' <<<"$bun_release")" \
-    || { check_failure_component "Bun runtime"; return 1; }
-  require_stable_version "Bun runtime" "$bun_latest" || return 1
-
-  if command -v aoe >/dev/null 2>&1; then
-    aoe_current="$(aoe --version)" \
-      || { check_failure_component "AoE"; return 1; }
-    aoe_current="${aoe_current##* }"
-  fi
-  aoe_latest="$(curl -fsSL "$AOE_LATEST_RELEASE_URL" | jq -r '.tag_name')" \
-    || { check_failure_component "AoE"; return 1; }
-  [[ -n "$aoe_latest" && "$aoe_latest" != "null" ]] \
-    || { check_failure_component "AoE"; return 1; }
-  aoe_latest="${aoe_latest#v}"
-  require_stable_version "AoE" "$aoe_latest" || return 1
-
-  installed="$(npm list --global --json --all 2>/dev/null || true)"
-  [[ -n "$installed" ]] \
-    || { check_failure_component "npm package inventory"; return 1; }
-  jq -e 'type == "object"' <<<"$installed" >/dev/null \
-    || { check_failure_component "npm package inventory"; return 1; }
-
-  load_managed_npm_metadata true \
-    || { check_failure_component "$managed_npm_metadata_failure"; return 1; }
-  bundled_codex_range="$(npm view \
-    @agentclientprotocol/codex-acp@latest \
-    'dependencies.@openai/codex')" \
-    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
-  [[ "$bundled_codex_range" =~ [^[:space:]] ]] \
-    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
-  [[ "$bundled_codex_range" != "null" && "$bundled_codex_range" != "undefined" ]] \
-    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
-  bundled_codex_versions="$(npm view \
-    "@openai/codex@$bundled_codex_range" \
-    version \
-    --json)" \
-    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
-  bundled_codex_latest="$(jq -er '
-    if type == "array" then . else [.] end
-    | map(select(
-        type == "string"
-        and length > 0
-        and (contains("-") | not)
-      ))
-    | last
-  ' <<<"$bundled_codex_versions")" \
-    || { check_failure_component "Codex runtime (codex-acp)"; return 1; }
-  require_stable_version "Codex runtime (codex-acp)" "$bundled_codex_latest" \
-    || return 1
-  for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
-    component="${entry%%|*}"
-    package="${entry#*|}"
-    require_stable_version \
-      "$component" \
-      "${managed_npm_latest_versions[$package]}" \
-      || return 1
-  done
-
-  check_runtime_engines "$bun_latest" \
-    || { check_failure_component "$runtime_engine_failure"; return 1; }
-
-  check_component "Bun runtime" \
-    "$(bun_installed_version)" \
-    "$bun_latest"
-  check_component "AoE" \
-    "$aoe_current" \
-    "$aoe_latest"
-  for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
-    component="${entry%%|*}"
-    package="${entry#*|}"
-    latest="${managed_npm_latest_versions[$package]}"
-    check_component \
-      "$component" \
-      "$(jq -r --arg package "$package" \
-        '.dependencies[$package].version // "missing"' <<<"$installed")" \
-      "$latest"
-  done
-  check_component "Codex runtime (codex-acp)" \
-    "$(jq -r '.dependencies["@agentclientprotocol/codex-acp"].dependencies["@openai/codex"].version // "missing"' <<<"$installed")" \
-    "$bundled_codex_latest"
-}
-
-print_cached_result() {
-  local cached_result="$1"
-
-  if [[ -n "$cached_result" ]]; then
-    printf '%s\n' "$cached_result"
-    if [[ "$freshness_check_mode" != true ]]; then
-      printf 'Run: update-agent-tools\n'
-    fi
-  fi
-}
-
-print_check_failure() {
-  local last_successful_check="$1"
-  local retry_iso="$2"
-
-  printf 'update-agent-tools: agent-tool update check failed; last successful check: %s; next retry: %s\n' \
-    "${last_successful_check:-never}" \
-    "$retry_iso" >&2
-}
-
-fresh_check_result=""
-fresh_check_failure_component=""
-run_fresh_check() {
-  local output_file
-  local error_file
-  local last_successful_check
-  local cached_result
-
-  output_file="$(mktemp "$STATE_DIR/check.stdout.XXXXXX")"
-  error_file="$(mktemp "$STATE_DIR/check.stderr.XXXXXX")"
-  if (check_toolchain) >"$output_file" 2>"$error_file"; then
-    fresh_check_result="$(<"$output_file")"
-    rm -f "$output_file" "$error_file"
-    write_check_state \
-      "$now_iso" \
-      "$now_iso" \
-      "$fresh_check_result" \
-      "success"
-    return 0
-  fi
-
-  fresh_check_failure_component="$(sed -n \
-    's/^update-agent-tools-check-component: //p' \
-    "$error_file" | tail -n 1)"
-  rm -f "$output_file" "$error_file"
-  last_successful_check="$(state_value last_successful_check)"
-  cached_result="$(state_value cached_version_result)"
-  write_check_state \
-    "$now_iso" \
-    "$last_successful_check" \
-    "$cached_result" \
-    "failed"
-  return 1
-}
-
-run_check() {
-  local last_successful_check
-  local retry_iso
-
-  if run_fresh_check; then
-    print_cached_result "$fresh_check_result"
-    return 0
-  fi
-
-  last_successful_check="$(state_value last_successful_check)"
-  retry_iso="$(date -u -d "@$((now_epoch + 3600))" +%Y-%m-%dT%H:%M:%SZ)"
-  print_check_failure "$last_successful_check" "$retry_iso"
-  return 1
-}
-
-run_status_check() {
-  run_fresh_check || return 1
-  if [[ -n "$fresh_check_result" \
-    || -n "$(state_value activation_failure)" ]]; then
-    return "$CHECK_STATUS_UPDATES_AVAILABLE"
-  fi
-  return 0
-}
-
-if [[ "${1:-}" == "--check-status" ]]; then
-  [[ $# -eq 1 ]] || fail "--check-status does not accept arguments"
-  if run_status_check; then
-    exit 0
-  else
-    exit $?
-  fi
-fi
-
-if [[ "${1:-}" == "--check" ]]; then
-  [[ $# -eq 1 ]] || fail "--check does not accept arguments"
-  if run_check; then
-    exit 0
-  else
-    exit 1
-  fi
-fi
-
-if [[ "${1:-}" == "--check-if-due" \
-  || "${1:-}" == "--freshness-check-if-due" ]]; then
-  local_last_attempt="$(state_value last_attempt)"
-  local_last_successful_check="$(state_value last_successful_check)"
-  local_cached_result="$(state_value cached_version_result)"
-  local_check_status="$(state_value check_status)"
-
-  if [[ -n "$local_last_attempt" ]]; then
-    if [[ "$local_check_status" == "failed" ]]; then
-      next_check_epoch="$(date -u -d "$local_last_attempt + 1 hour" +%s)"
-    else
-      next_check_epoch="$(date -u -d "$local_last_successful_check + 24 hours" +%s)"
-    fi
-
-    if (( now_epoch < next_check_epoch )); then
-      if [[ "$local_check_status" == "failed" ]]; then
-        next_check_iso="$(date -u -d "@$next_check_epoch" +%Y-%m-%dT%H:%M:%SZ)"
-        print_check_failure "$local_last_successful_check" "$next_check_iso"
-      else
-        print_cached_result "$local_cached_result"
-      fi
-      exit 0
-    fi
-  fi
-
-  if run_check; then
-    exit 0
-  else
-    exit 1
-  fi
-fi
-
 assume_yes=false
-update_if_needed=false
-if [[ $# -eq 1 && "$1" == "--yes" ]]; then
-  assume_yes=true
-elif [[ $# -eq 1 && "$1" == "--update-if-needed" ]]; then
-  update_if_needed=true
-elif [[ $# -eq 2 && "$1" == "--update-if-needed" && "$2" == "--yes" ]]; then
-  update_if_needed=true
+if [[ $# -eq 1 && "$1" == --yes ]]; then
   assume_yes=true
 elif [[ $# -ne 0 ]]; then
-  fail "unknown argument: $1"
+  fail 'usage: update-agent-tools [--yes]'
 fi
 
-if [[ "$update_if_needed" == true ]]; then
-  if run_status_check; then
-    exit 0
-  else
-    status=$?
-    if [[ "$status" -ne "$CHECK_STATUS_UPDATES_AVAILABLE" ]]; then
-      fail "discovery phase failed: ${fresh_check_failure_component:-agent-tool version discovery}; correct the problem, then rerun workstation-update"
-    fi
+prefix="$HOME/.local"
+export PATH="$prefix/bin:$PATH"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/update-agent-tools"
+mkdir -p "$state_dir"
+exec 9>"$state_dir/lock"
+flock 9
+
+packages=(
+  @openai/codex@latest
+  @anthropic-ai/claude-code@latest
+  @earendil-works/pi-coding-agent@latest
+  opencode-ai@latest
+  @oh-my-pi/pi-coding-agent@latest
+  @agentclientprotocol/codex-acp@latest
+  @agentclientprotocol/claude-agent-acp@latest
+  pi-acp@latest
+)
+
+read_workers() {
+  aoe ps --acp --dead --json | jq -ce '
+    if type == "array" and all(.[];
+      (.session_id | type == "string" and length > 0) and
+      (.pid | type == "number") and
+      (.alive | type == "boolean") and
+      (.build_stale | type == "boolean")
+    ) then . else error("invalid ACP worker inventory") end
+  '
+}
+
+captured="$(read_workers)" || fail 'unable to inspect running ACP sessions'
+captured="$(jq -c '[.[] | select(.alive)] | unique_by([.session_id, .pid])' <<<"$captured")"
+worker_count="$(jq 'length' <<<"$captured")"
+if (( worker_count > 0 )) && [[ "$assume_yes" == false ]]; then
+  [[ -t 0 ]] \
+    || fail "$worker_count running ACP workers would be disrupted; rerun with --yes to authorize replacement"
+  printf 'update-agent-tools: %s running ACP workers would be disrupted. Continue? [y/N] ' "$worker_count" >&2
+  if ! IFS= read -r answer || [[ ! "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+    fail 'update cancelled'
   fi
 fi
 
-command -v aoe >/dev/null 2>&1 \
-  || fail "installation failed: AoE command missing from PATH"
-captured_workers="$(read_acp_workers)" \
-  || fail "unable to inspect running ACP sessions"
-captured_workers="$(jq -c '
-  [
-    .[]
-    | select(.alive == true)
-    | {session_id, pid}
-  ]
-  | unique_by([.session_id, .pid])
-' <<<"$captured_workers")" \
-  || fail "unable to inspect running ACP sessions"
-captured_worker_count="$(jq -r 'length' <<<"$captured_workers")"
-if [[ "$captured_worker_count" -eq 1 ]]; then
-  captured_worker_noun="session"
-else
-  captured_worker_noun="sessions"
-fi
-if (( captured_worker_count > 0 )) && [[ "$assume_yes" == false ]]; then
-  if [[ ! -t 0 ]]; then
-    if [[ "$update_if_needed" == true ]]; then
-      fail "$captured_worker_count running ACP $captured_worker_noun would be disrupted; rerun workstation-update --yes to authorize replacement"
-    fi
-    fail "$captured_worker_count running ACP $captured_worker_noun would be disrupted; rerun with --yes to authorize replacement"
-  fi
-  printf 'update-agent-tools: %s running ACP %s would be disrupted. Continue? [y/N] ' \
-    "$captured_worker_count" "$captured_worker_noun" >&2
-  if ! IFS= read -r disruption_confirmation \
-    || [[ ! "$disruption_confirmation" =~ ^[Yy]([Ee][Ss])?$ ]]; then
-    fail "update cancelled"
-  fi
-fi
+# npm owns resolution, dependency compatibility, integrity and installation. Its
+# dry run enforces Node engines before replacing any executable. Bun engines are
+# verified by running the harnesses below, using the latest upstream runtime.
+mkdir -p "$prefix/lib"
+npm install --global --prefix "$prefix" --force=false --engine-strict --dry-run "${packages[@]}" \
+  || fail 'npm preflight failed; check package diagnostics and the Home Manager Node version'
 
-if [[ "$update_if_needed" == true ]]; then
-  write_activation_state "" "maintenance" "agent-tool update"
-fi
-
-# Bun first: it is the runtime the npm harnesses execute under, so installing it
-# ahead of them is what keeps a harness from landing on a Bun too old to run it.
-#
-# The guard runs here rather than only in discovery because --yes and the bare
-# invocation never reach check_toolchain before mutating: the Home Manager
-# bootstrap handoff uses --yes, so a floor checked only at discovery would leave
-# exactly that path replacing the harnesses first and refusing afterwards.
-bun_release="$(resolve_bun_release)" \
-  || fail "installation failed: Bun runtime (release metadata)"
-bun_target="$(jq -er '.version' <<<"$bun_release")" \
-  || fail "installation failed: Bun runtime (release metadata)"
-load_managed_npm_metadata false \
-  || fail "update refused before any change: $managed_npm_metadata_failure (engine metadata unavailable)"
-check_runtime_engines "$bun_target" \
-  || fail "update refused before any change: $runtime_engine_failure"
-
-if [[ "$(bun_installed_version)" == "$bun_target" ]]; then
-  printf 'Bun runtime %s is current\n' "$bun_target"
-else
-  install_bun_runtime "$bun_release"
-fi
-
-if ! aoe update --yes; then
-  fail "installation failed: AoE"
-fi
-
-for binary in codex claude pi opencode omp; do
-  binary_path="$EXPECTED_PREFIX/bin/$binary"
-  if [[ -e "$binary_path" || -L "$binary_path" ]]; then
-    rm -f "$binary_path"
-  fi
-done
-
-for entry in "${MANAGED_NPM_ENGINE_COMPONENTS[@]}"; do
-  component="${entry%%|*}"
-  package="${entry#*|}"
-  install_npm_component "$component" "$package@latest"
-done
-
-hash -r 2>/dev/null || true
-
-for binary in \
-  aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
-  expected_path="$EXPECTED_PREFIX/bin/$binary"
-  actual_path="$(command -v "$binary" || true)"
-  test "$actual_path" = "$expected_path" \
-    || fail "pre-activation verification failed: $binary command must resolve to $expected_path, got ${actual_path:-missing}"
-done
+# The upstream installer selects a CPU-compatible build and renames the extracted
+# binary into place. This PATH already includes its destination, so the installer
+# does not edit shell profiles. Keep bunx available without another installation.
+curl -fsSL https://bun.sh/install | BUN_INSTALL="$prefix" bash \
+  || fail 'Bun installation failed'
+ln -sfn bun "$prefix/bin/bunx"
+bun --version >/dev/null || fail 'installed Bun does not run on this workstation'
+npm install --global --prefix "$prefix" --force=false --engine-strict "${packages[@]}" \
+  || fail 'npm installation failed'
+aoe update --yes || fail 'AoE update failed'
 
 for harness in opencode omp pi; do
-  "$harness" --version >/dev/null \
-    || fail "pre-activation verification failed: $harness --version"
+  "$harness" --version >/dev/null || fail "pre-activation verification failed: $harness"
+done
+aoe acp doctor || fail 'pre-activation verification failed: ACP diagnostics'
+
+systemctl --user restart aoe-serve.service || fail 'AoE service restart failed'
+for (( attempt=0; attempt<10; attempt++ )); do
+  if systemctl --user is-active --quiet aoe-serve.service; then
+    break
+  fi
+  sleep 1
+done
+systemctl --user is-active --quiet aoe-serve.service || fail 'AoE service did not start'
+
+# A service restart may already have replaced a worker. Restart only captured
+# workers still present, never sessions created after consent was granted.
+mapfile -t sessions < <(jq -r 'unique_by(.session_id) | .[].session_id' <<<"$captured")
+for session in "${sessions[@]}"; do
+  current="$(read_workers)" || fail 'unable to inspect ACP workers after service restart'
+  if jq -e --arg session "$session" --argjson captured "$captured" '
+    any(.[]; . as $worker | .session_id == $session and .alive and
+      any($captured[]; .session_id == $worker.session_id and .pid == $worker.pid))
+  ' <<<"$current" >/dev/null; then
+    aoe acp restart "$session" || fail 'ACP worker restart failed'
+  fi
 done
 
-verification_output_file="$(mktemp "$STATE_DIR/verification.stdout.XXXXXX")"
-verification_error_file="$(mktemp "$STATE_DIR/verification.stderr.XXXXXX")"
-if ! check_toolchain >"$verification_output_file" 2>"$verification_error_file"; then
-  verification_component="$(sed -n \
-    's/^update-agent-tools-check-component: //p' \
-    "$verification_error_file" | tail -n 1)"
-  rm -f "$verification_output_file" "$verification_error_file"
-  fail "pre-activation verification failed: ${verification_component:-toolchain verification}"
-fi
-verification_output="$(<"$verification_output_file")"
-rm -f "$verification_output_file" "$verification_error_file"
-if [[ -n "$verification_output" ]]; then
-  failed_component="${verification_output%%:*}"
-  fail "pre-activation verification failed: $failed_component version"
-fi
-
-if ! aoe acp doctor; then
-  fail "pre-activation verification failed: AoE ACP diagnostics"
-fi
-
-if ! systemctl --user restart aoe-serve.service; then
-  activation_fail "activation" "AoE service restart"
-fi
-
-if (( captured_worker_count > 0 )); then
-  wait_for_aoe_service \
-    || activation_fail "post-activation verification" "AoE service"
-
-  mapfile -t captured_worker_sessions < <(jq -r '
-    unique_by(.session_id)
-    | .[].session_id
-  ' <<<"$captured_workers")
-  for worker_session_id in "${captured_worker_sessions[@]}"; do
-    current_workers="$(read_acp_workers)" \
-      || activation_fail \
-        "post-activation verification" \
-        "ACP session replacement"
-    if jq -e \
-      --arg session_id "$worker_session_id" \
-      --argjson captured "$captured_workers" '
-        ($captured
-          | map(select(.session_id == $session_id))
-          | first
-        ) as $before
-        | any(
-            .[];
-            .session_id == $session_id
-            and .pid != $before.pid
-          )
-      ' <<<"$current_workers" >/dev/null; then
-      continue
-    fi
-    if ! jq -e \
-      --arg session_id "$worker_session_id" '
-        any(.[]; .session_id == $session_id)
-      ' <<<"$current_workers" >/dev/null; then
-      continue
-    fi
-    if ! aoe acp restart "$worker_session_id"; then
-      activation_fail "activation" "ACP worker restart"
-    fi
-  done
-
-  workers_healthy=false
-  worker_health_attempt=1
-  while (( worker_health_attempt <= 10 )); do
-    current_workers="$(read_acp_workers)" \
-      || activation_fail \
-        "post-activation verification" \
-        "ACP session replacement"
-    if captured_workers_replaced_and_healthy \
-      "$current_workers" "$captured_workers"; then
-      workers_healthy=true
-      break
-    fi
-    if (( worker_health_attempt < 10 )); then
-      sleep 1
-    fi
-    worker_health_attempt=$((worker_health_attempt + 1))
-  done
-  [[ "$workers_healthy" == true ]] \
-    || activation_fail \
-      "post-activation verification" \
-      "ACP session replacement"
-fi
-
-wait_for_aoe_health \
-  || activation_fail \
-    "post-activation verification" \
-    "$aoe_health_component"
-
-activation_time_input="${UPDATE_AGENT_TOOLS_ACTIVATION_NOW:-${UPDATE_AGENT_TOOLS_NOW:-now}}"
-successful_activation_iso="$(date -u -d "$activation_time_input" +%Y-%m-%dT%H:%M:%SZ)" \
-  || activation_fail "post-activation verification" "activation timestamp"
-write_activation_state "$successful_activation_iso" "" ""
-if [[ "$update_if_needed" == true ]]; then
-  write_check_state "$now_iso" "$now_iso" "" "success"
-fi
+# Success means each captured session has a new live, current worker and none of
+# its old workers is still alive. Missing, stale and unchanged workers fail closed.
+for (( attempt=0; attempt<10; attempt++ )); do
+  current="$(read_workers)" || fail 'unable to verify ACP workers'
+  if jq -e --argjson captured "$captured" '
+    . as $current | all($captured[]; . as $before |
+      any($current[]; .session_id == $before.session_id and
+        .pid != $before.pid and .alive and (.build_stale | not)) and
+      all($current[]; .session_id != $before.session_id or
+        .pid != $before.pid or (.alive | not)))
+  ' <<<"$current" >/dev/null \
+    && systemctl --user is-active --quiet aoe-serve.service \
+    && aoe acp doctor; then
+    printf 'Agent tools updated and AoE workers verified.\n'
+    exit 0
+  fi
+  sleep 1
+done
+fail 'post-activation verification failed: AoE service, diagnostics or ACP worker replacement'

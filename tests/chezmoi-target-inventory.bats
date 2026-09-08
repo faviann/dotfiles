@@ -1,8 +1,12 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 readonly REPO_ROOT
+
+setup() {
+  export TMPDIR="$BATS_TEST_TMPDIR"
+}
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -55,7 +59,7 @@ run_chezmoi() {
     "$@"
 }
 
-test_repository_only_paths_are_ignored() {
+@test "test_repository_only_paths_are_ignored" {
   local test_dir
   local source_dir
   local destination_dir
@@ -64,7 +68,6 @@ test_repository_only_paths_are_ignored() {
   local path
 
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
   source_dir="$test_dir/source"
   destination_dir="$test_dir/home"
   managed_file="$test_dir/managed"
@@ -76,7 +79,7 @@ test_repository_only_paths_are_ignored() {
 
   for path in \
     README.md BOOTSTRAP.md AGENTS.md CLAUDE.md CONTRIBUTING.md \
-    CONTEXT.md CONTEXT-MAP.md docs/guide.md tests/inventory.bash \
+    CONTEXT.md CONTEXT-MAP.md docs/guide.md tests/inventory.bats \
     scripts/update-dotnet-sdk .github/workflows/update-dotnet-sdk.yml \
     flake.nix flake.lock home/workstation.nix; do
     printf 'repository only\n' >"$source_dir/$path"
@@ -86,7 +89,7 @@ test_repository_only_paths_are_ignored() {
   printf '#!/usr/bin/env bash\n' \
     >"$source_dir/dot_local/bin/executable_update-agent-tools"
   printf '#!/usr/bin/env bash\n' \
-    >"$source_dir/dot_local/bin/executable_workstation-login"
+    >"$source_dir/dot_local/bin/executable_workstation-update"
 
   run_chezmoi "$source_dir" "$destination_dir" \
     --override-data '{"is_lxc":false}' \
@@ -102,7 +105,7 @@ test_repository_only_paths_are_ignored() {
     assert_has_line "$path" "$ignored_file"
   done
   for path in \
-    docs/guide.md tests/inventory.bash scripts/update-dotnet-sdk \
+    docs/guide.md tests/inventory.bats scripts/update-dotnet-sdk \
     .github/workflows/update-dotnet-sdk.yml home/workstation.nix; do
     assert_lacks_line "$path" "$managed_file"
   done
@@ -112,10 +115,10 @@ test_repository_only_paths_are_ignored() {
   assert_has_line '.bash_profile' "$managed_file"
   assert_has_line '.bashrc' "$managed_file"
   assert_has_line '.local/bin/update-agent-tools' "$managed_file"
-  assert_has_line '.local/bin/workstation-login' "$managed_file"
+  assert_has_line '.local/bin/workstation-update' "$managed_file"
 }
 
-test_fish_is_ignored_only_on_the_configured_workstation() {
+@test "test_fish_is_ignored_only_on_the_configured_workstation" {
   local test_dir
   local source_dir
   local destination_dir
@@ -123,7 +126,6 @@ test_fish_is_ignored_only_on_the_configured_workstation() {
   local ignored_file
 
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
   source_dir="$test_dir/source"
   destination_dir="$test_dir/home"
   managed_file="$test_dir/managed"
@@ -157,7 +159,7 @@ test_fish_is_ignored_only_on_the_configured_workstation() {
   assert_lacks_line '.config/fish' "$ignored_file"
 }
 
-test_dry_run_proposes_only_intentional_targets() {
+@test "test_dry_run_proposes_only_intentional_targets" {
   local test_dir
   local source_dir
   local destination_dir
@@ -165,7 +167,6 @@ test_dry_run_proposes_only_intentional_targets() {
   local path
 
   test_dir="$(mktemp -d)"
-  trap 'rm -rf "$test_dir"' RETURN
   source_dir="$test_dir/source"
   destination_dir="$test_dir/home"
   dry_run_file="$test_dir/dry-run"
@@ -174,7 +175,7 @@ test_dry_run_proposes_only_intentional_targets() {
   cp "$REPO_ROOT/.chezmoiignore" "$source_dir/.chezmoiignore"
 
   for path in \
-    README.md docs/guide.md tests/inventory.bash \
+    README.md docs/guide.md tests/inventory.bats \
     flake.nix home/workstation.nix; do
     printf 'repository only\n' >"$source_dir/$path"
   done
@@ -183,7 +184,7 @@ test_dry_run_proposes_only_intentional_targets() {
   printf '#!/usr/bin/env bash\n' \
     >"$source_dir/dot_local/bin/executable_update-agent-tools"
   printf '#!/usr/bin/env bash\n' \
-    >"$source_dir/dot_local/bin/executable_workstation-login"
+    >"$source_dir/dot_local/bin/executable_workstation-update"
 
   run_chezmoi "$source_dir" "$destination_dir" \
     --override-data '{"is_lxc":false}' \
@@ -198,23 +199,12 @@ test_dry_run_proposes_only_intentional_targets() {
     "$dry_run_file" \
     || fail 'dry-run did not propose the intentional maintenance executable'
   grep -Fq \
-    'diff --git a/.local/bin/workstation-login b/.local/bin/workstation-login' \
+    'diff --git a/.local/bin/workstation-update b/.local/bin/workstation-update' \
     "$dry_run_file" \
     || fail 'dry-run did not propose the intentional login executable'
-  for path in README.md docs/guide.md tests/inventory.bash flake.nix home/workstation.nix; do
+  for path in README.md docs/guide.md tests/inventory.bats flake.nix home/workstation.nix; do
     assert_lacks_text "$path" "$dry_run_file"
   done
   [[ -z "$(find "$destination_dir" -mindepth 1 -print -quit)" ]] \
     || fail 'dry-run changed the isolated destination'
 }
-
-# shellcheck source=tests/lib/suite-dispatch.bash
-source "$REPO_ROOT/tests/lib/suite-dispatch.bash"
-
-readonly test_cases=(
-  test_repository_only_paths_are_ignored
-  test_fish_is_ignored_only_on_the_configured_workstation
-  test_dry_run_proposes_only_intentional_targets
-)
-
-suite_dispatch 'chezmoi target inventory' "$@"
