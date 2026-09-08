@@ -72,6 +72,16 @@ let
     service_bin_dir = "${morainePackage}/bin"
     managed_clickhouse_dir = "${moraineRoot}/clickhouse/current"
   '';
+  # The publish-artifact skill rereads this mapping on every publication.
+  # HomeLab-iac owns the directory, static server, routing, admin
+  # authentication, and retention behind these values
+  # (https://github.com/faviann/homelab-iac/issues/272); dotfiles owns only the
+  # user's mapping file. There is no automatic synchronization between the two
+  # repositories, so change both together.
+  artifactPublisherMapping = {
+    directory = "/ephemeral/workstation/artifacts";
+    baseUrl = "https://artifacts.admin.faviann.com";
+  };
 in
 {
   home.username = "faviann";
@@ -98,6 +108,9 @@ in
   ];
 
   home.file.${moraineConfigRelative}.text = moraineConfig;
+
+  xdg.configFile."faviann-skills/artifacts.json".text =
+    builtins.toJSON artifactPublisherMapping;
 
   home.activation.removeLegacyAoeUnits = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
     rm -f \
