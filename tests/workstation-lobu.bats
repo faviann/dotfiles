@@ -5,7 +5,7 @@ set -euo pipefail
 source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 setup() {
-  common_setup
+  export TMPDIR="$BATS_TEST_TMPDIR"
 }
 
 rendered_lobu() {

@@ -4,13 +4,12 @@ set -euo pipefail
 # shellcheck source=tests/test_helper.bash
 source "$BATS_TEST_DIRNAME/test_helper.bash"
 
+setup() {
+  export TMPDIR="$BATS_TEST_TMPDIR"
+}
 readonly COMMAND_PATH="$PATH"
 REAL_BASH="$(command -v bash)"
 readonly REAL_BASH
-
-setup() {
-  common_setup
-}
 
 make_fixture() {
   local test_dir="$1"

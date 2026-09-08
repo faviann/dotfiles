@@ -4,13 +4,12 @@ set -euo pipefail
 # shellcheck source=tests/test_helper.bash
 source "$BATS_TEST_DIRNAME/test_helper.bash"
 
+setup() {
+  export TMPDIR="$BATS_TEST_TMPDIR"
+}
 REAL_BASH="$(command -v bash)"
 readonly REAL_BASH
 export REAL_BASH
-
-setup() {
-  common_setup
-}
 
 render_hook() {
   local is_lxc="$1"

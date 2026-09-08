@@ -5,7 +5,7 @@ set -euo pipefail
 source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 setup() {
-  common_setup
+  export TMPDIR="$BATS_TEST_TMPDIR"
 }
 
 @test "test_workstation_profile_includes_dotnet_10_lts_sdk" {

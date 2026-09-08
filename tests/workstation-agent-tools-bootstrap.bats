@@ -4,12 +4,11 @@ set -euo pipefail
 # shellcheck source=tests/test_helper.bash
 source "$BATS_TEST_DIRNAME/test_helper.bash"
 
+setup() {
+  export TMPDIR="$BATS_TEST_TMPDIR"
+}
 REAL_BASH="$(command -v bash)"
 readonly REAL_BASH
-
-setup() {
-  common_setup
-}
 
 activation_script() {
   if [[ -n "${TEST_BOOTSTRAP_ACTIVATION_SCRIPT:-}" ]]; then
