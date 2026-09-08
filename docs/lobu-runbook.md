@@ -26,14 +26,14 @@ using its Node/npm runtime with engine compatibility enforced. It preserves an
 existing executable and never authenticates during activation.
 
 The enabled service skips startup while credentials are absent. It also has a
-read-only precondition that requires an active `homelab` context mapped to the
+read-only precondition that requires any configured context to resolve to the
 self-hosted origin, so applying the generation cannot create a context or start
-the daemon against an incomplete or incorrect installation. In an interactive
-workstation terminal, run:
+the daemon against an incomplete or incorrect installation. The matching context
+does not have to be the CLI's active context. In an interactive workstation
+terminal, run:
 
 ```bash
 lobu context add homelab --url https://lobu.faviann.com
-lobu context use homelab
 lobu login --context homelab
 systemctl --user start lobu.service
 systemctl --user status lobu.service --no-pager
@@ -45,9 +45,11 @@ Complete the browser approval requested by login. The service always passes
 Cloud. On first start, Lobu registers a headless device using the hostname. Later
 starts reuse the `homelab` context's cached identity and worker credential from
 `~/.config/lobu/devices/`. Keep both the persisted configuration root and the
-context name unchanged across restarts and LXC rebuilds. Agent-session identity
-detection is disabled. The service uses the ordinary home directory, including
-its persisted mapping, without managing that mapping itself.
+context name unchanged across restarts and LXC rebuilds. Changing the active CLI
+context does not affect daemon startup because Lobu matches the daemon's explicit
+API URL to saved contexts by origin. Agent-session identity detection is disabled.
+The service uses the ordinary home directory, including its persisted mapping,
+without managing that mapping itself.
 
 No inbound route or listening socket is configured. The daemon polls outward.
 Herdr routing and ChatGPT invocation experiments are separate work.
