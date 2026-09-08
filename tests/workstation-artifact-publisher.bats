@@ -1,33 +1,25 @@
 #!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-readonly REPO_ROOT
+# shellcheck source=tests/test_helper.bash
+source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 setup() {
-  export TMPDIR="$BATS_TEST_TMPDIR"
-}
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
+  common_setup
 }
 
 rendered_publisher() {
-  if [[ -n "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
-    jq -c '.artifactPublisher' "$TEST_WORKSTATION_RENDERED_CONFIGURATION"
-  else
-    nix eval --json "$REPO_ROOT#homeConfigurations.workstation.config" \
-      --apply 'c: {
-        text = c.xdg.configFile."faviann-skills/artifacts.json".text;
-        target = c.xdg.configFile."faviann-skills/artifacts.json".target;
-        managedPaths = builtins.filter
-          (path: builtins.match ".*faviann-skills/artifacts\\.json" path != null)
-          (builtins.attrNames c.home.file);
-        sessionVariables = builtins.attrNames c.home.sessionVariables;
-        inherit (c.home) homeDirectory;
-      }'
-  fi
+  rendered_json '.artifactPublisher' \
+    "$REPO_ROOT#homeConfigurations.workstation.config" \
+    --apply 'c: {
+      text = c.xdg.configFile."faviann-skills/artifacts.json".text;
+      target = c.xdg.configFile."faviann-skills/artifacts.json".target;
+      managedPaths = builtins.filter
+        (path: builtins.match ".*faviann-skills/artifacts\\.json" path != null)
+        (builtins.attrNames c.home.file);
+      sessionVariables = builtins.attrNames c.home.sessionVariables;
+      inherit (c.home) homeDirectory;
+    }'
 }
 
 @test "test_artifact_mapping_declares_the_agreed_directory_and_base_url" {

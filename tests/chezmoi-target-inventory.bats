@@ -1,16 +1,11 @@
 #!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-readonly REPO_ROOT
+# shellcheck source=tests/test_helper.bash
+source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 setup() {
-  export TMPDIR="$BATS_TEST_TMPDIR"
-}
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
+  common_setup
 }
 
 assert_has_line() {

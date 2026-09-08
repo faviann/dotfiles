@@ -9,6 +9,7 @@ shell_inputs=(
   "$REPO_ROOT/dot_bash_profile.tmpl"
   "$REPO_ROOT/dot_bashrc.tmpl"
   "$REPO_ROOT"/tests/*.bats
+  "$REPO_ROOT"/tests/*.bash
   "$REPO_ROOT/scripts/run-shellcheck"
   "$REPO_ROOT/scripts/collie-bootstrap"
   "$REPO_ROOT/scripts/lobu-bootstrap"

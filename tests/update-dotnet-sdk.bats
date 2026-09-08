@@ -1,19 +1,15 @@
 #!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-readonly REPO_ROOT
+# shellcheck source=tests/test_helper.bash
+source "$BATS_TEST_DIRNAME/test_helper.bash"
 
-setup() {
-  export TMPDIR="$BATS_TEST_TMPDIR"
-}
 readonly COMMAND_PATH="$PATH"
 REAL_BASH="$(command -v bash)"
 readonly REAL_BASH
 
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
+setup() {
+  common_setup
 }
 
 make_fixture() {

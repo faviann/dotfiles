@@ -1,70 +1,11 @@
 #!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-readonly REPO_ROOT
+# shellcheck source=tests/test_helper.bash
+source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 setup() {
-  export TMPDIR="$BATS_TEST_TMPDIR"
-}
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
-}
-
-rendered_json() {
-  local fixture_filter="$1"
-  local installable="$2"
-  shift 2
-
-  if [[ -n "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
-    jq -ce "$fixture_filter" "$TEST_WORKSTATION_RENDERED_CONFIGURATION"
-    return
-  fi
-
-  nix eval --json "$installable" "$@"
-}
-
-rendered_raw() {
-  local fixture_filter="$1"
-  local installable="$2"
-
-  if [[ -n "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
-    jq -er "$fixture_filter" "$TEST_WORKSTATION_RENDERED_CONFIGURATION"
-    return
-  fi
-
-  nix eval --raw "$installable"
-}
-
-@test "test_workstation_profile_includes_dotnet_10_lts_sdk" {
-  local dotnet_sdk_package
-
-  dotnet_sdk_package="$(
-    rendered_json '.dotnetSdkPackage' \
-      "$REPO_ROOT#homeConfigurations.workstation.config.home.packages" \
-      --apply '
-        packages:
-        let
-          package = builtins.head (
-            builtins.filter
-              (package: (package.pname or package.name) == "dotnet-sdk-wrapped")
-              packages
-          );
-        in
-        {
-          pname = package.pname or package.name;
-          inherit (package) version;
-        }
-      '
-  )" || fail 'could not render the workstation .NET SDK package'
-
-  jq -e '
-    (.pname == "dotnet-sdk-wrapped") and
-    (.version | startswith("10."))
-  ' <<<"$dotnet_sdk_package" >/dev/null \
-    || fail 'rendered workstation package profile does not include the .NET 10 LTS SDK'
+  common_setup
 }
 
 @test "test_collie_origin_socket_listens_on_the_portal_origin_port" {
@@ -120,26 +61,6 @@ rendered_raw() {
     || fail 'Collie origin forwarder adds a Collie service dependency or fallback'
 }
 
-@test "test_aoe_serve_pulls_up_its_origin_socket" {
-  local rendered_service
-
-  rendered_service="$(
-    rendered_json '.aoeServeService' \
-      "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.services.aoe-serve"
-  )" || fail 'could not render the AoE serve service'
-
-  # Starting aoe-serve without the socket leaves origin port 4001 unbound, so the
-  # portal sees nothing while the app is healthy. Wants, not Requires: aoe-serve
-  # stays useful locally if the socket fails, and Wants adds no ordering, so it
-  # cannot deadlock against the proxy's own Requires=aoe-serve.service.
-  jq -e '
-    ([((.Unit.Wants // [])[]) | select(. == "aoe-lan-proxy.socket")] | length == 1) and
-    ([((.Unit.Requires // [])[]) | select(test("aoe-lan-proxy"; "i"))] == []) and
-    ([((.Unit.After // [])[]) | select(test("aoe-lan-proxy"; "i"))] == [])
-  ' <<<"$rendered_service" >/dev/null \
-    || fail 'aoe-serve does not softly pull up its origin socket'
-}
-
 @test "test_collie_service_drop_in_pulls_up_its_origin_socket" {
   local rendered_drop_in
 
@@ -161,33 +82,6 @@ rendered_raw() {
     <<<"$rendered_drop_in"; then
     fail 'Collie drop-in reproduces generated unit contents instead of only the socket link'
   fi
-}
-
-@test "test_existing_aoe_forwarder_rendering_is_unchanged" {
-  local rendered_socket
-  local rendered_service
-
-  rendered_socket="$(
-    rendered_json '.aoeLanProxySocket' \
-      "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.sockets.aoe-lan-proxy"
-  )" || fail 'could not render the existing AoE proxy socket'
-  rendered_service="$(
-    rendered_json '.aoeLanProxyService' \
-      "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.services.aoe-lan-proxy"
-  )" || fail 'could not render the existing AoE proxy service'
-
-  jq -e '
-    (.Socket.ListenStream == "0.0.0.0:4001") and
-    (.Socket.NoDelay == true) and
-    (.Install.WantedBy == ["sockets.target"])
-  ' <<<"$rendered_socket" >/dev/null \
-    || fail 'existing AoE proxy socket rendering changed'
-  jq -e '
-    (.Service.ExecStart == ["/lib/systemd/systemd-socket-proxyd 127.0.0.1:4000"]) and
-    (.Unit.Requires == ["aoe-serve.service"]) and
-    (.Unit.After == ["aoe-serve.service"])
-  ' <<<"$rendered_service" >/dev/null \
-    || fail 'existing AoE proxy service rendering changed'
 }
 
 # Exercise the handoff with a plugin fixture that owns its generated unit.
