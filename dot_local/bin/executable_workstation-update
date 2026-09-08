@@ -92,6 +92,12 @@ validate_source
 [[ "$(git -C "$source_repository" rev-parse HEAD)" == "$target_commit" ]] \
   || fail 'source changed during update'
 
+# The config file is generated from the source's .chezmoi.toml.tmpl at init
+# time and apply never refreshes it. Fast-forwarding the source alone leaves
+# it stale, so a template reading a data key the old config lacks aborts the
+# apply. Regenerate it from the source just fetched, before anything renders.
+chezmoi init || fail 'chezmoi configuration refresh failed'
+
 ensure_bitwarden_session
 chezmoi apply --dry-run --verbose --force=false || fail 'chezmoi preview failed'
 chezmoi apply --force=false || fail 'chezmoi apply failed'
