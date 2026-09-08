@@ -19,6 +19,7 @@ _Avoid_: Remote backend, central database
 
 **Workstation applicability**:
 The chezmoi `is_workstation` data value, true only when the hostname is
-`workstation`; it gates fish exclusion, package installation, and agent-skill
-reconciliation.
+`workstation`. True excludes fish config and renders the agent-skill
+reconciliation hook; it also skips the fish `apt` install, which runs only
+on other hosts.
 _Avoid_: is_lxc, LXC applicability, container flag

@@ -185,7 +185,7 @@ run_hook() {
     || fail 'reconciler inherited the unlocked vault session'
 }
 
-@test "test_non_lxc_render_is_a_noop" {
+@test "test_non_workstation_render_is_a_noop" {
   local test_dir
   local script
   test_dir="$(mktemp -d)"
@@ -193,10 +193,10 @@ run_hook() {
 
   render_hook false "$script"
   if grep -q '[^[:space:]]' "$script"; then
-    fail 'non-LXC render contained executable work'
+    fail 'non-workstation render contained executable work'
   fi
   HOME="$test_dir/home" "$REAL_BASH" "$script" \
-    || fail 'non-LXC no-op failed'
+    || fail 'non-workstation no-op failed'
   [[ ! -e "$test_dir/home/repos/skills" ]] \
-    || fail 'non-LXC no-op created a skills checkout'
+    || fail 'non-workstation no-op created a skills checkout'
 }
