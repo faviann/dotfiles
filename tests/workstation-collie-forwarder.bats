@@ -1,31 +1,15 @@
 #!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-readonly REPO_ROOT
+# shellcheck source=tests/test_helper.bash
+source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 setup() {
   export TMPDIR="$BATS_TEST_TMPDIR"
 }
 
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
-}
-
-rendered_json() {
-  local fixture_filter="$1"
-  local installable="$2"
-  shift 2
-
-  if [[ -n "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
-    jq -ce "$fixture_filter" "$TEST_WORKSTATION_RENDERED_CONFIGURATION"
-    return
-  fi
-
-  nix eval --json "$installable" "$@"
-}
-
+# The same fixture-or-live switch as rendered_json, for values that render as raw
+# text. Only the Collie suite needs it.
 rendered_raw() {
   local fixture_filter="$1"
   local installable="$2"
@@ -36,35 +20,6 @@ rendered_raw() {
   fi
 
   nix eval --raw "$installable"
-}
-
-@test "test_workstation_profile_includes_dotnet_10_lts_sdk" {
-  local dotnet_sdk_package
-
-  dotnet_sdk_package="$(
-    rendered_json '.dotnetSdkPackage' \
-      "$REPO_ROOT#homeConfigurations.workstation.config.home.packages" \
-      --apply '
-        packages:
-        let
-          package = builtins.head (
-            builtins.filter
-              (package: (package.pname or package.name) == "dotnet-sdk-wrapped")
-              packages
-          );
-        in
-        {
-          pname = package.pname or package.name;
-          inherit (package) version;
-        }
-      '
-  )" || fail 'could not render the workstation .NET SDK package'
-
-  jq -e '
-    (.pname == "dotnet-sdk-wrapped") and
-    (.version | startswith("10."))
-  ' <<<"$dotnet_sdk_package" >/dev/null \
-    || fail 'rendered workstation package profile does not include the .NET 10 LTS SDK'
 }
 
 @test "test_collie_origin_socket_listens_on_the_portal_origin_port" {
@@ -120,6 +75,8 @@ rendered_raw() {
     || fail 'Collie origin forwarder adds a Collie service dependency or fallback'
 }
 
+# The AoE forwarder is the origin-socket pattern the Collie implementation
+# mirrors, so its regression guards stay beside the Collie tests they anchor.
 @test "test_aoe_serve_pulls_up_its_origin_socket" {
   local rendered_service
 

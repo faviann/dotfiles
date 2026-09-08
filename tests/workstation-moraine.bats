@@ -1,29 +1,11 @@
 #!/usr/bin/env bats
 set -euo pipefail
 
-REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-readonly REPO_ROOT
+# shellcheck source=tests/test_helper.bash
+source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 setup() {
   export TMPDIR="$BATS_TEST_TMPDIR"
-}
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
-}
-
-rendered_json() {
-  local fixture_filter="$1"
-  local installable="$2"
-  shift 2
-
-  if [[ -n "${TEST_WORKSTATION_RENDERED_CONFIGURATION:-}" ]]; then
-    jq -ce "$fixture_filter" "$TEST_WORKSTATION_RENDERED_CONFIGURATION"
-    return
-  fi
-
-  nix eval --json "$installable" "$@"
 }
 
 rendered_moraine_config() {
