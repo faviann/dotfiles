@@ -143,8 +143,8 @@ cd ServerManagementScripts
 ## Hostname Contract
 
 The LXC workstation must be named `workstation` as set by the Ansible repo.
-That hostname triggers `is_lxc = true` in `.chezmoi.toml.tmpl`, which skips fish
-config on that machine.
+That hostname triggers `is_workstation = true` in `.chezmoi.toml.tmpl`, which
+skips fish config on that machine.
 
 When lifecycle playbooks run from the workstation itself, they exclude that host
 by default. To manage it intentionally, run:

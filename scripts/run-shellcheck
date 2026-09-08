@@ -22,8 +22,8 @@ render_dir="$(mktemp -d)"
 trap 'rm -rf "$render_dir"' EXIT
 
 rendered_inputs=()
-for is_lxc in true false; do
-  variant_dir="$render_dir/is_lxc-$is_lxc"
+for is_workstation in true false; do
+  variant_dir="$render_dir/is_workstation-$is_workstation"
   mkdir -p "$variant_dir/destination"
 
   for template in "${template_inputs[@]}"; do
@@ -34,7 +34,7 @@ for is_lxc in true false; do
       --config /dev/null \
       --config-format toml \
       --persistent-state "$variant_dir/chezmoistate.boltdb" \
-      --override-data "{\"is_lxc\":$is_lxc}" \
+      --override-data "{\"is_workstation\":$is_workstation}" \
       execute-template --file "$template" >"$rendered"
     rendered_inputs+=("$rendered")
   done

@@ -119,7 +119,7 @@ Apply it through the Ansible-installed `workstation-setup` command, or build it
 directly while developing dotfiles:
 
 ```bash
-home-manager build --flake /home/aperture/repos/dotfiles#workstation
+home-manager build --flake .#workstation
 ```
 
 ## Workstation Moraine
@@ -189,7 +189,7 @@ Agent of Empires (`aoe`) is managed here as a user-level workstation tool, not i
   separate package-discovery or Ansible step.
 - SSH login: `dot_bash_profile.tmpl` loads the Nix and Home Manager environment
   and opens a plain shell. Maintenance, tmux, and AoE are explicit commands.
-- Shell choice: the workstation LXC is bash-based; `.chezmoiignore` excludes fish config on LXC hosts.
+- Shell choice: the workstation is bash-based; `.chezmoiignore` excludes fish config on the host named `workstation`, not on LXC guests generally.
 - Dashboard: `home/workstation.nix` declares the `aoe-serve.service`, `aoe-lan-proxy.service`, and `aoe-lan-proxy.socket` user units. The socket exposes `0.0.0.0:4001` and proxies to the localhost service.
 - Reboot survival: Ansible enables lingering for the workstation user with `loginctl enable-linger <user>`.
 

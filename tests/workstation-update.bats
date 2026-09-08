@@ -57,7 +57,7 @@ set -euo pipefail
 printf 'chezmoi %s\n' "$*" >>"$PHASE_LOG"
 [[ "${FAIL_PHASE:-}" != "$1" ]] || exit 1
 "$REAL_CHEZMOI" --source "$SOURCE_REPO" --destination "$HOME" \
-  --config /dev/null --config-format toml \
+  --config "${CHEZMOI_CONFIG_FILE:-/dev/null}" --config-format toml \
   --persistent-state "$XDG_STATE_HOME/chezmoi.boltdb" "$@"
 STUB
   cat >"$BATS_TEST_TMPDIR/bin/workstation-setup" <<'STUB'
@@ -81,7 +81,8 @@ publish_change() {
   run bash "$COMMAND" --yes
   [ "$status" -eq 0 ]
   [ "$(cat "$HOME/.managed")" = 'version one' ]
-  diff -u <(printf '%s\n' 'chezmoi source-path' fetch 'bw unlock --check' \
+  diff -u <(printf '%s\n' 'chezmoi source-path' fetch 'chezmoi init' \
+    'bw unlock --check' \
     'chezmoi apply --dry-run --verbose --force=false' 'chezmoi apply --force=false' \
     'chezmoi verify --exclude scripts' workstation-setup 'agent-tools --yes') "$PHASE_LOG"
 
@@ -194,7 +195,7 @@ publish_change() {
 }
 
 @test "test_workstation_update_stops_at_failed_phases_and_can_be_rerun" {
-  for phase in fetch apply verify workstation-setup agent-tools; do
+  for phase in fetch init apply verify workstation-setup agent-tools; do
     : >"$PHASE_LOG"
     run env FAIL_PHASE="$phase" bash "$COMMAND"
     [ "$status" -ne 0 ]
@@ -230,4 +231,31 @@ publish_change() {
   [ "$status" -ne 0 ]
   [[ "$output" == *'expected no arguments or --yes'* ]]
   [ ! -e "$PHASE_LOG" ]
+}
+
+@test "test_workstation_update_refreshes_source_owned_chezmoi_configuration" {
+  local expected=other
+
+  # An installation whose persisted config predates the source rename.
+  export CHEZMOI_CONFIG_FILE="$XDG_CONFIG_HOME/chezmoi/chezmoi.toml"
+  mkdir -p "$(dirname "$CHEZMOI_CONFIG_FILE")"
+  printf '[data]\n  is_lxc = true\n' >"$CHEZMOI_CONFIG_FILE"
+
+  # The source publishes this repository's config template plus a consumer of
+  # the renamed key. Under chezmoi's missingkey=error that consumer cannot
+  # render until the config is regenerated, so an update path that only
+  # fast-forwards the source fails here.
+  cp "$BATS_TEST_DIRNAME/../.chezmoi.toml.tmpl" "$seed/.chezmoi.toml.tmpl"
+  printf '{{ if .is_workstation }}workstation{{ else }}other{{ end }}\n' \
+    >"$seed/dot_applicability.tmpl"
+  git -C "$seed" add .
+  git -C "$seed" commit --quiet -m 'rename the applicability key'
+  git -C "$seed" push --quiet
+
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  [[ "$(hostname -s)" != workstation ]] || expected=workstation
+  [ "$(cat "$HOME/.applicability")" = "$expected" ]
+  grep -q 'is_workstation' "$CHEZMOI_CONFIG_FILE"
+  run ! grep -q 'is_lxc' "$CHEZMOI_CONFIG_FILE"
 }
