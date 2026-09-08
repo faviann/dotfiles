@@ -99,7 +99,13 @@ run_bootstrap() {
     .service |
     (.Unit.ConditionPathExists == "%h/.config/lobu/credentials.json") and
     (.Service.Type == "simple") and
-    (.Service.ExecStart == ["/home/faviann/.local/bin/lobu daemon --api-url https://app.lobu.ai --no-interactive-session"]) and
+    (.Service.ExecCondition | contains("/bin/jq -e")) and
+    (.Service.ExecCondition | contains("--arg context homelab")) and
+    (.Service.ExecCondition | contains("--arg origin https://lobu.faviann.com")) and
+    (.Service.ExecCondition | contains(".currentContext == $context and .contexts[$context].url == $origin")) and
+    (.Service.ExecCondition | endswith("%h/.config/lobu/config.json")) and
+    (.Service.ExecStart == ["/home/faviann/.local/bin/lobu daemon --api-url https://lobu.faviann.com --no-interactive-session"]) and
+    (.Service.ExecStart | all(contains("https://app.lobu.ai") | not)) and
     (.Service.WorkingDirectory == "/home/faviann") and
     (.Service.Environment == [
       "HOME=/home/faviann",
@@ -112,4 +118,28 @@ run_bootstrap() {
     (.Service.RestartMaxDelaySec == null) and
     (.Install.WantedBy == ["default.target"])
   ' <<<"$rendered" >/dev/null || fail 'unexpected Lobu service contract'
+}
+
+@test "test_lobu_service_waits_for_the_active_self_hosted_context" {
+  local fixture rendered condition
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/home/.config/lobu"
+  rendered="$(rendered_lobu)"
+  condition="$(jq -r '.service.Service.ExecCondition' <<<"$rendered")"
+  condition="${condition//%h/$fixture/home}"
+
+  run bash -c "$condition"
+  [[ "$status" != 0 ]] || fail 'missing context passed the service precondition'
+
+  printf '%s\n' \
+    '{"currentContext":"lobu","contexts":{"lobu":{"url":"https://app.lobu.ai/api/v1"}}}' \
+    >"$fixture/home/.config/lobu/config.json"
+  run bash -c "$condition"
+  [[ "$status" != 0 ]] || fail 'cloud context passed the service precondition'
+
+  printf '%s\n' \
+    '{"currentContext":"homelab","contexts":{"homelab":{"url":"https://lobu.faviann.com"}}}' \
+    >"$fixture/home/.config/lobu/config.json"
+  run bash -c "$condition"
+  [[ "$status" == 0 ]] || fail 'active self-hosted context failed the service precondition'
 }
