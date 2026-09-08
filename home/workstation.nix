@@ -156,6 +156,7 @@ in
         "LOBU_CONTEXT=${lobuContextName}"
         "PATH=${config.home.homeDirectory}/.local/bin:${config.home.profileDirectory}/bin:/usr/local/bin:/usr/bin:/bin"
       ];
+      UnsetEnvironment = "LOBU_API_URL";
       WorkingDirectory = config.home.homeDirectory;
       ExecStart = "${config.home.homeDirectory}/.local/bin/lobu daemon --no-interactive-session";
       # Longer than the local units' five seconds: a stale credential fails

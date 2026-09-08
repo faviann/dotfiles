@@ -104,7 +104,7 @@ run_bootstrap() {
     (.Service.Environment | index("HOME=/home/faviann") != null) and
     (.Service.Environment | index("LOBU_CONTEXT=homelab") != null) and
     (.Service.Environment | index("PATH=/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin") != null) and
-    (.Service.Environment | all(startswith("LOBU_API_URL=") | not)) and
+    (.Service.UnsetEnvironment == "LOBU_API_URL") and
     (.Service.UMask == "0077") and
     (.Service.Restart == "on-failure") and
     (.Service.RestartSec == 30) and
