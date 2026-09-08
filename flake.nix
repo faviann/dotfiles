@@ -149,6 +149,8 @@
           aoeLanProxyService = workstationHomeConfiguration.config.systemd.user.services.aoe-lan-proxy;
           aoeServeService = workstationHomeConfiguration.config.systemd.user.services.aoe-serve;
           herdrService = workstationHomeConfiguration.config.systemd.user.services.herdr;
+          lobuService = workstationHomeConfiguration.config.systemd.user.services.lobu;
+          lobuBootstrap = workstationHomeConfiguration.config.home.activation.bootstrapLobu;
           workstationActivation = builtins.mapAttrs (
             _: entry: entry.data or ""
           ) workstationHomeConfiguration.config.home.activation;
@@ -166,6 +168,7 @@
           ./dot_local/bin/executable_update-agent-tools
           ./dot_local/bin/executable_workstation-update
           ./scripts/collie-bootstrap
+          ./scripts/lobu-bootstrap
           ./scripts/moraine-service
           ./scripts/run-shellcheck
           ./scripts/update-dotnet-sdk
