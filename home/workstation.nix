@@ -1,6 +1,7 @@
 { pkgs, lib, config, dotnetSdk, hermesPackage, morainePackage, ... }:
 
 let
+  lobuContextName = "homelab";
   lobuControlPlaneOrigin = "https://lobu.faviann.com";
   lobuContextConfig = "%h/.config/lobu/config.json";
   lobuBootstrap = pkgs.writeShellApplication {
@@ -137,16 +138,19 @@ in
     };
     Service = {
       Type = "simple";
-      # An unmatched --api-url makes Lobu create a context. Fail closed before
-      # that mutation, while accepting any context name, active context, or API
-      # path on the configured gateway origin.
+      # An unmatched --api-url makes Lobu create a context. Require the stable
+      # identity-bearing context before that mutation, without requiring it to
+      # be the active interactive CLI context.
       ExecCondition = lib.escapeShellArgs [
         "${pkgs.jq}/bin/jq"
         "-e"
         "--arg"
+        "context"
+        lobuContextName
+        "--arg"
         "origin"
         lobuControlPlaneOrigin
-        ''any((.contexts // {})[]?.url? | select(type == "string"); . == $origin or startswith($origin + "/"))''
+        ''(.contexts[$context].url? | select(type == "string")) | . == $origin or startswith($origin + "/")''
         lobuContextConfig
       ];
       Environment = [

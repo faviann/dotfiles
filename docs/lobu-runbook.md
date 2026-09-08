@@ -26,11 +26,11 @@ using its Node/npm runtime with engine compatibility enforced. It preserves an
 existing executable and never authenticates during activation.
 
 The enabled service skips startup while credentials are absent. It also has a
-read-only precondition that requires any configured context to resolve to the
-self-hosted origin, so applying the generation cannot create a context or start
-the daemon against an incomplete or incorrect installation. The matching context
-does not have to be the CLI's active context. In an interactive workstation
-terminal, run:
+read-only precondition that requires the stable `homelab` context to resolve to
+the self-hosted origin, so applying the generation cannot create that context or
+start the daemon against an incomplete or incorrect installation. `homelab` does
+not have to be the CLI's active context. In an interactive workstation terminal,
+run:
 
 ```bash
 lobu context add homelab --url https://lobu.faviann.com

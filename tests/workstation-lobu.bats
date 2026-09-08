@@ -133,20 +133,7 @@ lobu_service_condition() {
   [[ "$status" != 0 ]] || fail 'missing context passed the service precondition'
 }
 
-@test "test_lobu_service_waits_when_no_context_matches_the_self_hosted_origin" {
-  local fixture condition
-  fixture="$(mktemp -d)"
-  mkdir -p "$fixture/home/.config/lobu"
-  condition="$(lobu_service_condition "$fixture")"
-
-  printf '%s\n' \
-    '{"currentContext":"lobu","contexts":{"lobu":{"url":"https://app.lobu.ai/api/v1"}}}' \
-    >"$fixture/home/.config/lobu/config.json"
-  run bash -c "$condition"
-  [[ "$status" != 0 ]] || fail 'cloud context passed the service precondition'
-}
-
-@test "test_lobu_service_accepts_an_inactive_context_matching_the_self_hosted_origin" {
+@test "test_lobu_service_waits_when_the_homelab_context_is_missing" {
   local fixture condition
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/home/.config/lobu"
@@ -156,5 +143,18 @@ lobu_service_condition() {
     '{"currentContext":"lobu","contexts":{"lobu":{"url":"https://app.lobu.ai/api/v1"},"self-hosted":{"url":"https://lobu.faviann.com/api/v1"}}}' \
     >"$fixture/home/.config/lobu/config.json"
   run bash -c "$condition"
-  [[ "$status" == 0 ]] || fail 'inactive self-hosted context failed the service precondition'
+  [[ "$status" != 0 ]] || fail 'non-homelab context passed the service precondition'
+}
+
+@test "test_lobu_service_accepts_the_inactive_homelab_context" {
+  local fixture condition
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/home/.config/lobu"
+  condition="$(lobu_service_condition "$fixture")"
+
+  printf '%s\n' \
+    '{"currentContext":"lobu","contexts":{"lobu":{"url":"https://app.lobu.ai/api/v1"},"homelab":{"url":"https://lobu.faviann.com/api/v1"}}}' \
+    >"$fixture/home/.config/lobu/config.json"
+  run bash -c "$condition"
+  [[ "$status" == 0 ]] || fail 'inactive homelab context failed the service precondition'
 }
