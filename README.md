@@ -312,10 +312,10 @@ it does not provide VAPID or subscription-state persistence.
 ## Workstation Lobu
 
 [Lobu](https://lobu.faviann.com) registers the workstation as a headless device
-and polls the self-hosted control plane outward over HTTPS. The service pins that
-origin explicitly and starts only after the operator has configured the stable
-`homelab` context for it; that context does not have to remain globally active.
-No inbound route, listener, or reverse-proxy configuration is involved.
+and polls the self-hosted control plane outward over HTTPS. The service selects
+the stable `homelab` context independently of the globally active CLI context and
+verifies its self-hosted origin before startup. No inbound route, listener, or
+reverse-proxy configuration is involved.
 
 - Install: Home Manager activation runs `scripts/lobu-bootstrap`, which installs
   `@lobu/cli` under `~/.local` when the CLI is missing. It preserves an existing

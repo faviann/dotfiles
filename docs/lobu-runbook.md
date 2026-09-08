@@ -41,15 +41,15 @@ journalctl --user -u lobu.service -n 50 --no-pager
 ```
 
 Complete the browser approval requested by login. The service always passes
-`https://lobu.faviann.com` explicitly to the daemon; it cannot fall back to Lobu
+`LOBU_CONTEXT=homelab` to the daemon and verifies that context's origin before
+startup, so it cannot follow the globally active context or fall back to Lobu
 Cloud. On first start, Lobu registers a headless device using the hostname. Later
 starts reuse the `homelab` context's cached identity and worker credential from
 `~/.config/lobu/devices/`. Keep both the persisted configuration root and the
 context name unchanged across restarts and LXC rebuilds. Changing the active CLI
-context does not affect daemon startup because Lobu matches the daemon's explicit
-API URL to saved contexts by origin. Agent-session identity detection is disabled.
-The service uses the ordinary home directory, including its persisted mapping,
-without managing that mapping itself.
+context does not affect the supervised daemon. Agent-session identity detection
+is disabled. The service uses the ordinary home directory, including its
+persisted mapping, without managing that mapping itself.
 
 No inbound route or listening socket is configured. The daemon polls outward.
 Herdr routing and ChatGPT invocation experiments are separate work.

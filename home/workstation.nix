@@ -138,9 +138,8 @@ in
     };
     Service = {
       Type = "simple";
-      # An unmatched --api-url makes Lobu create a context. Require the stable
-      # identity-bearing context before that mutation, without requiring it to
-      # be the active interactive CLI context.
+      # The daemon resolves this named context directly. Verify its origin
+      # without making it the active interactive CLI context.
       ExecCondition = lib.escapeShellArgs [
         "${pkgs.jq}/bin/jq"
         "-e"
@@ -150,15 +149,16 @@ in
         "--arg"
         "origin"
         lobuControlPlaneOrigin
-        ''(.contexts[$context].url? | select(type == "string")) | . == $origin or startswith($origin + "/")''
+        ".contexts[$context].url == $origin"
         lobuContextConfig
       ];
       Environment = [
         "HOME=${config.home.homeDirectory}"
+        "LOBU_CONTEXT=${lobuContextName}"
         "PATH=${config.home.homeDirectory}/.local/bin:${config.home.profileDirectory}/bin:/usr/local/bin:/usr/bin:/bin"
       ];
       WorkingDirectory = config.home.homeDirectory;
-      ExecStart = "${config.home.homeDirectory}/.local/bin/lobu daemon --api-url ${lobuControlPlaneOrigin} --no-interactive-session";
+      ExecStart = "${config.home.homeDirectory}/.local/bin/lobu daemon --no-interactive-session";
       # Longer than the local units' five seconds: a stale credential fails
       # every start, and the default rate limiter never trips at a flat
       # interval, so this is the actual request rate against the control plane
