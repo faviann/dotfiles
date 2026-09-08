@@ -9,7 +9,7 @@ setup() {
 }
 
 # The same fixture-or-live switch as rendered_json, for values that render as raw
-# text. Only the Collie drop-in needs it.
+# text. Only the Collie suite needs it.
 rendered_raw() {
   local fixture_filter="$1"
   local installable="$2"
