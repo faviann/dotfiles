@@ -2,7 +2,27 @@
 
 Personal dotfiles managed with [chezmoi](https://chezmoi.io) + Bitwarden CLI.
 
-See `BOOTSTRAP.md` for new machine setup.
+See [BOOTSTRAP.md](BOOTSTRAP.md) for new machine setup.
+
+## Repository-only files
+
+[.chezmoiignore](.chezmoiignore) excludes repository documentation, tests,
+scripts, `flake.nix`, `flake.lock`, and `home/` from chezmoi's home-directory
+targets. Match target paths, not encoded source names (for example,
+`.config/fish`, not `dot_config/fish`). Excluding an entire subtree requires
+both its directory and contents patterns, such as `docs/` and `docs/**`.
+
+Git and chezmoi exclusions are independent: `.chezmoiignore` does not prevent
+publication, and Git ignore rules do not prevent chezmoi applying a source path.
+Keep private or machine-local notes outside the canonical source checkout;
+[workstation maintenance](#workstation-maintenance) rejects local content,
+including ignored files. After changing the target inventory, inspect it before
+applying:
+
+```bash
+chezmoi -S "$PWD" ignored --tree
+chezmoi -S "$PWD" managed --path-style=source-relative --tree
+```
 
 ## Repository validation
 
@@ -110,7 +130,9 @@ toolchain and locked Cargo closure. It installs matching CLI, ingest,
 monitor-compatibility alias, and MCP executables, while reusing the unchanged,
 hash-pinned v0.7.3 monitor assets. There is intentionally no separate monitor
 unit; the unified MCP/backend executable owns the monitor HTTP listener, native
-loopback `/mcp` endpoint, and private MCP socket.
+loopback `/mcp` endpoint, and private MCP socket. The source still reports
+version 0.7.3, so use the commit-bearing `moraine --version` output, not the
+semantic version alone, to identify this build.
 
 The package temporarily gives Moraine's interactive query profile 8 GiB, its
 ClickHouse user a 16 GiB aggregate limit, and managed ClickHouse a 48 GiB
@@ -118,7 +140,9 @@ process limit on this 64 GiB host. This keeps session discovery usable while
 upstream issue #599's bounded summary query remains unresolved. Background
 queries retain upstream's 256 MiB ceiling. Remove
 `packages/moraine-managed-memory-headroom.patch` when a bounded upstream
-discovery path is pinned.
+discovery path is pinned. Managed ClickHouse refuses startup below 2 GiB of
+detected memory; `moraine up` may restart it when managed resource settings
+change.
 
 Home Manager owns `~/.moraine/config.toml` as a read-only Nix-managed file.
 Persistent ingestion state, ClickHouse data, logs, sockets, and process state
@@ -141,6 +165,12 @@ the pinned build serves `POST /mcp`, and its per-user MCP Unix socket at mode
 0600; there is no non-loopback listener. Applying a Home Manager generation
 restarts the service when the managed Moraine configuration changes, so
 ingestion reloads newly declared sources.
+
+For this pinned build, HTTP MCP requires an explicit loopback IP in
+`backend.bind`: wildcards, non-loopback addresses, and `localhost` do not enable
+`/mcp`, even with an `auth_token`. HTTP uses the default backend; named-backend
+routing and `--project-only` retrieval remain stdio-only because HTTP has no
+launch-directory context.
 
 The workstation profile does not manage `~/.codex/config.toml` or register a
 Codex MCP server. Moraine's local producer and query backend operate without a
@@ -232,20 +262,16 @@ to authorize the repair, then rerun `workstation-update`.
 
 ### Login and maintenance ownership
 
-Login loads the shell environment and performs no network checks or updates.
-The former login freshness helper, release comparison caches, applied-commit
-marker, and background-check interface have been removed. Package managers
-resolve releases during explicit maintenance, chezmoi tracks target state, and
-`workstation-setup` checks configuration freshness. Existing cache files under
-`~/.local/state/workstation-update` and `~/.local/state/update-agent-tools` are
-unused; only the maintenance lock files remain active. Old installed
-`workstation-login` copies are no longer invoked and may be removed.
+Login only loads the shell PATH, Nix environment, and Home Manager session
+variables. It performs no network checks or updates, does not source `.bashrc`,
+and does not launch tmux or AoE. Package managers resolve releases during
+explicit maintenance, chezmoi tracks target state, and `workstation-setup`
+checks configuration freshness. Only maintenance lock files are active under
+`~/.local/state/workstation-update` and `~/.local/state/update-agent-tools`;
+there is no freshness cache or workstation-side update scheduler.
 
-This trades advance update notices and no-op detection for a smaller ownership
-boundary. An explicit maintenance run may reinstall current agent versions and
-restart their services, so choose an appropriate maintenance window. There is
-no workstation-side update scheduler. The login profile continues to load the
-required environment without sourcing unrelated `.bashrc` configuration.
+An explicit maintenance run may reinstall current agent versions and restart
+their services, so choose an appropriate maintenance window.
 
 ## Workstation herdr
 
@@ -256,37 +282,46 @@ over HTTP, while herdr is a TUI.
 - Install: `.chezmoiscripts/run_once_install-herdr.sh.tmpl` uses the upstream
   installer until there is a clean Nix package path. herdr is packaged in
   nixpkgs, but not in the pinned nixpkgs revision.
-- Updates: herdr is deliberately outside the `workstation-update` managed unit.
-  It self-updates through `herdr update`, run by hand. That command refuses to
-  run from inside a herdr pane; detach from the session first.
-- Configuration: `~/.config/herdr/config.toml` is optional and unmanaged. herdr
-  writes to it itself, so chezmoi does not own it.
-- Supervision: Home Manager enables the foreground `herdr.service` under
-  `default.target`. Existing user lingering starts it at boot without login.
-  Failures restart after five seconds; an intentional stop remains stopped.
-  Server shutdown ends pane processes. Restore is reconstructive: herdr reads
-  `~/.config/herdr/session.json` to rebuild its session, not resume live processes.
+- Updates: manual `herdr update`, outside `workstation-update` and from a
+  terminal outside Herdr with the service stopped.
+- Configuration: `~/.config/herdr/config.toml` is optional and app-owned.
+- Supervision: Home Manager owns the foreground `herdr.service` under
+  `default.target`, with user lingering for boot startup and a five-second
+  failure-restart delay. Intentional stops remain stopped. Shutdown ends pane
+  processes; restore from `~/.config/herdr/session.json` is reconstructive.
 
-```bash
-systemctl --user status herdr.service collie.service --no-pager
-journalctl --user -u herdr.service -u collie.service --since=-10m --no-pager
-systemctl --user stop herdr.service     # remains stopped until start or next boot
-systemctl --user start herdr.service
-systemctl --user restart herdr.service  # ends panes and reconstructs the session
-```
+Use the [Herdr operations and recovery runbook](docs/herdr-supervision-runbook.md)
+for service control, safe updates, detached-server recovery, and restore limits.
 
-Before a manual update, finish important pane work and use a terminal outside
-herdr. Run `systemctl --user stop herdr.service`, then `herdr update`, then
-`systemctl --user start herdr.service`. Avoid launching the interactive herdr
-client while the service is stopped: it can create an unmanaged detached server.
-Collie keeps its own service and reconnects when herdr returns. Home Manager
-also runs `collie-bootstrap.service` at boot to regenerate that service from the
-persisted plugin installation after an LXC rebuild. See the
-[rebuild recovery procedure](docs/collie-pilot-runbook.md#recovery-after-an-lxc-rebuild).
+## Workstation Collie
 
-For the one-time migration and recovery evidence, see the
-[herdr supervision runbook](docs/herdr-supervision-runbook.md).
+Collie is installed and controlled through Herdr. Its plugin checkout,
+configuration, state, and generated `collie.service` remain app-owned and
+outside `workstation-update`. Dotfiles owns the Bun prerequisite, the boot-time
+`collie-bootstrap.service` handoff, and the origin forwarder from `0.0.0.0:8788`
+to Collie's loopback listener at `127.0.0.1:8787`. A Home Manager drop-in makes
+the app want the forwarder socket without taking ownership of its generated
+unit. Collie reconnects independently when Herdr returns.
 
-The manual, loopback-only Collie evaluation that uses herdr is documented in
-the [Collie pilot runbook](docs/collie-pilot-runbook.md). Collie's plugin,
-configuration, state, and generated service remain outside dotfiles ownership.
+See the [Collie operator runbook](docs/collie-pilot-runbook.md) for configuration,
+manual updates, origin isolation, Web Push, and
+[rebuild recovery](docs/collie-pilot-runbook.md#recovery-after-an-lxc-rebuild).
+The bootstrap regenerates the service from a surviving plugin installation;
+it does not provide VAPID or subscription-state persistence.
+
+## SSH key rotation
+
+The Bitwarden item and GitHub identity setup are defined in
+[bootstrap](BOOTSTRAP.md#bitwarden-ssh-key-item). To replace that identity:
+
+1. Generate a replacement Ed25519 key on a trusted machine.
+2. Update the Bitwarden item notes with the replacement private key and the
+   `public_key` custom field with its matching public key.
+3. Register the replacement in GitHub as both an Authentication Key and a
+   Signing Key.
+4. Unlock Bitwarden and run `chezmoi apply` on each workstation.
+5. Perform the [key-pair and SSH checks](BOOTSTRAP.md#lightweight-verification).
+6. Remove the old GitHub Authentication Key and Signing Key only after every
+   workstation has the replacement.
+
+Keep private keys out of documentation, shell history, and repository files.
