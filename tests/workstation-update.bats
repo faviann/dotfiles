@@ -195,7 +195,7 @@ publish_change() {
 }
 
 @test "test_workstation_update_stops_at_failed_phases_and_can_be_rerun" {
-  for phase in fetch apply verify workstation-setup agent-tools; do
+  for phase in fetch init apply verify workstation-setup agent-tools; do
     : >"$PHASE_LOG"
     run env FAIL_PHASE="$phase" bash "$COMMAND"
     [ "$status" -ne 0 ]
