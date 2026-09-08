@@ -2,7 +2,7 @@
 
 let
   lobuContextName = "homelab";
-  lobuControlPlaneOrigin = "https://lobu.faviann.com";
+  lobuControlPlaneOrigin = "https://lobu.admin.faviann.com";
   lobuBootstrap = pkgs.writeShellApplication {
     name = "lobu-bootstrap";
     runtimeInputs = [ pkgs.nodejs ];

@@ -9,7 +9,7 @@ configuration is deployed on the workstation first.
 It also requires the self-hosted Lobu control plane from
 [homelab-iac#275](https://github.com/faviann/homelab-iac/issues/275). Do not apply
 this Home Manager change, install or start Lobu, create its context, or run
-`lobu login` until `https://lobu.faviann.com` has been deployed and validated.
+`lobu login` until `https://lobu.admin.faviann.com` has been deployed and validated.
 Implementation and isolated repository tests do not deploy either prerequisite.
 
 Dotfiles owns CLI installation and `lobu.service`; homelab-iac owns persistence.
@@ -33,7 +33,7 @@ not have to be the CLI's active context. In an interactive workstation terminal,
 run:
 
 ```bash
-lobu context add homelab --url https://lobu.faviann.com
+lobu context add homelab --url https://lobu.admin.faviann.com
 lobu login --context homelab
 systemctl --user start lobu.service
 systemctl --user status lobu.service --no-pager

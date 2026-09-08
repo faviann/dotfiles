@@ -311,7 +311,7 @@ it does not provide VAPID or subscription-state persistence.
 
 ## Workstation Lobu
 
-[Lobu](https://lobu.faviann.com) registers the workstation as a headless device
+[Lobu](https://lobu.admin.faviann.com) registers the workstation as a headless device
 and polls the self-hosted control plane outward over HTTPS. The service selects
 the stable `homelab` context independently of the globally active CLI context and
 verifies its self-hosted origin before startup. No inbound route, listener, or

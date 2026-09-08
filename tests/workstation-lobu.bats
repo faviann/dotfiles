@@ -126,13 +126,13 @@ run_bootstrap() {
   [[ "$status" != 0 ]] || fail 'missing context passed the service precondition'
 
   printf '%s\n' \
-    '{"currentContext":"self-hosted","contexts":{"homelab":{"url":"https://app.lobu.ai/api/v1"},"self-hosted":{"url":"https://lobu.faviann.com/api/v1"}}}' \
+    '{"currentContext":"self-hosted","contexts":{"homelab":{"url":"https://app.lobu.ai/api/v1"},"self-hosted":{"url":"https://lobu.admin.faviann.com/api/v1"}}}' \
     >"$fixture/home/.config/lobu/config.json"
   run bash -c "$condition"
   [[ "$status" != 0 ]] || fail 'cloud homelab context passed the service precondition'
 
   printf '%s\n' \
-    '{"currentContext":"lobu","contexts":{"lobu":{"url":"https://app.lobu.ai/api/v1"},"homelab":{"url":"https://lobu.faviann.com"}}}' \
+    '{"currentContext":"lobu","contexts":{"lobu":{"url":"https://app.lobu.ai/api/v1"},"homelab":{"url":"https://lobu.admin.faviann.com"}}}' \
     >"$fixture/home/.config/lobu/config.json"
   run bash -c "$condition"
   [[ "$status" == 0 ]] || fail 'inactive homelab context failed the service precondition'
