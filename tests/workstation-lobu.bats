@@ -116,9 +116,9 @@ run_bootstrap() {
     ]) and
     (.Service.UMask == "0077") and
     (.Service.Restart == "on-failure") and
-    (.Service.RestartSec == 5) and
-    (.Service.RestartSteps == 6) and
-    (.Service.RestartMaxDelaySec == 300) and
+    (.Service.RestartSec == 30) and
+    (.Service.RestartSteps == null) and
+    (.Service.RestartMaxDelaySec == null) and
     (.Install.WantedBy == ["default.target"])
   ' <<<"$rendered" >/dev/null || fail 'unexpected Lobu service contract'
 }

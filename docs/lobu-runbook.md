@@ -50,15 +50,18 @@ systemctl --user stop lobu.service
 systemctl --user start lobu.service
 ```
 
-The first unexpected failure restarts after five seconds, and each consecutive
-failure backs off further, up to five minutes. A single restart therefore looks
-immediate, while a persistent fault settles into a slow retry instead of hammering
-the control plane. A successful start resets the delay. An intentional stop stays
-stopped until a start/restart or subsequent boot. Existing lingering enables boot
-startup without an SSH login. The credentials-file condition is an initial-setup
-gate, not a credential validity check: stale or invalid credentials fail every
-start, so treat a climbing restart delay as a signal to re-authenticate rather
-than to wait.
+Unexpected failures restart after thirty seconds, every time. The interval is
+deliberately flat, so recovery from an isolated failure takes the same thirty
+seconds whether the service started yesterday or has been running for months.
+An intentional stop stays stopped until a start/restart or subsequent boot.
+Existing lingering enables boot startup without an SSH login.
+
+The credentials-file condition is an initial-setup gate, not a credential
+validity check. Stale or invalid credentials fail every start, and systemd's
+start rate limiter does not trip at this interval, so the daemon retries
+indefinitely at one attempt per thirty seconds. That is a low enough rate to
+leave running, but it does not self-heal: a repeating start failure in the
+journal means re-authenticate, not wait.
 
 For expired login credentials, stop the service, run `lobu login --force` for the
 managed installation, then start the service and inspect its status. If the log
@@ -91,9 +94,7 @@ same command. Package rollback does not imply credential/state rollback.
 ## Live acceptance checks (deferred until deployment)
 
 - Confirm one supervised daemon and the expected device in Lobu's control plane.
-- Stop it, wait longer than five seconds, and verify it remains inactive; start it.
-- Confirm the backoff is in effect with
-  `systemctl --user show lobu.service -p RestartSec -p RestartSteps -p RestartMaxDelayUSec`.
+- Stop it, wait longer than thirty seconds, and verify it remains inactive; start it.
 - With no device work running, kill only the service's main process using
   `systemctl --user kill --kill-whom=main --signal=SIGKILL lobu.service`.
   Confirm a replacement main PID and an increased `NRestarts` using

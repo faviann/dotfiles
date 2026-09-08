@@ -128,14 +128,14 @@ in
       ];
       WorkingDirectory = config.home.homeDirectory;
       ExecStart = "${config.home.homeDirectory}/.local/bin/lobu daemon --api-url https://app.lobu.ai --no-interactive-session";
-      # A stale credential fails every start, and the default rate limiter
-      # never trips at a flat interval. Back off so a transient failure still
-      # recovers quickly while a permanent one settles to a slow poll of the
-      # control plane rather than retrying forever at five seconds.
+      # Longer than the local units' five seconds: a stale credential fails
+      # every start, and the default rate limiter never trips at a flat
+      # interval, so this is the actual request rate against the control plane
+      # during a permanent authentication fault. Deliberately flat rather than
+      # backed off, because systemd's restart counter accumulates for the
+      # unit's lifetime and does not reset on a successful start.
       Restart = "on-failure";
-      RestartSec = 5;
-      RestartSteps = 6;
-      RestartMaxDelaySec = 300;
+      RestartSec = 30;
       UMask = "0077";
     };
     Install.WantedBy = [ "default.target" ];
