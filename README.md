@@ -322,14 +322,16 @@ or reverse-proxy configuration is involved.
 - Credentials: `lobu login` is interactive and human-owned. No token, device
   identifier, or generated credential is committed to this repository.
 - Supervision: Home Manager owns `lobu.service` under `default.target`, with
-  user lingering for boot startup and a five-second failure-restart delay.
-  Intentional stops remain stopped. Startup is gated on the presence of
+  user lingering for boot startup. Failures restart after five seconds and back
+  off to a five-minute ceiling, so a permanent authentication fault does not
+  retry against the control plane indefinitely. Intentional stops remain
+  stopped. Startup is gated on the presence of
   `~/.config/lobu/credentials.json`, so the unit stays inactive until login.
 
 Durable state under `~/.config/lobu` is owned by homelab-iac's persistent-home
-mapping, not by dotfiles. Deploy
-[homelab-iac#270](https://github.com/faviann/homelab-iac/issues/270) before
-applying this configuration or running `lobu login`.
+mapping, not by dotfiles. That mapping
+([homelab-iac#271](https://github.com/faviann/homelab-iac/pull/271)) must be
+deployed before applying this configuration or running `lobu login`.
 
 Use the [Lobu bootstrap and recovery runbook](docs/lobu-runbook.md) for rollout
 order, first deployment, service control, re-authentication, manual upgrades,

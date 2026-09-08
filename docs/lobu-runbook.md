@@ -2,10 +2,11 @@
 
 ## Deployment prerequisite
 
-Land and deploy [homelab-iac#270](https://github.com/faviann/homelab-iac/issues/270)
-first. It establishes the persistent-home mapping for `~/.config/lobu`.
-Until then, do not apply this Home Manager change, install or start Lobu, or run
-`lobu login`. Implementation and isolated repository tests do not deploy it.
+This requires the persistent-home mapping for `~/.config/lobu` implemented by
+[homelab-iac#271](https://github.com/faviann/homelab-iac/pull/271). Confirm that
+configuration is deployed on the workstation before applying this Home Manager
+change, installing or starting Lobu, or running `lobu login`. Implementation and
+isolated repository tests do not deploy it.
 
 Dotfiles owns CLI installation and `lobu.service`; homelab-iac owns persistence.
 Dotfiles never creates, copies, or manages Lobu credential/configuration files.
@@ -49,10 +50,15 @@ systemctl --user stop lobu.service
 systemctl --user start lobu.service
 ```
 
-Unexpected failures restart after five seconds. An intentional stop stays stopped
-until a start/restart or subsequent boot. Existing lingering enables boot startup
-without an SSH login. The credentials-file condition is an initial-setup gate,
-not a credential validity check: stale or invalid credentials can fail repeatedly.
+The first unexpected failure restarts after five seconds, and each consecutive
+failure backs off further, up to five minutes. A single restart therefore looks
+immediate, while a persistent fault settles into a slow retry instead of hammering
+the control plane. A successful start resets the delay. An intentional stop stays
+stopped until a start/restart or subsequent boot. Existing lingering enables boot
+startup without an SSH login. The credentials-file condition is an initial-setup
+gate, not a credential validity check: stale or invalid credentials fail every
+start, so treat a climbing restart delay as a signal to re-authenticate rather
+than to wait.
 
 For expired login credentials, stop the service, run `lobu login --force` for the
 managed installation, then start the service and inspect its status. If the log
@@ -86,6 +92,8 @@ same command. Package rollback does not imply credential/state rollback.
 
 - Confirm one supervised daemon and the expected device in Lobu's control plane.
 - Stop it, wait longer than five seconds, and verify it remains inactive; start it.
+- Confirm the backoff is in effect with
+  `systemctl --user show lobu.service -p RestartSec -p RestartSteps -p RestartMaxDelayUSec`.
 - With no device work running, kill only the service's main process using
   `systemctl --user kill --kill-whom=main --signal=SIGKILL lobu.service`.
   Confirm a replacement main PID and an increased `NRestarts` using

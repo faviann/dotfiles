@@ -128,8 +128,14 @@ in
       ];
       WorkingDirectory = config.home.homeDirectory;
       ExecStart = "${config.home.homeDirectory}/.local/bin/lobu daemon --api-url https://app.lobu.ai --no-interactive-session";
+      # A stale credential fails every start, and the default rate limiter
+      # never trips at a flat interval. Back off so a transient failure still
+      # recovers quickly while a permanent one settles to a slow poll of the
+      # control plane rather than retrying forever at five seconds.
       Restart = "on-failure";
       RestartSec = 5;
+      RestartSteps = 6;
+      RestartMaxDelaySec = 300;
       UMask = "0077";
     };
     Install.WantedBy = [ "default.target" ];
