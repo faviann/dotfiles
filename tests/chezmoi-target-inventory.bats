@@ -87,10 +87,10 @@ run_chezmoi() {
     >"$source_dir/dot_local/bin/executable_workstation-update"
 
   run_chezmoi "$source_dir" "$destination_dir" \
-    --override-data '{"is_lxc":false}' \
+    --override-data '{"is_workstation":false}' \
     managed --path-style relative >"$managed_file"
   run_chezmoi "$source_dir" "$destination_dir" \
-    --override-data '{"is_lxc":false}' \
+    --override-data '{"is_workstation":false}' \
     ignored >"$ignored_file"
 
   for path in \
@@ -132,10 +132,10 @@ run_chezmoi() {
     >"$source_dir/dot_config/fish/functions/fish_greeting.fish"
 
   run_chezmoi "$source_dir" "$destination_dir" \
-    --override-data '{"is_lxc":true}' \
+    --override-data '{"is_workstation":true}' \
     managed --path-style relative >"$managed_file"
   run_chezmoi "$source_dir" "$destination_dir" \
-    --override-data '{"is_lxc":true}' \
+    --override-data '{"is_workstation":true}' \
     ignored >"$ignored_file"
 
   assert_lacks_line '.config/fish/config.fish' "$managed_file"
@@ -143,10 +143,10 @@ run_chezmoi() {
   assert_has_line '.config/fish' "$ignored_file"
 
   run_chezmoi "$source_dir" "$destination_dir" \
-    --override-data '{"is_lxc":false}' \
+    --override-data '{"is_workstation":false}' \
     managed --path-style relative >"$managed_file"
   run_chezmoi "$source_dir" "$destination_dir" \
-    --override-data '{"is_lxc":false}' \
+    --override-data '{"is_workstation":false}' \
     ignored >"$ignored_file"
 
   assert_has_line '.config/fish/config.fish' "$managed_file"
@@ -182,7 +182,7 @@ run_chezmoi() {
     >"$source_dir/dot_local/bin/executable_workstation-update"
 
   run_chezmoi "$source_dir" "$destination_dir" \
-    --override-data '{"is_lxc":false}' \
+    --override-data '{"is_workstation":false}' \
     apply --dry-run --verbose >"$dry_run_file"
 
   grep -Fq 'diff --git a/.bash_profile b/.bash_profile' "$dry_run_file" \

@@ -12,7 +12,7 @@ readonly REAL_BASH
 export REAL_BASH
 
 render_hook() {
-  local is_lxc="$1"
+  local is_workstation="$1"
   local output="$2"
   local destination
   local render_dir
@@ -26,7 +26,7 @@ render_hook() {
     --config /dev/null \
     --config-format toml \
     --persistent-state "$render_dir/chezmoistate.boltdb" \
-    --override-data "{\"is_lxc\":$is_lxc}" \
+    --override-data "{\"is_workstation\":$is_workstation}" \
     execute-template \
     --file "$REPO_ROOT/.chezmoiscripts/run_after_reconcile-agent-skills.sh.tmpl" \
     >"$output"

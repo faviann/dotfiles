@@ -119,7 +119,7 @@ Apply it through the Ansible-installed `workstation-setup` command, or build it
 directly while developing dotfiles:
 
 ```bash
-home-manager build --flake /home/aperture/repos/dotfiles#workstation
+home-manager build --flake .#workstation
 ```
 
 ## Workstation Moraine

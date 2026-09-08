@@ -1,7 +1,7 @@
-{{- $is_lxc := false -}}
+{{- $is_workstation := false -}}
 {{- if eq .chezmoi.hostname "workstation" -}}
-{{-   $is_lxc = true -}}
+{{-   $is_workstation = true -}}
 {{- end -}}
 
 [data]
-  is_lxc = {{ $is_lxc }}
+  is_workstation = {{ $is_workstation }}

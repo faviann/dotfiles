@@ -25,7 +25,7 @@ flake.lock
 home/
 home/**
 
-{{- if .is_lxc }}
+{{- if .is_workstation }}
 .config/fish/
 .config/fish/**
 {{- end }}
