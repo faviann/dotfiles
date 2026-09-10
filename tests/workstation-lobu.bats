@@ -14,6 +14,15 @@ rendered_lobu() {
     --apply 'c: { service = c.systemd.user.services.lobu; bootstrap = c.home.activation.bootstrapLobu; }'
 }
 
+rendered_lobu_session_context() {
+  rendered_json '.lobuSessionContext' \
+    "$REPO_ROOT#homeConfigurations.workstation.config" \
+    --apply 'c: {
+      shell = c.home.sessionVariables;
+      systemd = c.systemd.user.sessionVariables;
+    }'
+}
+
 make_fixture() {
   local fixture="$1"
   mkdir -p "$fixture/home/.local/bin" "$fixture/bin"
@@ -136,4 +145,20 @@ run_bootstrap() {
     >"$fixture/home/.config/lobu/config.json"
   run bash -c "$condition"
   [[ "$status" == 0 ]] || fail 'inactive homelab context failed the service precondition'
+}
+
+@test "test_workstation_sessions_default_to_the_self_hosted_lobu_context" {
+  local rendered
+
+  rendered="$(rendered_lobu_session_context)" \
+    || fail 'could not render the workstation session context'
+
+  jq -e '
+    (.shell.LOBU_CONTEXT == "homelab") and
+    (.systemd.LOBU_CONTEXT == "homelab")
+  ' <<<"$rendered" >/dev/null \
+    || fail 'workstation sessions do not default LOBU_CONTEXT to the self-hosted context'
+  jq -e '(.shell.LOBU_API_URL == null) and (.systemd.LOBU_API_URL == null)' \
+    <<<"$rendered" >/dev/null \
+    || fail 'a session-wide Lobu origin override was declared'
 }

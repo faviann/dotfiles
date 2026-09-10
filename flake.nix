@@ -151,6 +151,10 @@
           herdrService = workstationHomeConfiguration.config.systemd.user.services.herdr;
           lobuService = workstationHomeConfiguration.config.systemd.user.services.lobu;
           lobuBootstrap = workstationHomeConfiguration.config.home.activation.bootstrapLobu;
+          lobuSessionContext = {
+            shell = workstationHomeConfiguration.config.home.sessionVariables;
+            systemd = workstationHomeConfiguration.config.systemd.user.sessionVariables;
+          };
           workstationActivation = builtins.mapAttrs (
             _: entry: entry.data or ""
           ) workstationHomeConfiguration.config.home.activation;

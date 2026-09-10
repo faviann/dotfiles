@@ -47,7 +47,16 @@ Cloud. On first start, Lobu registers a headless device using the hostname. Late
 starts reuse the `homelab` context's cached identity and worker credential from
 `~/.config/lobu/devices/`. Keep both the persisted configuration root and the
 context name unchanged across restarts and LXC rebuilds. Changing the active CLI
-context does not affect the supervised daemon. Agent-session identity detection
+context does not affect the supervised daemon.
+
+Workstation sessions export `LOBU_CONTEXT=homelab` by default, from Home
+Manager's shell session variables and the equivalent systemd user-manager
+environment. An interactive `lobu daemon` started from a terminal, Codex, or
+Herdr therefore uses the self-hosted control plane without a per-invocation
+override; the globally selected CLI context no longer decides. Select a
+different context for one command by exporting `LOBU_CONTEXT` or passing
+`--context`. Picking up a change to this default requires a fresh login shell,
+and `systemctl --user daemon-reload` plus a restart for user services. Agent-session identity detection
 is disabled. The service uses the ordinary home directory, including its
 persisted mapping, without managing that mapping itself.
 

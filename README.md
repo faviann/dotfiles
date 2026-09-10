@@ -323,6 +323,11 @@ reverse-proxy configuration is involved.
 - Updates: manual, outside `update-agent-tools`, and not version-pinned.
 - Credentials: `lobu login` is interactive and human-owned. No token, device
   identifier, or generated credential is committed to this repository.
+- Interactive default: shell sessions and the systemd user manager both export
+  `LOBU_CONTEXT=homelab`, so an ad-hoc `lobu daemon` started from a terminal,
+  Codex, or Herdr targets the self-hosted control plane instead of the globally
+  selected CLI context. The hosted `lobu` context stays available and
+  selectable, and an explicit `LOBU_CONTEXT` or `--context` still wins.
 - Supervision: Home Manager owns `lobu.service` under `default.target`, with
   user lingering for boot startup. Failures restart after thirty seconds, a
   flat interval chosen so a permanent authentication fault retries against the

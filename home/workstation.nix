@@ -123,6 +123,16 @@ in
 
   systemd.user.startServices = "sd-switch";
 
+  # Interactive Lobu use follows the self-hosted control plane by default,
+  # instead of whichever context the CLI happens to have selected. Declared for
+  # both shell sessions and the systemd user manager so a daemon started from a
+  # terminal, Codex, or a user service such as Herdr resolves the same context.
+  # This is a default, not a lock: the hosted `lobu` context stays selectable,
+  # and an explicit `LOBU_CONTEXT` or `--context` still wins. `lobu.service`
+  # sets the variable itself and does not depend on this.
+  home.sessionVariables.LOBU_CONTEXT = lobuContextName;
+  systemd.user.sessionVariables.LOBU_CONTEXT = lobuContextName;
+
   # The profile must exist before npm runs; install before sd-switch can start
   # the daemon. Home Manager's run helper preserves activation dry-run behavior.
   home.activation.bootstrapLobu =
