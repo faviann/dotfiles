@@ -1,0 +1,378 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# dev-session provisions and removes the coding-worker environment for one
+# issue. Identity is the <project, issue> pair; every resource it touches is
+# derived from that pair, so matching resources under the dedicated worktree
+# layout are the ownership convention and no registry is kept.
+#
+# It never prompts a worker, interprets work, reviews code, or decides
+# completion. Orchestration stays with the caller, which talks to the worker
+# directly through Herdr.
+#
+# Helpers that can fail publish their result in a global instead of writing it
+# to stdout: a command substitution would swallow the refusal, because exiting
+# from one only ends its own subshell.
+
+fail() {
+  printf 'dev-session: %s\n' "$*" >&2
+  exit 1
+}
+
+# Callers reach this command over Lobu and other non-interactive transports, so
+# the workstation tool directories are resolved here rather than from a shell
+# profile that such a caller never sources.
+PATH="$HOME/.local/bin:$HOME/.nix-profile/bin:$PATH"
+export PATH
+
+usage() {
+  printf 'usage: dev-session ensure|remove <project> <issue>\n' >&2
+  exit 64
+}
+
+(( $# == 3 )) || usage
+action="$1"
+project="$2"
+issue="$3"
+[[ "$action" == ensure || "$action" == remove ]] || usage
+[[ "$project" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+  || fail "invalid project name: $project"
+[[ "$issue" =~ ^[0-9]+$ ]] || fail "invalid issue number: $issue"
+
+repository="$HOME/repos/$project"
+branch="issue-$issue"
+worktree="$HOME/worktrees/$project/$branch"
+workspace_label="$project/$branch"
+worker_name="${project,,}-$issue"
+worker_name="${worker_name//[^a-z0-9_-]/-}"
+worker_name="${worker_name:0:32}"
+[[ "$worker_name" == [a-z]* ]] || worker_name="w$worker_name"
+
+for tool in git herdr jq; do
+  command -v "$tool" >/dev/null 2>&1 || fail "$tool is not installed"
+done
+
+# Herdr answers on stdout and reports failures by exit status. Identifiers are
+# read back out of its result object rather than predicted.
+herdr_result=''
+herdr_call() {
+  local response
+
+  response="$(herdr "$@" 2>&1)" \
+    || fail "herdr $1 $2 failed: $response"
+  herdr_result="$(jq -ce '.result' <<<"$response")" \
+    || fail "herdr $1 $2 returned an unreadable response"
+}
+
+require_repository() {
+  [[ -d "$repository" ]] \
+    || fail "$repository is missing; clone it before provisioning a session"
+  git -C "$repository" rev-parse --git-dir >/dev/null 2>&1 \
+    || fail "$repository is not a Git repository"
+}
+
+# path<TAB>checked-out ref for every worktree Git knows about, with "-" for a
+# worktree that has no branch.
+worktree_registry() {
+  local line path='' ref='-'
+
+  while IFS= read -r line; do
+    case "$line" in
+      'worktree '*)
+        if [[ -n "$path" ]]; then
+          printf '%s\t%s\n' "$path" "$ref"
+        fi
+        path="${line#worktree }"
+        ref='-'
+        ;;
+      'branch '*) ref="${line#branch }" ;;
+    esac
+  done < <(git -C "$repository" worktree list --porcelain)
+  if [[ -n "$path" ]]; then
+    printf '%s\t%s\n' "$path" "$ref"
+  fi
+}
+
+worktree_of_branch() {
+  local path ref
+
+  while IFS=$'\t' read -r path ref; do
+    if [[ "$ref" == "refs/heads/$branch" ]]; then
+      printf '%s\n' "$path"
+      return
+    fi
+  done < <(worktree_registry)
+}
+
+ref_at_expected_worktree() {
+  local path ref
+
+  while IFS=$'\t' read -r path ref; do
+    if [[ "$path" == "$worktree" ]]; then
+      printf '%s\n' "$ref"
+      return
+    fi
+  done < <(worktree_registry)
+}
+
+base_ref=''
+resolve_base_ref() {
+  local name
+
+  name="$(git -C "$repository" \
+    symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" || name=''
+  if [[ -n "$name" ]]; then
+    base_ref="$name"
+    return
+  fi
+
+  name="$(cd "$repository" \
+    && gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null)" \
+    || name=''
+  [[ -n "$name" ]] \
+    || fail "could not determine the default branch of $repository"
+  if git -C "$repository" show-ref --verify --quiet "refs/remotes/origin/$name"; then
+    base_ref="origin/$name"
+  elif git -C "$repository" show-ref --verify --quiet "refs/heads/$name"; then
+    base_ref="$name"
+  else
+    fail "default branch $name is not present in $repository"
+  fi
+}
+
+# Reuse the expected worktree when its repository and branch match, including
+# when it is dirty. Anything else is contradictory and is reported, never
+# relocated, reset, or adopted.
+ensure_worktree() {
+  local branch_path path_ref report
+
+  branch_path="$(worktree_of_branch)"
+  path_ref="$(ref_at_expected_worktree)"
+
+  if [[ -n "$branch_path" ]]; then
+    [[ "$branch_path" == "$worktree" ]] \
+      || fail "$branch is checked out in $branch_path, not $worktree"
+    [[ -d "$worktree" ]] \
+      || fail "$worktree is registered for $branch but missing on disk; run git -C $repository worktree prune, then rerun"
+    return
+  fi
+
+  [[ -z "$path_ref" ]] \
+    || fail "$worktree already holds $path_ref instead of $branch"
+  [[ ! -e "$worktree" ]] \
+    || fail "$worktree exists but is not a worktree of $repository"
+
+  mkdir -p "${worktree%/*}"
+  # Git reports progress on stderr; stdout stays reserved for the JSON result.
+  if git -C "$repository" show-ref --verify --quiet "refs/heads/$branch"; then
+    report="$(git -C "$repository" worktree add "$worktree" "$branch" 2>&1)" \
+      || fail "could not check out the existing branch $branch in $worktree: $report"
+  else
+    resolve_base_ref
+    report="$(git -C "$repository" \
+      worktree add -b "$branch" "$worktree" "$base_ref" 2>&1)" \
+      || fail "could not create $branch from $base_ref: $report"
+  fi
+}
+
+# The worker is whichever live Herdr agent occupies the expected worktree. Pane
+# IDs are never stored between runs, so discovery is by cwd every time.
+worker=''
+discover_worker() {
+  local workers count
+
+  herdr_call agent list
+  workers="$(jq -ce --arg cwd "$worktree" \
+    '[.agents[] | select(.cwd == $cwd)]' <<<"$herdr_result")"
+  count="$(jq 'length' <<<"$workers")"
+  (( count <= 1 )) \
+    || fail "$count Herdr agents run in $worktree; resolve the ambiguity by hand"
+  worker="$(jq -c '.[0] // empty' <<<"$workers")"
+}
+
+session_workspace=''
+discover_session_workspace() {
+  local matches
+
+  herdr_call workspace list
+  matches="$(jq -ce --arg label "$workspace_label" \
+    '[.workspaces[] | select(.label == $label)]' <<<"$herdr_result")"
+  case "$(jq 'length' <<<"$matches")" in
+    0) session_workspace='' ;;
+    1) session_workspace="$(jq -r '.[0].workspace_id' <<<"$matches")" ;;
+    *) fail "more than one Herdr workspace is labelled $workspace_label; resolve the ambiguity by hand" ;;
+  esac
+}
+
+# A shell pane at the worktree in the session's own workspace. An existing
+# workspace is reused and its unrelated contents are left alone.
+session_pane=''
+resolve_session_pane() {
+  discover_session_workspace
+
+  if [[ -z "$session_workspace" ]]; then
+    herdr_call workspace create \
+      --cwd "$worktree" --label "$workspace_label" --no-focus
+    session_pane="$(jq -r '.root_pane.pane_id' <<<"$herdr_result")"
+    return
+  fi
+
+  herdr_call pane list --workspace "$session_workspace"
+  session_pane="$(jq -r --arg cwd "$worktree" '
+    [.panes[] | select(.cwd == $cwd and (has("agent") | not))]
+    | sort_by(.pane_id) | .[0].pane_id // empty
+  ' <<<"$herdr_result")"
+  if [[ -n "$session_pane" ]]; then
+    return
+  fi
+
+  herdr_call tab create --workspace "$session_workspace" --cwd "$worktree" --no-focus
+  session_pane="$(jq -r '.root_pane.pane_id' <<<"$herdr_result")"
+}
+
+# Codex keeps the workstation's own approval and sandbox settings; only the
+# model and reasoning effort are pinned here.
+start_report=''
+launch_worker() {
+  resolve_session_pane
+  [[ -n "$session_pane" ]] \
+    || fail 'Herdr did not report a pane to start the worker in'
+  # A pane an exiting Codex just vacated still holds that terminal's keyboard
+  # report as pending shell input, which would concatenate with the launch
+  # command. ctrl+u discards the line; it is an ordinary byte to any process.
+  herdr pane send-keys "$session_pane" ctrl+u >/dev/null 2>&1 || true
+  # A worker that blocks on its own startup dialog is still provisioned, so the
+  # outcome is decided by rediscovery rather than by this exit status.
+  start_report="$(herdr agent start "$worker_name" --kind codex \
+    --pane "$session_pane" \
+    -- -m gpt-5.6-luna -c 'model_reasoning_effort="xhigh"' 2>&1)" || true
+}
+
+ensure_session() {
+  local target state
+
+  require_repository
+  ensure_worktree
+
+  discover_worker
+  if [[ -z "$worker" ]]; then
+    launch_worker
+    discover_worker
+    [[ -n "$worker" ]] \
+      || fail "no Codex worker is running in $worktree after launch: $start_report"
+  fi
+
+  # Address the worker the way the caller will: by pane ID, verified through
+  # Herdr rather than assumed from the launch response.
+  target="$(jq -r '.pane_id' <<<"$worker")"
+  herdr_call agent get "$target"
+  state="$(jq -r '.agent.agent_status' <<<"$herdr_result")"
+  [[ -n "$state" && "$state" != null ]] \
+    || fail "Herdr cannot address the worker at $target"
+
+  jq -n \
+    --arg project "$project" \
+    --arg issue "$issue" \
+    --arg repository "$repository" \
+    --arg branch "$branch" \
+    --arg worktree "$worktree" \
+    --arg target "$target" \
+    --arg worker_state "$state" \
+    '$ARGS.named'
+}
+
+# Close the session's own panes. The workspace goes only when everything left in
+# it belongs to this session.
+removed_workspace=''
+removed_panes=()
+remove_herdr_resources() {
+  local session_panes foreign pane
+
+  discover_worker
+  if [[ -n "$worker" ]]; then
+    [[ "$(jq -r '.agent_status' <<<"$worker")" != working ]] \
+      || fail "the worker in $worktree is working; wait for it to settle before removing the session"
+  fi
+
+  discover_session_workspace
+  if [[ -n "$session_workspace" ]]; then
+    herdr_call pane list --workspace "$session_workspace"
+    session_panes="$(jq -r --arg cwd "$worktree" \
+      '.panes[] | select(.cwd == $cwd) | .pane_id' <<<"$herdr_result")"
+    foreign="$(jq -r --arg cwd "$worktree" \
+      '[.panes[] | select(.cwd != $cwd)] | length' <<<"$herdr_result")"
+    if (( foreign == 0 )); then
+      herdr_call workspace close "$session_workspace"
+      removed_workspace="$session_workspace"
+      return
+    fi
+    for pane in $session_panes; do
+      herdr_call pane close "$pane"
+      removed_panes+=("$pane")
+    done
+    return
+  fi
+
+  if [[ -n "$worker" ]]; then
+    pane="$(jq -r '.pane_id' <<<"$worker")"
+    herdr_call pane close "$pane"
+    removed_panes+=("$pane")
+  fi
+}
+
+# The branch, its remote counterpart, and the pull request all survive removal;
+# only the worktree checkout goes.
+removed_worktree=false
+remove_worktree() {
+  local path_ref report
+
+  [[ -d "$repository" ]] || return 0
+  git -C "$repository" rev-parse --git-dir >/dev/null 2>&1 \
+    || fail "$repository is not a Git repository"
+
+  path_ref="$(ref_at_expected_worktree)"
+  if [[ -z "$path_ref" ]]; then
+    [[ ! -e "$worktree" ]] \
+      || fail "$worktree is not a registered worktree of $repository; remove it by hand"
+    return 0
+  fi
+  [[ "$path_ref" == "refs/heads/$branch" ]] \
+    || fail "$worktree holds $path_ref instead of $branch"
+  report="$(git -C "$repository" worktree remove "$worktree" 2>&1)" \
+    || fail "could not remove $worktree; it may hold uncommitted work: $report"
+  removed_worktree=true
+}
+
+remove_session() {
+  local branch_preserved=false
+
+  if [[ -d "$worktree" ]] \
+    && [[ -n "$(git -C "$worktree" status --porcelain 2>/dev/null)" ]]; then
+    fail "$worktree has uncommitted work; commit or discard it before removing the session"
+  fi
+
+  remove_herdr_resources
+  remove_worktree
+
+  if [[ -d "$repository" ]] \
+    && git -C "$repository" show-ref --verify --quiet "refs/heads/$branch"; then
+    branch_preserved=true
+  fi
+
+  jq -n \
+    --arg project "$project" \
+    --arg issue "$issue" \
+    --arg repository "$repository" \
+    --arg branch "$branch" \
+    --arg worktree "$worktree" \
+    --arg removed_workspace "$removed_workspace" \
+    --argjson removed_worktree "$removed_worktree" \
+    --argjson branch_preserved "$branch_preserved" \
+    --args '$ARGS.named + {removed_panes: $ARGS.positional}' \
+    "${removed_panes[@]+"${removed_panes[@]}"}"
+}
+
+case "$action" in
+  ensure) ensure_session ;;
+  remove) remove_session ;;
+esac
