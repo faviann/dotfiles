@@ -237,8 +237,11 @@ assert_branch_exists() {
   [ -d "$WORKTREE" ]
   assert_branch_exists
   [[ "$(git -C "$WORKTREE" rev-parse issue-7)" == "$(git -C "$REPOSITORY" rev-parse origin/main)" ]]
-  grep -Eq 'agent start demo-7-[0-9a-f]{8} --kind codex --pane w1:p1 -- -m gpt-5\.6-luna -c model_reasoning_effort="xhigh"$' \
-    "$COMMAND_LOG"
+  # Codex is launched with the pinned model and reasoning effort plus trust for
+  # this worktree alone, and with nothing else.
+  local launch
+  launch="$(grep -F 'agent start ' "$COMMAND_LOG")"
+  [[ "$launch" =~ ^'agent start demo-7-'[0-9a-f]{8}' --kind codex --pane w1:p1 -- -m gpt-5.6-luna -c model_reasoning_effort="xhigh" -c projects={"'"$WORKTREE"'"={trust_level="trusted"}}'$ ]]
   # Codex leaves a terminal keyboard report as pending shell input when it
   # exits, so the launch pane's input line is discarded first.
   [[ "$(grep -n 'pane send-keys w1:p1 ctrl+u' "$COMMAND_LOG" | cut -d: -f1)" \
