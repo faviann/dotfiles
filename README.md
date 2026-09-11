@@ -308,8 +308,10 @@ dev-session remove <project> <issue>
 Identity is the `<project, issue>` pair, and every resource is derived from it:
 the repository `~/repos/<project>`, the branch `issue-<issue>`, the worktree
 `~/worktrees/<project>/issue-<issue>`, a Herdr workspace labelled
-`<project>/issue-<issue>`, and the Codex worker running in that worktree. Git
-and Herdr are the only sources of truth; no session database, pane-ID tracking,
+`<project>/issue-<issue>`, and the Codex worker running in that worktree. The
+worker's Herdr launch name is a readable label carrying a digest of the pair, so
+distinct identities never compete for one name; it is never used to identify a
+worker. Git and Herdr are the only sources of truth; no session database, pane-ID tracking,
 or background supervision is kept. The command resolves its own PATH, so it
 runs unchanged over Lobu and other non-interactive transports.
 
@@ -331,8 +333,9 @@ worktree, current Herdr target, and observed worker state. Success means the
 worker exists and Herdr can address it, not that it is idle.
 
 `remove` deletes only the session's own worker panes, its workspace, and its
-worktree. It refuses to interrupt a working worker or to remove a dirty
-worktree, proceeds when worker activity cannot be determined, leaves unrelated
+worktree. The matching worker goes wherever its pane currently lives, since
+location is not part of its identity. It refuses to interrupt a working worker
+or to remove a dirty worktree, proceeds when worker activity cannot be determined, leaves unrelated
 workspace contents alone, and tolerates resources a partial cleanup already
 removed. The local branch, its remote counterpart, and the pull request all
 survive. There is no force cleanup: resolve a refusal by hand.

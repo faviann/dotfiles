@@ -30,9 +30,13 @@ create_disposable_repository() {
   git init -q -b main "$seed"
   git -C "$seed" commit -q --allow-empty -m 'initial'
   git clone -q --bare "$seed" "$BATS_TEST_TMPDIR/origin.git"
-  git clone -q "$BATS_TEST_TMPDIR/origin.git" "$HOME/repos/demo"
+  clone_project demo
   export REPOSITORY="$HOME/repos/demo"
   export WORKTREE="$HOME/worktrees/demo/issue-7"
+}
+
+clone_project() {
+  git clone -q "$BATS_TEST_TMPDIR/origin.git" "$HOME/repos/$1"
 }
 
 install_herdr_stub() {
@@ -156,6 +160,13 @@ case "$group:$subcommand" in
       blocked) status=blocked ;;
       *) status="${HERDR_START_RESULT:-idle}" ;;
     esac
+    # Herdr requires a valid name that no live agent already holds.
+    [[ "$name" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] \
+      || { printf 'invalid_agent_name\n' >&2; exit 1; }
+    jq -e --arg name "$name" \
+      '[.panes[] | select(has("agent") and .name == $name)] | length == 0' \
+      "$state" >/dev/null \
+      || { printf 'agent_name_in_use\n' >&2; exit 1; }
     save "$(jq -c --arg pane "$pane" --arg name "$name" --arg status "$status" '
       .panes |= map(
         if .pane_id == $pane then
@@ -226,18 +237,36 @@ assert_branch_exists() {
   [ -d "$WORKTREE" ]
   assert_branch_exists
   [[ "$(git -C "$WORKTREE" rev-parse issue-7)" == "$(git -C "$REPOSITORY" rev-parse origin/main)" ]]
-  grep -Fq 'agent start demo-7 --kind codex --pane w1:p1 -- -m gpt-5.6-luna -c model_reasoning_effort="xhigh"' \
+  grep -Eq 'agent start demo-7-[0-9a-f]{8} --kind codex --pane w1:p1 -- -m gpt-5\.6-luna -c model_reasoning_effort="xhigh"$' \
     "$COMMAND_LOG"
   # Codex leaves a terminal keyboard report as pending shell input when it
   # exits, so the launch pane's input line is discarded first.
   [[ "$(grep -n 'pane send-keys w1:p1 ctrl+u' "$COMMAND_LOG" | cut -d: -f1)" \
-    -lt "$(grep -n 'agent start demo-7' "$COMMAND_LOG" | cut -d: -f1)" ]]
+    -lt "$(grep -n 'agent start demo-7-' "$COMMAND_LOG" | cut -d: -f1)" ]]
 
   : >"$COMMAND_LOG"
   run -0 bash "$COMMAND" ensure demo 7
   [[ "$output" == "$first" ]]
   run ! grep -Eq '^(workspace create|tab create|agent start|pane close|workspace close)' "$COMMAND_LOG"
   [[ "$(herdr_state '[(.workspaces|length),(.panes|length)]')" == '[1,1]' ]]
+}
+
+@test "test_distinct_session_identities_get_distinct_valid_worker_names" {
+  local project
+  local names
+
+  # These four identities collapse onto one readable launch name: two differ
+  # only past Herdr's length limit, two only in characters Herdr disallows.
+  for project in a-very-long-project-name-variant-one \
+    a-very-long-project-name-variant-two Foo.Bar foo-bar; do
+    clone_project "$project"
+    run -0 bash "$COMMAND" ensure "$project" 7
+  done
+
+  names="$(herdr_state '[.panes[] | select(has("agent")) | .name]')"
+  [[ "$(jq 'length' <<<"$names")" == 4 ]]
+  [[ "$(jq 'unique | length' <<<"$names")" == 4 ]]
+  [[ "$(jq '[.[] | select(test("^[a-z][a-z0-9_-]{0,31}$"))] | length' <<<"$names")" == 4 ]]
 }
 
 @test "test_ensure_relaunches_a_dead_worker_and_preserves_uncommitted_work" {
@@ -251,7 +280,7 @@ assert_branch_exists() {
   run -0 bash "$COMMAND" ensure demo 7
   jq -e '.target == "w1:p1" and .worker_state == "idle"' <<<"$output" >/dev/null
   grep -Fq 'pane send-keys w1:p1 ctrl+u' "$COMMAND_LOG"
-  grep -Fq 'agent start demo-7 --kind codex --pane w1:p1' "$COMMAND_LOG"
+  grep -Eq 'agent start demo-7-[0-9a-f]{8} --kind codex --pane w1:p1' "$COMMAND_LOG"
   run ! grep -Eq '^(workspace create|tab create)' "$COMMAND_LOG"
   [[ "$(cat "$WORKTREE/notes.txt")" == $'work in progress\nmore' ]]
   [[ -n "$(git -C "$WORKTREE" status --porcelain)" ]]
@@ -409,6 +438,37 @@ assert_branch_exists() {
     <<<"$output" >/dev/null
   run ! grep -Fq 'workspace close' "$COMMAND_LOG"
   [[ "$(herdr_state '[(.workspaces[].workspace_id),(.panes[].pane_id)]')" == '["w1","w1:pX"]' ]]
+}
+
+@test "test_remove_disposes_of_a_worker_moved_out_of_the_session_workspace" {
+  run -0 bash "$COMMAND" ensure demo 7
+
+  # Herdr gives a pane moved into another workspace a new workspace-qualified
+  # ID. Here the session workspace keeps a spare shell at the worktree and the
+  # destination workspace holds an unrelated pane.
+  printf '%s\n' "$(jq -c --arg cwd "$WORKTREE" '
+    .workspaces += [{workspace_id:"w2",label:"unrelated"}]
+    | .tabs += [{tab_id:"w2:t1",workspace_id:"w2"}]
+    | .panes += [
+        {pane_id:"w1:p2",workspace_id:"w1",tab_id:"w1:t1",cwd:$cwd},
+        {pane_id:"w2:p1",workspace_id:"w2",tab_id:"w2:t1",cwd:"/elsewhere"}
+      ]
+    | .panes |= map(
+        if .pane_id == "w1:p1"
+        then . + {pane_id:"w2:p2",workspace_id:"w2",tab_id:"w2:t1"}
+        else . end
+      )
+  ' "$HERDR_STATE")" >"$HERDR_STATE"
+  : >"$COMMAND_LOG"
+
+  run -0 bash "$COMMAND" remove demo 7
+  jq -e '.removed_workspace == "w1" and .removed_panes == ["w2:p2"]' \
+    <<<"$output" >/dev/null
+  [[ "$(herdr_state '[.panes[] | select(has("agent"))] | length')" == 0 ]]
+  [[ "$(herdr_state '[(.workspaces[].workspace_id),(.panes[].pane_id)]')" \
+    == '["w2","w2:p1"]' ]]
+  [ ! -d "$WORKTREE" ]
+  assert_branch_exists
 }
 
 @test "test_remove_tolerates_resources_that_are_already_gone" {

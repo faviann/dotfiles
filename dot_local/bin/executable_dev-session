@@ -43,14 +43,23 @@ repository="$HOME/repos/$project"
 branch="issue-$issue"
 worktree="$HOME/worktrees/$project/$branch"
 workspace_label="$project/$branch"
-worker_name="${project,,}-$issue"
-worker_name="${worker_name//[^a-z0-9_-]/-}"
-worker_name="${worker_name:0:32}"
-[[ "$worker_name" == [a-z]* ]] || worker_name="w$worker_name"
 
 for tool in git herdr jq; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is not installed"
 done
+
+# Herdr launch names must match [a-z][a-z0-9_-]{0,31} and be unique among live
+# agents. The readable part alone is not: lowercasing, substituting the
+# characters Herdr disallows, and fitting the length all merge distinct project
+# names. A digest of the exact pair keeps every accepted identity distinct, so
+# concurrent sessions never compete for one name. The name stays a label only —
+# discovery remains by worktree cwd.
+worker_digest="$(printf '%s/%s' "$project" "$issue" | git hash-object --stdin)"
+worker_digest="${worker_digest:0:8}"
+worker_slug="${project,,}-$issue"
+worker_slug="${worker_slug//[^a-z0-9_-]/-}"
+worker_name="${worker_slug:0:23}-$worker_digest"
+[[ "$worker_name" == [a-z]* ]] || worker_name="w${worker_name:0:31}"
 
 # Herdr answers on stdout and reports failures by exit status. Identifiers are
 # read back out of its result object rather than predicted.
@@ -282,16 +291,19 @@ ensure_session() {
 }
 
 # Close the session's own panes. The workspace goes only when everything left in
-# it belongs to this session.
+# it belongs to this session. The matching worker is disposed of wherever its
+# pane currently lives, since location is not part of its identity.
 removed_workspace=''
 removed_panes=()
 remove_herdr_resources() {
-  local session_panes foreign pane
+  local worker_pane='' worker_workspace='' session_panes foreign pane
 
   discover_worker
   if [[ -n "$worker" ]]; then
     [[ "$(jq -r '.agent_status' <<<"$worker")" != working ]] \
       || fail "the worker in $worktree is working; wait for it to settle before removing the session"
+    worker_pane="$(jq -r '.pane_id' <<<"$worker")"
+    worker_workspace="$(jq -r '.workspace_id' <<<"$worker")"
   fi
 
   discover_session_workspace
@@ -304,19 +316,22 @@ remove_herdr_resources() {
     if (( foreign == 0 )); then
       herdr_call workspace close "$session_workspace"
       removed_workspace="$session_workspace"
-      return
+    else
+      for pane in $session_panes; do
+        herdr_call pane close "$pane"
+        removed_panes+=("$pane")
+      done
     fi
-    for pane in $session_panes; do
-      herdr_call pane close "$pane"
-      removed_panes+=("$pane")
-    done
-    return
+    # Either branch already took every session pane in that workspace, the
+    # worker's among them when it still lives there.
+    if [[ "$worker_workspace" == "$session_workspace" ]]; then
+      worker_pane=''
+    fi
   fi
 
-  if [[ -n "$worker" ]]; then
-    pane="$(jq -r '.pane_id' <<<"$worker")"
-    herdr_call pane close "$pane"
-    removed_panes+=("$pane")
+  if [[ -n "$worker_pane" ]]; then
+    herdr_call pane close "$worker_pane"
+    removed_panes+=("$worker_pane")
   fi
 }
 
