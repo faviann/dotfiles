@@ -75,5 +75,5 @@ routine Home Manager updates.
 For boot problems, inspect lingering and the user-service boot journal. An
 active service checked only after SSH login does not establish startup without
 login. For a missing Collie unit after a rebuild, use the
-[Collie rebuild recovery procedure](collie-pilot-runbook.md#recovery-after-an-lxc-rebuild)
+[Collie rebuild recovery procedure](collie.md#recovery-after-an-lxc-rebuild)
 rather than copying its generated unit into Home Manager.
