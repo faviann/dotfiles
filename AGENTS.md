@@ -29,3 +29,6 @@ For Bash or shell-template work, run focused analysis with
 The sole full closeout command is `nix flake check`. It runs focused shell
 analysis and every behavioral suite in the declared Nix environment; do not
 run a redundant standalone full behavioral pass immediately beforehand.
+
+Repository conventions, including the chezmoi target inventory, are in
+`docs/repository-conventions.md`.

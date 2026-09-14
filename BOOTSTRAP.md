@@ -46,7 +46,7 @@ authenticates GitHub CLI from the `dotfiles/github-cli-token` Bitwarden item,
 and validates the expected tools. Chezmoi installs AoE first. Home Manager then
 installs the base tools, loads the user units, and hands off to
 `update-agent-tools` if any managed agent command is missing. This installs the
-[complete agent toolchain](README.md#workstation-home-manager) without another
+[complete agent toolchain](docs/workstation/toolchain.md) without another
 package-discovery or Ansible step.
 
 The bootstrap handoff is part of `workstation-setup`, not SSH login or a
@@ -64,7 +64,7 @@ never during shell login.
 Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
 has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
 before enabling the bind mount. For Collie's service-regeneration prerequisites
-and retry command, see [recovery after an LXC rebuild](docs/collie-pilot-runbook.md#recovery-after-an-lxc-rebuild).
+and retry command, see [recovery after an LXC rebuild](docs/runbooks/collie.md#recovery-after-an-lxc-rebuild).
 
 ## Bitwarden SSH Key Item
 
@@ -81,7 +81,7 @@ The item must contain:
 
 Keep the private key only in the item notes. Do not duplicate it into docs,
 Ansible vars, shell history, or plaintext files. For later replacement, use the
-[SSH key rotation procedure](README.md#ssh-key-rotation).
+[SSH key rotation procedure](docs/ssh-key-rotation.md).
 
 ## GitHub Registration
 
@@ -125,7 +125,7 @@ gh auth login --git-protocol ssh --skip-ssh-key
 ## Day-to-Day Updates
 
 After bootstrap, use `workstation-update` for routine maintenance. See the
-canonical [workstation maintenance guidance](README.md#workstation-maintenance)
+canonical [workstation maintenance guidance](docs/workstation/maintenance.md)
 for source guards, Bitwarden sessions, restart consent, and failure recovery.
 
 ## Clone ServerManagementScripts

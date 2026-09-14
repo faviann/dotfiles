@@ -95,7 +95,7 @@ curl --fail --show-error --silent --connect-timeout 5 --output /dev/null \
 ```
 
 Collie remains running and reconnects across Herdr restarts. Use the
-[Herdr recovery checks](herdr-supervision-runbook.md#recovery-checks) to inspect
+[Herdr recovery checks](herdr.md#recovery-checks) to inspect
 connection state without exposing pane content. Do not interrupt active Herdr
 panes merely to test reconnection.
 
