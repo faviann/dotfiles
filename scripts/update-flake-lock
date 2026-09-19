@@ -33,8 +33,22 @@ cleanup() {
   exit "$status"
 }
 
+# A flake input's lock node is not necessarily named after the input: nixpkgs
+# resolves to a node like `nixpkgs_3` whenever a transitive dependency already
+# claimed the plain name. Resolve through the root's input map so every lookup
+# reads the node this flake actually consumes, never a same-named node
+# belonging to some other input.
 locked_revision() {
-  jq -r --arg input "$1" '.nodes[$input].locked.rev // empty' "$2"
+  local input="$1" lock_file="$2" node
+
+  node="$(
+    jq -r --arg input "$input" '
+      .nodes.root.inputs[$input] // empty
+      | if type == "string" then . else empty end
+    ' "$lock_file"
+  )" || return 1
+  [[ -n "$node" ]] || return 1
+  jq -r --arg node "$node" '.nodes[$node].locked.rev // empty' "$lock_file"
 }
 
 (( $# == 0 )) || fail 'usage: update-flake-lock'
@@ -54,9 +68,15 @@ lock_backup="$(mktemp "${TMPDIR:-/tmp}/flake-lock.XXXXXX")" \
 trap cleanup EXIT
 cp -- "$LOCK_FILE" "$lock_backup" || fail 'could not back up flake.lock'
 
-isolated_before="$(locked_revision "$ISOLATED_INPUT" "$lock_backup")"
+isolated_before="$(locked_revision "$ISOLATED_INPUT" "$lock_backup")" \
+  || fail "could not resolve the $ISOLATED_INPUT lock node"
 [[ -n "$isolated_before" ]] \
   || fail "could not read the locked $ISOLATED_INPUT revision"
+
+for input in "${TRACKED_INPUTS[@]}"; do
+  locked_revision "$input" "$lock_backup" >/dev/null \
+    || fail "could not resolve the $input lock node"
+done
 
 (
   cd "$REPO_ROOT"
