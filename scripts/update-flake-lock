@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPO_ROOT
+readonly LOCK_FILE="$REPO_ROOT/flake.lock"
+# home-manager tracks master and reads nixpkgs internals, so an old
+# home-manager against a freshly advanced nixpkgs breaks. Advance them as one
+# unit. Every other input either follows these two or is pinned deliberately.
+readonly TRACKED_INPUTS=(nixpkgs home-manager)
+# The .NET SDK track is isolated on purpose and is owned by update-dotnet-sdk.
+# This updater must never move it.
+readonly ISOLATED_INPUT='dotnet-nixpkgs'
+
+lock_backup=''
+keep_lock=0
+
+fail() {
+  printf 'update-flake-lock: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  local status=$?
+
+  trap - EXIT
+  if [[ -n "$lock_backup" && -f "$lock_backup" ]]; then
+    if (( keep_lock == 0 )); then
+      cp -- "$lock_backup" "$LOCK_FILE" || status=1
+    fi
+    rm -f -- "$lock_backup" || status=1
+  fi
+  exit "$status"
+}
+
+locked_revision() {
+  jq -r --arg input "$1" '.nodes[$input].locked.rev // empty' "$2"
+}
+
+(( $# == 0 )) || fail 'usage: update-flake-lock'
+
+for command in cp diff git jq mktemp nix rm; do
+  command -v "$command" >/dev/null 2>&1 \
+    || fail "required command is missing: $command"
+done
+
+[[ "$(git -C "$REPO_ROOT" rev-parse --show-toplevel 2>/dev/null)" == "$REPO_ROOT" ]] \
+  || fail 'repository root is unavailable'
+[[ -z "$(git -C "$REPO_ROOT" status --porcelain=v1 --untracked-files=all)" ]] \
+  || fail 'repository must be clean before updating the flake lock'
+
+lock_backup="$(mktemp "${TMPDIR:-/tmp}/flake-lock.XXXXXX")" \
+  || fail 'could not create a lock-file backup'
+trap cleanup EXIT
+cp -- "$LOCK_FILE" "$lock_backup" || fail 'could not back up flake.lock'
+
+isolated_before="$(locked_revision "$ISOLATED_INPUT" "$lock_backup")"
+[[ -n "$isolated_before" ]] \
+  || fail "could not read the locked $ISOLATED_INPUT revision"
+
+(
+  cd "$REPO_ROOT"
+  nix flake update "${TRACKED_INPUTS[@]}"
+) || fail 'could not update the tracked flake inputs'
+
+if git -C "$REPO_ROOT" diff --quiet -- "$LOCK_FILE"; then
+  printf 'Flake inputs: current\n'
+  exit 0
+fi
+
+[[ -z "$(git -C "$REPO_ROOT" diff --name-only -- . ':(exclude)flake.lock')" ]] \
+  || fail 'the flake update changed a tracked file other than flake.lock'
+[[ -z "$(git -C "$REPO_ROOT" ls-files --others --exclude-standard)" ]] \
+  || fail 'the flake update created an unexpected untracked file'
+
+isolated_after="$(locked_revision "$ISOLATED_INPUT" "$LOCK_FILE")"
+[[ "$isolated_after" == "$isolated_before" ]] \
+  || fail "the flake update moved the isolated $ISOLATED_INPUT input"
+
+# Inputs that follow nixpkgs or home-manager move with them, so the set of
+# changed lock nodes is not constrained further here. The activation build and
+# behavioral suites below are what qualify the result.
+(
+  cd "$REPO_ROOT"
+  nix flake check
+) || fail 'validation failed for the updated flake inputs'
+
+keep_lock=1
+for input in "${TRACKED_INPUTS[@]}"; do
+  printf '%s: %s -> %s\n' \
+    "$input" \
+    "$(locked_revision "$input" "$lock_backup")" \
+    "$(locked_revision "$input" "$LOCK_FILE")"
+done

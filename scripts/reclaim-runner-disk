@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# GitHub-hosted runners ship toolchains this repository never uses, and the
+# images grow over time. Building Moraine's Rust toolchain from source needs
+# more room than the stock image leaves free, so reclaim the unused trees
+# before Nix creates /nix. Removal is best effort: a path the current image no
+# longer ships is not an error, and a failure here must not mask the real
+# validation result.
+
+fail() {
+  printf 'reclaim-runner-disk: %s\n' "$*" >&2
+  exit 1
+}
+
+(( $# == 0 )) || fail 'usage: reclaim-runner-disk'
+
+[[ "${GITHUB_ACTIONS:-}" == "true" ]] \
+  || fail 'refusing to delete system trees outside a GitHub Actions runner'
+
+command -v sudo >/dev/null 2>&1 || fail 'required command is missing: sudo'
+
+# Preinstalled toolchains. Nix supplies every compiler and SDK this flake
+# builds with, so none of these participate in validation.
+disposable=(
+  /opt/ghc
+  /opt/hostedtoolcache
+  /usr/local/.ghcup
+  /usr/local/lib/android
+  /usr/local/share/boost
+  /usr/local/share/powershell
+  /usr/share/dotnet
+  /usr/share/swift
+)
+
+printf 'Runner disk before reclamation:\n'
+df -h /
+
+for path in "${disposable[@]}"; do
+  [[ -e "$path" ]] || continue
+  if sudo rm -rf -- "$path"; then
+    printf 'reclaimed %s\n' "$path"
+  else
+    printf 'reclaim-runner-disk: could not remove %s; continuing\n' "$path" >&2
+  fi
+done
+
+printf 'Runner disk after reclamation:\n'
+df -h /

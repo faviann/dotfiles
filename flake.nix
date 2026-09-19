@@ -189,8 +189,10 @@
           ./scripts/collie-bootstrap
           ./scripts/lobu-bootstrap
           ./scripts/moraine-service
+          ./scripts/reclaim-runner-disk
           ./scripts/run-shellcheck
           ./scripts/update-dotnet-sdk
+          ./scripts/update-flake-lock
           ./tests
         ];
       };
@@ -220,7 +222,9 @@
         github-actions = pkgs.runCommand "github-actions" {
           nativeBuildInputs = [ pkgs.actionlint ];
         } ''
-          actionlint ${./.github/workflows/update-dotnet-sdk.yml}
+          actionlint \
+            ${./.github/workflows/update-dotnet-sdk.yml} \
+            ${./.github/workflows/update-flake-lock.yml}
           touch "$out"
         '';
 
