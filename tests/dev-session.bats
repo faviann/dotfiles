@@ -241,7 +241,7 @@ assert_branch_exists() {
   # this worktree alone, and with nothing else.
   local launch
   launch="$(grep -F 'agent start ' "$COMMAND_LOG")"
-  [[ "$launch" =~ ^'agent start demo-7-'[0-9a-f]{8}' --kind codex --pane w1:p1 -- -m gpt-5.6-luna -c model_reasoning_effort="xhigh" -c projects={"'"$WORKTREE"'"={trust_level="trusted"}}'$ ]]
+  [[ "$launch" =~ ^'agent start demo-7-'[0-9a-f]{8}' --kind codex --pane w1:p1 -- -m gpt-6-luna -c model_reasoning_effort="xhigh" -c projects={"'"$WORKTREE"'"={trust_level="trusted"}}'$ ]]
   # Codex leaves a terminal keyboard report as pending shell input when it
   # exits, so the launch pane's input line is discarded first.
   [[ "$(grep -n 'pane send-keys w1:p1 ctrl+u' "$COMMAND_LOG" | cut -d: -f1)" \

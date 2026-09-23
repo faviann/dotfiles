@@ -33,7 +33,7 @@ discovered by the expected worktree's working directory, so a working or blocked
 worker is reused and never interrupted.
 
 A missing or dead worker is replaced with a fresh Codex worker launched as
-`-m gpt-5.6-luna -c 'model_reasoning_effort="xhigh"'`, keeping the
+`-m gpt-6-luna -c 'model_reasoning_effort="xhigh"'`, keeping the
 workstation's own Codex approval and sandbox settings. A generated worktree is a
 project Codex has never seen, so the launch also trusts that one path through an
 invocation-scoped `-c` override; nothing is written to `~/.codex/config.toml`.

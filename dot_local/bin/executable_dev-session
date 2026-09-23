@@ -265,7 +265,7 @@ launch_worker() {
   # outcome is decided by rediscovery rather than by this exit status.
   start_report="$(herdr agent start "$worker_name" --kind codex \
     --pane "$session_pane" \
-    -- -m gpt-5.6-luna -c 'model_reasoning_effort="xhigh"' \
+    -- -m gpt-6-luna -c 'model_reasoning_effort="xhigh"' \
     -c "projects={\"$worktree\"={trust_level=\"trusted\"}}" 2>&1)" || true
 }
 
