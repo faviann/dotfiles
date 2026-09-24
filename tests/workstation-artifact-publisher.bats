@@ -27,7 +27,7 @@ rendered_publisher() {
   publisher="$(rendered_publisher)"
 
   diff -u \
-    <(printf '%s\n' '{"baseUrl":"https://artifacts.admin.faviann.com","directory":"/ephemeral/workstation/artifacts"}') \
+    <(printf '%s\n' '{"baseUrl":"https://artifacts.public.faviann.com","directory":"/ephemeral/workstation/artifacts"}') \
     <(jq -c -S '.text | fromjson' <<<"$publisher") \
     || fail 'the mapping is not exactly the agreed directory and base URL'
 }
