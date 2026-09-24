@@ -31,6 +31,23 @@ packages=(
   pi-acp@latest
 )
 
+# npm is moving install scripts behind an explicit allowlist and already warns
+# about every unreviewed one. Approval cannot be recorded for a global install,
+# so the allowlist is named on each invocation. The claude and opencode packages
+# ship a placeholder executable that their install script replaces with the real
+# binary, so a blocked script leaves a stub behind and still succeeds. A package
+# that starts wanting an install script is absent from this list and warns
+# instead of running.
+allow_scripts=(
+  @anthropic-ai/claude-code
+  opencode-ai
+  esbuild
+  onnxruntime-node
+  protobufjs
+  @google/genai
+)
+allowed_scripts="$(IFS=,; printf '%s' "${allow_scripts[*]}")"
+
 read_workers() {
   aoe ps --acp --dead --json | jq -ce '
     if type == "array" and all(.[];
@@ -58,7 +75,8 @@ fi
 # dry run enforces Node engines before replacing any executable. Bun engines are
 # verified by running the harnesses below, using the latest upstream runtime.
 mkdir -p "$prefix/lib"
-npm install --global --prefix "$prefix" --force=false --engine-strict --dry-run "${packages[@]}" \
+npm install --global --prefix "$prefix" --force=false --engine-strict \
+  --allow-scripts="$allowed_scripts" --dry-run "${packages[@]}" \
   || fail 'npm preflight failed; check package diagnostics and the Home Manager Node version'
 
 # The upstream installer selects a CPU-compatible build and renames the extracted
@@ -68,7 +86,8 @@ curl -fsSL https://bun.sh/install | BUN_INSTALL="$prefix" bash \
   || fail 'Bun installation failed'
 ln -sfn bun "$prefix/bin/bunx"
 bun --version >/dev/null || fail 'installed Bun does not run on this workstation'
-npm install --global --prefix "$prefix" --force=false --engine-strict "${packages[@]}" \
+npm install --global --prefix "$prefix" --force=false --engine-strict \
+  --allow-scripts="$allowed_scripts" "${packages[@]}" \
   || fail 'npm installation failed'
 aoe update --yes || fail 'AoE update failed'
 

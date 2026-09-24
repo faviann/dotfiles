@@ -94,7 +94,7 @@ live_worker() {
   [ "$status" -ne 0 ]
   [[ "$output" == *'npm preflight failed'* ]]
   run ! grep -Eq '^(curl|systemctl|aoe update)' "$COMMAND_LOG"
-  grep -q '^npm install .*--force=false --engine-strict --dry-run' "$COMMAND_LOG"
+  grep -q '^npm install .*--force=false --engine-strict .*--dry-run' "$COMMAND_LOG"
 }
 
 @test "test_installation_failure_does_not_restart_services" {
@@ -123,6 +123,9 @@ live_worker() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'workers verified'* ]]
   grep -q '^npm install .*--force=false --engine-strict .*@openai/codex@latest .*pi-acp@latest$' "$COMMAND_LOG"
+  # Both npm invocations must name the install-script allowlist. Without it the
+  # claude and opencode packages install a placeholder executable and succeed.
+  [ "$(grep -c '^npm install .*--allow-scripts=@anthropic-ai/claude-code,opencode-ai,' "$COMMAND_LOG")" -eq 2 ]
   grep -qx 'curl -fsSL https://bun.sh/install' "$COMMAND_LOG"
   grep -qx 'aoe update --yes' "$COMMAND_LOG"
   grep -qx 'aoe acp restart private-session' "$COMMAND_LOG"
