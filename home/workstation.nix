@@ -75,14 +75,16 @@ let
     managed_clickhouse_dir = "${moraineRoot}/clickhouse/current"
   '';
   # The publish-artifact skill rereads this mapping on every publication.
-  # HomeLab-iac owns the directory, static server, routing, admin
-  # authentication, and retention behind these values
-  # (https://github.com/faviann/homelab-iac/issues/272); dotfiles owns only the
-  # user's mapping file. There is no automatic synchronization between the two
-  # repositories, so change both together.
+  # HomeLab-iac owns the directory, static server, routing, and retention
+  # behind these values (https://github.com/faviann/homelab-iac/issues/272);
+  # dotfiles owns only the user's mapping file. The public tier serves
+  # publications to anyone holding the URL, with no forward-auth in front of
+  # it, so nothing private belongs in the publishing root. There is no
+  # automatic synchronization between the two repositories, so change both
+  # together.
   artifactPublisherMapping = {
     directory = "/ephemeral/workstation/artifacts";
-    baseUrl = "https://artifacts.admin.faviann.com";
+    baseUrl = "https://artifacts.public.faviann.com";
   };
 in
 {

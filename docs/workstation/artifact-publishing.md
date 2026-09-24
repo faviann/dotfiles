@@ -12,14 +12,16 @@ symlink, which the publisher's discovery accepts. The agreed mapping is:
 | Field | Value |
 | --- | --- |
 | `directory` | `/ephemeral/workstation/artifacts` |
-| `baseUrl` | `https://artifacts.admin.faviann.com` |
+| `baseUrl` | `https://artifacts.public.faviann.com` |
 
 Dotfiles owns nothing else here.
 [homelab-iac#272](https://github.com/faviann/homelab-iac/issues/272) owns the
 publishing root, its permissions, the static server, routing, storage and
-retention, and the admin forward-auth tier. The endpoint is reachable from
-outside the LAN without VPN, subject to admin login; publications are retained
-until deliberate cleanup and survive source removal and LXC rebuilds.
+retention. The endpoint is reachable from outside the LAN without VPN and
+without credentials: the public tier has no forward-auth in front of it, so
+anyone holding a publication's URL can read it. Publish only what you are
+willing to hand to a stranger. Publications are retained until deliberate
+cleanup and survive source removal and LXC rebuilds.
 
 The two values are a shared agreement between the repositories with no
 automatic synchronization: change them in both, together. The publisher's
