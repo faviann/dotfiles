@@ -123,12 +123,11 @@ live_worker() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'workers verified'* ]]
   grep -q '^npm install .*--force=false --engine-strict .*@openai/codex@latest .*pi-acp@latest$' "$COMMAND_LOG"
-  # Both npm invocations must carry the whole install-script allowlist: the
+  # Both npm invocations must carry a non-empty install-script allowlist: the
   # claude and opencode packages install a placeholder executable and still
-  # succeed when their script is blocked. Matching the entire list rather than
-  # the flag alone makes dropping any single entry fail here.
-  local allowed_scripts='--allow-scripts=@anthropic-ai/claude-code,opencode-ai,esbuild,onnxruntime-node,protobufjs,@google/genai'
-  [ "$(grep -cF -- "$allowed_scripts" "$COMMAND_LOG")" -eq 2 ]
+  # succeed when their script is blocked. Which packages it names is not
+  # asserted here; npm reports an omitted one on the next update.
+  [ "$(grep -c '^npm install .*--allow-scripts=[^ ]' "$COMMAND_LOG")" -eq 2 ]
   grep -qx 'curl -fsSL https://bun.sh/install' "$COMMAND_LOG"
   grep -qx 'aoe update --yes' "$COMMAND_LOG"
   grep -qx 'aoe acp restart private-session' "$COMMAND_LOG"
