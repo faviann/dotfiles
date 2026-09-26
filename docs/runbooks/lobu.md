@@ -61,7 +61,8 @@ is disabled. The service uses the ordinary home directory, including its
 persisted mapping, without managing that mapping itself.
 
 No inbound route or listening socket is configured. The daemon polls outward.
-Herdr routing and ChatGPT invocation experiments are separate work.
+Herdr routing remains separate work. ChatGPT connector OAuth and the `run_sdk`
+write-path probe have been validated against the self-hosted control plane.
 
 ## Operation and recovery
 
@@ -112,17 +113,22 @@ If installation fails, keep the service stopped until the CLI is repaired. To
 return to the recorded version, install `@lobu/cli@<previous-version>` with the
 same command. Package rollback does not imply credential/state rollback.
 
-## Live acceptance checks (deferred until deployment)
+## Live acceptance status
 
-- Confirm one supervised daemon and the expected device in the self-hosted Lobu
-  control plane.
-- Stop it, wait longer than thirty seconds, and verify it remains inactive; start it.
-- With no device work running, kill only the service's main process using
-  `systemctl --user kill --kill-whom=main --signal=SIGKILL lobu.service`.
-  Confirm a replacement main PID and an increased `NRestarts` using
-  `systemctl --user show lobu.service -p MainPID -p NRestarts`.
-- At a planned reboot, verify startup through the lingering manager using boot
-  journal timestamps and `loginctl show-user faviann -p Linger`.
-- Coordinate LXC rebuild validation with homelab-iac: verify the persistent mount
-  and the same device identity after recreation. Record only identity/status,
-  never credential-file contents.
+Live workstation validation completed on 2026-09-14:
+
+- One supervised daemon reconnects as `headless:workstation` against the
+  self-hosted `homelab` context without creating a duplicate device.
+- An intentional `systemctl --user stop` remains stopped. Killing the service's
+  main process with SIGKILL triggers the configured restart thirty seconds later
+  and increments `NRestarts`.
+- A full workstation reboot starts `lobu.service` through the lingering user
+  manager with the self-hosted-origin precondition satisfied.
+- ChatGPT connector OAuth and the `run_sdk` write-path probe have succeeded
+  against the self-hosted control plane.
+
+One persistence acceptance scenario remains: an intentional workstation LXC
+destroy/recreate has not been exercised end to end. When convenient, coordinate
+that validation with homelab-iac, verify the persistent mount and the same device
+identity after recreation, and record only identity/status — never
+credential-file contents.
