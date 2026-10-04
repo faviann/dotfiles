@@ -55,11 +55,12 @@ disruption consent. If repairing missing tools with active workers cannot
 prompt, run `update-agent-tools --yes` explicitly, then retry
 `workstation-setup`; bootstrap never supplies restart consent on your behalf.
 
-Chezmoi also recovers agent skills on the workstation. If `~/repos/skills` is
-absent, it clones `faviann/skills`; it never updates an existing checkout. The
-repository's reconciler restores supported harness links while leaving
-deprecated skills unlinked. Skill reconciliation runs during `chezmoi apply`,
-never during shell login.
+Chezmoi also recovers agent skills on the workstation. If `~/repos/skillset`
+is absent, it clones `faviann/skillset` and initializes its pinned submodule
+sources; it never updates an existing checkout or its sources. Skillset's
+reconciler then links the skills selected in its `skills.txt` into the
+supported harnesses. Skill reconciliation runs during `chezmoi apply`, never
+during shell login.
 
 Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
 has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`

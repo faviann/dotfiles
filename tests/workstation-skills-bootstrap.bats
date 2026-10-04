@@ -72,10 +72,16 @@ RECONCILER
   exit 0
 fi
 
+if [[ "${1:-}" == -C && "${3:-}" == submodule && "${4:-}" == update &&
+  "${5:-}" == --init && "${6:-}" == --recursive && "${7:-}" == --checkout ]]; then
+  [[ "${GIT_SUBMODULE_FAIL:-false}" != true ]] || exit 24
+  exit 0
+fi
+
 if [[ "${1:-}" == -C && "${3:-}" == rev-parse &&
   "${4:-}" == --show-toplevel ]]; then
   [[ "${GIT_INVALID_CHECKOUT:-false}" != true ]] || exit 128
-  printf '%s\n' "$SKILLS_REPO"
+  printf '%s\n' "$SKILLSET_REPO"
   exit 0
 fi
 
@@ -98,8 +104,9 @@ run_hook() {
     PATH="$bin_dir:$PATH" \
     COMMAND_LOG="$test_dir/commands" \
     BW_PROBE="$test_dir/bw-probe" \
-    SKILLS_REPO="$home/repos/skills" \
+    SKILLSET_REPO="$home/repos/skillset" \
     GIT_CLONE_FAIL="${GIT_CLONE_FAIL:-false}" \
+    GIT_SUBMODULE_FAIL="${GIT_SUBMODULE_FAIL:-false}" \
     GIT_INVALID_CHECKOUT="${GIT_INVALID_CHECKOUT:-false}" \
     RECONCILE_STATUS="${RECONCILE_STATUS:-0}" \
     "$REAL_BASH" "$script"
@@ -113,17 +120,18 @@ run_hook() {
 
   diff -u \
     <(printf '%s\n' \
-      "git clone https://github.com/faviann/skills.git $test_dir/home/repos/skills" \
+      "git clone https://github.com/faviann/skillset.git $test_dir/home/repos/skillset" \
+      "git -C $test_dir/home/repos/skillset submodule update --init --recursive --checkout" \
       reconcile) \
     "$test_dir/commands" \
-    || fail 'bootstrap did not clone and reconcile in order'
+    || fail 'bootstrap did not clone, initialize sources, and reconcile in order'
 }
 
 @test "test_existing_checkout_is_preserved_and_idempotent" {
   local test_dir
   test_dir="$(mktemp -d)"
 
-  make_reconciler "$test_dir/home/repos/skills"
+  make_reconciler "$test_dir/home/repos/skillset"
   run_hook "$test_dir" || fail 'existing checkout reconciliation failed'
   run_hook "$test_dir" || fail 'second reconciliation failed'
 
@@ -133,28 +141,33 @@ run_hook() {
     "$test_dir/commands"; then
     fail 'existing checkout was cloned or updated'
   fi
+  if grep -q ' submodule ' "$test_dir/commands"; then
+    fail 'existing checkout sources were initialized or advanced'
+  fi
 }
 
 @test "test_invalid_existing_path_fails_without_reconciliation" {
   local test_dir
   test_dir="$(mktemp -d)"
 
-  mkdir -p "$test_dir/home/repos/skills"
-  printf 'preserve me\n' >"$test_dir/home/repos/skills/marker"
+  mkdir -p "$test_dir/home/repos/skillset"
+  printf 'preserve me\n' >"$test_dir/home/repos/skillset/marker"
   if GIT_INVALID_CHECKOUT=true run_hook "$test_dir"; then
     fail 'invalid existing path was accepted'
   fi
 
-  [[ "$(cat "$test_dir/home/repos/skills/marker")" == 'preserve me' ]] \
+  [[ "$(cat "$test_dir/home/repos/skillset/marker")" == 'preserve me' ]] \
     || fail 'invalid existing path was mutated'
   ! grep -q '^reconcile$' "$test_dir/commands" \
     || fail 'reconciler ran for an invalid checkout'
 }
 
-@test "test_clone_and_reconciler_failures_propagate" {
+@test "test_clone_source_init_and_reconciler_failures_propagate" {
   local clone_dir
+  local submodule_dir
   local reconcile_dir
   clone_dir="$(mktemp -d)"
+  submodule_dir="$(mktemp -d)"
   reconcile_dir="$(mktemp -d)"
 
   if GIT_CLONE_FAIL=true run_hook "$clone_dir"; then
@@ -163,7 +176,15 @@ run_hook() {
   ! grep -q '^reconcile$' "$clone_dir/commands" \
     || fail 'reconciler ran after clone failure'
 
-  make_reconciler "$reconcile_dir/home/repos/skills"
+  if GIT_SUBMODULE_FAIL=true run_hook "$submodule_dir"; then
+    fail 'source initialization failure was accepted'
+  fi
+  grep -q ' submodule update ' "$submodule_dir/commands" \
+    || fail 'source initialization did not run after clone'
+  ! grep -q '^reconcile$' "$submodule_dir/commands" \
+    || fail 'reconciler ran after source initialization failure'
+
+  make_reconciler "$reconcile_dir/home/repos/skillset"
   if RECONCILE_STATUS=29 run_hook "$reconcile_dir"; then
     fail 'reconciler failure was accepted'
   fi
@@ -173,7 +194,7 @@ run_hook() {
   local test_dir
   test_dir="$(mktemp -d)"
 
-  make_reconciler "$test_dir/home/repos/skills"
+  make_reconciler "$test_dir/home/repos/skillset"
   BW_SESSION=vault-session-token run_hook "$test_dir" \
     || fail 'reconciliation under an unlocked vault session failed'
 
@@ -197,6 +218,6 @@ run_hook() {
   fi
   HOME="$test_dir/home" "$REAL_BASH" "$script" \
     || fail 'non-workstation no-op failed'
-  [[ ! -e "$test_dir/home/repos/skills" ]] \
-    || fail 'non-workstation no-op created a skills checkout'
+  [[ ! -e "$test_dir/home/repos/skillset" ]] \
+    || fail 'non-workstation no-op created a skillset checkout'
 }

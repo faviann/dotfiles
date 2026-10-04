@@ -2,23 +2,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly skills_repo="$HOME/repos/skills"
-readonly skills_url="https://github.com/faviann/skills.git"
-readonly reconciler="$skills_repo/scripts/reconcile-skills.sh"
+readonly skillset_repo="$HOME/repos/skillset"
+readonly skillset_url="https://github.com/faviann/skillset.git"
+readonly reconciler="$skillset_repo/scripts/reconcile-skills.sh"
 
-if [[ -e "$skills_repo" || -L "$skills_repo" ]]; then
-  checkout_root="$(git -C "$skills_repo" rev-parse --show-toplevel 2>/dev/null || true)"
-  if [[ "$checkout_root" != "$skills_repo" ]]; then
-    printf 'error: skills path is not a Git checkout: %s\n' "$skills_repo" >&2
+if [[ -e "$skillset_repo" || -L "$skillset_repo" ]]; then
+  checkout_root="$(git -C "$skillset_repo" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ "$checkout_root" != "$skillset_repo" ]]; then
+    printf 'error: skillset path is not a Git checkout: %s\n' "$skillset_repo" >&2
     exit 1
   fi
 else
-  mkdir -p "$(dirname "$skills_repo")"
-  git clone "$skills_url" "$skills_repo"
+  mkdir -p "$(dirname "$skillset_repo")"
+  git clone "$skillset_url" "$skillset_repo"
+  git -C "$skillset_repo" submodule update --init --recursive --checkout
 fi
 
 if [[ ! -x "$reconciler" ]]; then
-  printf 'error: skills reconciler is missing or not executable: %s\n' \
+  printf 'error: skillset reconciler is missing or not executable: %s\n' \
     "$reconciler" >&2
   exit 1
 fi
