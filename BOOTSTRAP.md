@@ -115,13 +115,77 @@ ssh -T git@github.com
 
 GitHub should identify the account and report that shell access is not provided.
 
-## Optional GitHub CLI Auth
+## GitHub Tokens
 
-If you use `gh`, authenticate without generating or uploading another SSH key:
+On the workstation, HTTPS git and `gh` use two fine-grained personal access
+tokens for the same GitHub account. Each token is a profile. The `main`
+profile's resource owner is the personal account; its Bitwarden item is
+`dotfiles/github-cli-token`, and its live copy is `gh`'s own login. The `work`
+profile's resource owner is the employer organization; its Bitwarden item is
+`dotfiles/github-token-work`, and its live copy is
+`~/.config/github-tokens/work`.
+
+`workstation-setup` logs `gh` in with the `main` token. Other hosts have no
+`work` profile; if you use `gh` there, log in without generating or uploading
+another SSH key:
 
 ```bash
 gh auth login --git-protocol ssh --skip-ssh-key
 ```
+
+Both items keep the token in Notes. The `work` item also needs a custom field
+`owner` containing the organization's login, in GitHub's canonical casing:
+git matches the owner case-sensitively, so remotes must use the same casing.
+The organization name lives only in Bitwarden and in rendered files under
+`$HOME`; this repository is public, so never commit it. Give the `work` token
+read-only Contents, read and write Issues and Pull requests, and read-only
+Actions and Commit statuses.
+
+### Routing
+
+Git's credential configuration is the only routing table. Chezmoi renders a
+`[credential "https://github.com/<owner>"]` section into `~/.gitconfig` that
+sends repositories under the `owner` to `github-token credential work`. Every
+other `github.com` repository uses `gh auth git-credential`, the `main` login.
+
+`~/.local/bin/gh` wraps the Nix `gh` and gives each call the token git's
+configuration assigns to its target repository. Like `gh`, it takes the target
+from `--repo`, the `OWNER/REPO` argument of `repo view` or `repo clone`, a
+`github.com` pull request or issue URL argument, an `api repos/OWNER/REPO/...`
+endpoint, or the checkout's base remote. It does
+not change `gh auth` commands or calls that already have `GH_TOKEN` or
+`GITHUB_TOKEN`. Git operations that `gh` itself runs during a `work`-routed
+call also use the `work` token.
+
+### Rotation and expiry
+
+To replace a token, create the new token on GitHub and run:
+
+```bash
+github-token rotate work    # or: github-token rotate main
+```
+
+The command reads the token from standard input, without echoing it on a
+terminal. It needs an unlocked Bitwarden session. It checks the token with
+GitHub, writes it to the profile's Bitwarden Notes, and syncs Bitwarden. It
+then reloads the live copy: `gh auth login` for `main`, and `chezmoi apply` of
+the token file for `work`. An invalid token leaves Bitwarden unchanged.
+
+At the end of every run, `workstation-update` runs
+`github-token check-expiry`. This prints a warning for each token that expires
+within 7 days or that GitHub rejects. The warnings never fail the update.
+
+### Pull requests from a private fork
+
+A fine-grained token cannot open a pull request from a personal fork into a
+private organization repository. When `gh pr create` targets such a
+repository with the `work` token, the wrapper does not call `gh`. Instead, it
+prints a GitHub compare URL that carries the title and body, followed by
+instructions for an agent. Then it exits with status 3, which `gh` itself
+never uses. Open the URL and click **Create pull request**. Set draft state,
+labels, reviewers, and assignees on that page or after the pull request
+exists. Push the branch to `origin` first; the wrapper refuses to hand off a
+branch that is not on the fork.
 
 ## Day-to-Day Updates
 
