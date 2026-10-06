@@ -43,8 +43,9 @@ workstation-setup
 
 It runs `chezmoi init/update`, applies the `#workstation` Home Manager flake,
 authenticates GitHub CLI from the `dotfiles/github-cli-token` Bitwarden item,
-and validates the expected tools. Home Manager installs the base tools, loads the user units, and hands off to
-`update-agent-tools` if any managed agent command is missing. This installs the
+and validates the expected tools. Home Manager installs the base tools, loads
+the user units, and hands off to `update-agent-tools` if any managed agent
+command is missing. This installs the
 [complete agent toolchain](docs/workstation/toolchain.md) without another
 package-discovery or Ansible step.
 

@@ -182,7 +182,7 @@ STUB
 }
 
 # The updater's other dependencies come from the profile (npm) or Home Manager's
-# own activation PATH (mkdir, ln); these have no other source.
+# own activation PATH (bash, coreutils, grep); these have no other source.
 readonly updater_host_tools=(flock curl unzip)
 
 @test "test_updater_host_tools_are_reachable_from_the_bootstrap_handoff" {

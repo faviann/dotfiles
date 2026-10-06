@@ -69,7 +69,7 @@ STUB
 }
 
 @test "test_arguments_are_rejected_before_changes" {
-  run bash "$COMMAND" --yes
+  run bash "$COMMAND" --check
   [ "$status" -ne 0 ]
   [[ "$output" == *'usage:'* ]]
   [ ! -s "$COMMAND_LOG" ]
