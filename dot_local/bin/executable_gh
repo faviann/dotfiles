@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Routes each gh call to the GitHub token git's credential configuration
+# assigns to the target repository, so gh and git never disagree about which
+# token owns which owner.
+
+# Hand-off exit status for a pull request a person must open in the browser.
+# gh itself uses 1, 2, 4, and 8.
+readonly HANDOFF_STATUS=3
+
+fail() {
+  printf 'gh wrapper: %s\n' "$*" >&2
+  exit 1
+}
+
+# Compares canonical paths, since PATH may reach this wrapper through a symlink.
+real_gh="$(type -aP gh | xargs -rd '\n' realpath \
+  | grep -vxFm1 "$(realpath "${BASH_SOURCE[0]}")")" \
+  || fail 'no gh executable other than this wrapper is on PATH'
+
+# git's `!gh auth git-credential` helper resolves gh through PATH, so a plain
+# `git push` from an org checkout reaches this wrapper and must get the login.
+[[ "${1:-}" != auth ]] || exec "$real_gh" "$@"
+if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
+  exec "$real_gh" "$@"
+fi
+
+readonly OWNER_PATTERN='[A-Za-z0-9-]+'
+readonly REPO_PATTERN='[A-Za-z0-9._-]+'
+readonly API_REPO_PATTERN="^/?repos/($OWNER_PATTERN)/($REPO_PATTERN)(/|[?]|$)"
+readonly ITEM_URL_PATTERN="^https://github\\.com/($OWNER_PATTERN)/($REPO_PATTERN)/(pull|issues)/[0-9]+[^[:space:]]*$"
+readonly PROFILE_HELPER_PATTERN='^!github-token credential ([a-z]+)$'
+
+# Prints OWNER/REPO for a github.com remote URL in https, ssh, or scp form.
+repo_from_url() {
+  local url="$1"
+  local pattern="^(https://([^@/]+@)?github\\.com/|ssh://([^@/]+@)?github\\.com(:22)?/|([^@/:]+@)?github\\.com:)($OWNER_PATTERN)/($REPO_PATTERN)/?$"
+
+  [[ "$url" =~ $pattern ]] || return 1
+  printf '%s/%s' "${BASH_REMATCH[6]}" "${BASH_REMATCH[7]%.git}"
+}
+
+# Prints OWNER/REPO for a gh repository argument: OWNER/REPO,
+# github.com/OWNER/REPO, or a github.com URL.
+repo_from_spec() {
+  local spec="$1"
+  local pattern="^(github\\.com/)?($OWNER_PATTERN)/($REPO_PATTERN)$"
+
+  if [[ "$spec" =~ $pattern ]]; then
+    printf '%s/%s' "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]%.git}"
+    return
+  fi
+  repo_from_url "$spec"
+}
+
+remote_repo() {
+  local url
+
+  url="$(git config --get "remote.$1.url" 2>/dev/null)" || return 1
+  repo_from_url "$url"
+}
+
+# Mirrors gh's base-repository choice for the current checkout.
+checkout_repo() {
+  local name key value
+
+  git rev-parse --git-dir >/dev/null 2>&1 || return 1
+  # `gh repo set-default` stores `base` for the remote's own repository, or
+  # OWNER/REPO for a parent reached through a fork remote.
+  while read -r key value; do
+    name="${key#remote.}"
+    case "$value" in
+      base) remote_repo "${name%.gh-resolved}" && return ;;
+      *) repo_from_spec "$value" && return ;;
+    esac
+  done < <(git config --get-regexp '^remote\..+\.gh-resolved$' 2>/dev/null || true)
+  for name in upstream github origin; do
+    remote_repo "$name" && return
+  done
+  return 1
+}
+
+# Prints the last value given to a flag in any of -X VALUE, --long VALUE, or
+# --long=VALUE form.
+flag_value() {
+  local short="$1" long="$2" found=1 value=''
+  shift 2
+
+  while (( $# > 0 )); do
+    case "$1" in
+      --) break ;;
+      "$short" | "$long")
+        (( $# > 1 )) || break
+        value="$2"
+        found=0
+        shift
+        ;;
+      "$long"=*) value="${1#*=}"; found=0 ;;
+    esac
+    shift
+  done
+  (( found == 0 )) || return 1
+  printf '%s' "$value"
+}
+
+# Prints OWNER/REPO for the repository this gh call targets. Fails when the
+# call names a target that is not a github.com repository or names none and
+# runs outside a github.com checkout.
+target_repo() {
+  local repo_flag arg
+
+  if repo_flag="$(flag_value -R --repo "$@")"; then
+    repo_from_spec "$repo_flag"
+    return
+  fi
+  case "${1:-} ${2:-}" in
+    api\ *)
+      for arg in "${@:2}"; do
+        [[ "$arg" =~ $API_REPO_PATTERN ]] || continue
+        printf '%s/%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+        return
+      done
+      ;;
+    'repo view' | 'repo clone')
+      if [[ -n "${3:-}" && "$3" != -* ]]; then
+        repo_from_spec "$3"
+        return
+      fi
+      ;;
+  esac
+  for arg in "${@:2}"; do
+    [[ "$arg" =~ $ITEM_URL_PATTERN ]] || continue
+    printf '%s/%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return
+  done
+  checkout_repo
+}
+
+# Prints the token of the github-token profile git's credential configuration
+# assigns to the repository. Fails for repositories git sends elsewhere.
+profile_token() {
+  local helper token
+
+  helper="$(git config --get-urlmatch credential.helper "https://github.com/$1")" \
+    || return 1
+  [[ "$helper" =~ $PROFILE_HELPER_PATTERN ]] || return 1
+  token="$(github-token credential "${BASH_REMATCH[1]}" get </dev/null \
+    | sed -n 's/^password=//p')"
+  [[ -n "$token" ]] || return 1
+  printf '%s' "$token"
+}
+
+# Fine-grained tokens cannot open a pull request from a private fork they do
+# not own, so a person opens it from a prepared compare URL instead.
+private_fork_handoff() {
+  local base_repo="$1" token="$2"
+  shift 2
+  local details private default_branch head base fork title body body_file url query
+
+  details="$(GH_TOKEN="$token" "$real_gh" api "repos/$base_repo" \
+    --jq '[.private, .default_branch] | @tsv' 2>/dev/null)" || return 0
+  IFS=$'\t' read -r private default_branch <<<"$details"
+  [[ "$private" == true ]] || return 0
+  # A branch in the base repository itself needs no hand-off.
+  fork="$(remote_repo origin)" || return 0
+  [[ "${fork,,}" != "${base_repo,,}" ]] || return 0
+
+  head="$(flag_value -H --head "$@")" \
+    || head="$(git symbolic-ref --quiet --short HEAD)" \
+    || fail 'cannot determine the head branch; pass --head'
+  head="${head##*:}"
+  base="$(flag_value -B --base "$@")" || base="$default_branch"
+  title="$(flag_value -t --title "$@")" || title=''
+  body="$(flag_value -b --body "$@")" || body=''
+  if body_file="$(flag_value -F --body-file "$@")"; then
+    body="$(cat -- "$body_file")" || fail "cannot read $body_file"
+  fi
+  git ls-remote --exit-code origin "refs/heads/$head" >/dev/null 2>&1 \
+    || fail "branch $head is not on origin ($fork); push it first, then rerun"
+
+  url="https://github.com/$base_repo/compare/$base...${fork%%/*}:${fork#*/}:$head"
+  query="$(jq -rn --arg title "$title" --arg body "$body" \
+    '[["expand", "1"], ["title", $title], ["body", $body]]
+     | map(select(.[1] != "") | "\(.[0])=\(.[1] | @uri)") | join("&")')"
+  printf '%s?%s\n\n' "$url" "$query"
+  cat <<EOF
+$base_repo is private and the head is in the fork $fork, so tokens cannot open this pull request.
+Ask the user to open the link above and click "Create pull request"; draft, labels, and reviewers can be set there or afterwards.
+Then continue with:
+
+  gh pr view --repo $base_repo ${fork%%/*}:$head
+EOF
+  exit "$HANDOFF_STATUS"
+}
+
+repo="$(target_repo "$@")" || exec "$real_gh" "$@"
+token="$(profile_token "$repo")" || exec "$real_gh" "$@"
+if [[ "${1:-} ${2:-}" == 'pr create' ]]; then
+  private_fork_handoff "$repo" "$token" "${@:3}"
+fi
+export GH_TOKEN="$token"
+exec "$real_gh" "$@"
