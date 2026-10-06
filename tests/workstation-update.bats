@@ -30,7 +30,13 @@ setup() {
 printf 'agent-tools %s\n' "$*" >>"$PHASE_LOG"
 [[ "${FAIL_PHASE:-}" != agent-tools ]]
 STUB
-  sed -i "1c #!$(command -v bash)" "$seed/dot_local/bin/executable_update-agent-tools"
+  cat >"$seed/dot_local/bin/executable_github-token" <<'STUB'
+#!/usr/bin/env bash
+printf 'github-token %s\n' "$*" >>"$PHASE_LOG"
+printf 'github-token: warning: the work token expires soon; run github-token rotate work\n' >&2
+[[ "${FAIL_PHASE:-}" != github-token ]]
+STUB
+  sed -i "1c #!$(command -v bash)" "$seed/dot_local/bin/executable_"*
   git -C "$seed" add .
   git -C "$seed" commit --quiet -m initial
   git -C "$seed" remote add origin "$REMOTE_REPO"
@@ -84,7 +90,8 @@ publish_change() {
   diff -u <(printf '%s\n' 'chezmoi source-path' fetch 'chezmoi init' \
     'bw unlock --check' \
     'chezmoi apply --dry-run --verbose --force=false' 'chezmoi apply --force=false' \
-    'chezmoi verify --exclude scripts' workstation-setup 'agent-tools --yes') "$PHASE_LOG"
+    'chezmoi verify --exclude scripts' workstation-setup 'agent-tools --yes' \
+    'github-token check-expiry') "$PHASE_LOG"
 
   # Even unchanged source must retry the configuration owner's reconciliation.
   : >"$PHASE_LOG"
@@ -258,4 +265,14 @@ publish_change() {
   [ "$(cat "$HOME/.applicability")" = "$expected" ]
   grep -q 'is_workstation' "$CHEZMOI_CONFIG_FILE"
   run ! grep -q 'is_lxc' "$CHEZMOI_CONFIG_FILE"
+}
+
+@test "test_workstation_update_completes_despite_token_expiry_warnings_or_failure" {
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'run github-token rotate work'*'Workstation update complete'* ]]
+
+  run env FAIL_PHASE=github-token bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'expiry check failed; continuing'*'Workstation update complete'* ]]
 }
