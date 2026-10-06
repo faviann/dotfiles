@@ -204,18 +204,15 @@ in
     Install.WantedBy = [ "default.target" ];
   };
 
-  # installPackages is what creates the profile this handoff reads from. Ordered
-  # only after reloadSystemd, the handoff ran while ~/.nix-profile was still a
-  # dangling symlink, so every home.packages tool the updater needs — npm, jq —
-  # was missing and activation died on whichever one it probed first.
+  # installPackages creates the profile the updater takes npm from. Before it,
+  # ~/.nix-profile is a dangling symlink and the handoff fails.
   home.activation.bootstrapAgentTools =
-    lib.hm.dag.entryAfter [ "reloadSystemd" "installPackages" ] ''
-      # Supply installer tools from Nix; use the host systemctl for its user session.
-      export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH:/usr/local/bin:/usr/bin:/bin"
+    lib.hm.dag.entryAfter [ "installPackages" ] ''
+      export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH"
 
       _agent_tools_missing=false
       for _agent_tool in \
-        aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
+        bun codex claude pi opencode omp; do
         if ! command -v "$_agent_tool" >/dev/null 2>&1; then
           _agent_tools_missing=true
           break
@@ -223,11 +220,8 @@ in
       done
 
       if [ "$_agent_tools_missing" = true ]; then
-        command -v aoe >/dev/null 2>&1 \
-          || { echo "Agent-tool bootstrap requires chezmoi to install AoE first" >&2; exit 1; }
         command -v update-agent-tools >/dev/null 2>&1 \
           || { echo "Agent-tool bootstrap requires the dotfiles updater" >&2; exit 1; }
-        # Repairing a missing tool does not authorize disrupting existing workers.
         run update-agent-tools
       fi
     '';

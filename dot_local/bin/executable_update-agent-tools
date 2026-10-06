@@ -6,12 +6,7 @@ fail() {
   exit 1
 }
 
-assume_yes=false
-if [[ $# -eq 1 && "$1" == --yes ]]; then
-  assume_yes=true
-elif [[ $# -ne 0 ]]; then
-  fail 'usage: update-agent-tools [--yes]'
-fi
+[[ $# -eq 0 ]] || fail 'usage: update-agent-tools'
 
 prefix="$HOME/.local"
 export PATH="$prefix/bin:$PATH"
@@ -26,9 +21,6 @@ packages=(
   @earendil-works/pi-coding-agent@latest
   opencode-ai@latest
   @oh-my-pi/pi-coding-agent@latest
-  @agentclientprotocol/codex-acp@latest
-  @agentclientprotocol/claude-agent-acp@latest
-  pi-acp@latest
 )
 
 # npm is moving install scripts behind an explicit allowlist and already warns
@@ -48,29 +40,6 @@ allow_scripts=(
 )
 allowed_scripts="$(IFS=,; printf '%s' "${allow_scripts[*]}")"
 
-read_workers() {
-  aoe ps --acp --dead --json | jq -ce '
-    if type == "array" and all(.[];
-      (.session_id | type == "string" and length > 0) and
-      (.pid | type == "number") and
-      (.alive | type == "boolean") and
-      (.build_stale | type == "boolean")
-    ) then . else error("invalid ACP worker inventory") end
-  '
-}
-
-captured="$(read_workers)" || fail 'unable to inspect running ACP sessions'
-captured="$(jq -c '[.[] | select(.alive)] | unique_by([.session_id, .pid])' <<<"$captured")"
-worker_count="$(jq 'length' <<<"$captured")"
-if (( worker_count > 0 )) && [[ "$assume_yes" == false ]]; then
-  [[ -t 0 ]] \
-    || fail "$worker_count running ACP workers would be disrupted; rerun with --yes to authorize replacement"
-  printf 'update-agent-tools: %s running ACP workers would be disrupted. Continue? [y/N] ' "$worker_count" >&2
-  if ! IFS= read -r answer || [[ ! "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
-    fail 'update cancelled'
-  fi
-fi
-
 # npm owns resolution, dependency compatibility, integrity and installation. Its
 # dry run enforces Node engines before replacing any executable. Bun engines are
 # verified by running the harnesses below, using the latest upstream runtime.
@@ -89,51 +58,8 @@ bun --version >/dev/null || fail 'installed Bun does not run on this workstation
 npm install --global --prefix "$prefix" --force=false --engine-strict \
   --allow-scripts="$allowed_scripts" "${packages[@]}" \
   || fail 'npm installation failed'
-aoe update --yes || fail 'AoE update failed'
 
 for harness in opencode omp pi; do
-  "$harness" --version >/dev/null || fail "pre-activation verification failed: $harness"
+  "$harness" --version >/dev/null || fail "verification failed: $harness"
 done
-aoe acp doctor || fail 'pre-activation verification failed: ACP diagnostics'
-
-systemctl --user restart aoe-serve.service || fail 'AoE service restart failed'
-for (( attempt=0; attempt<10; attempt++ )); do
-  if systemctl --user is-active --quiet aoe-serve.service; then
-    break
-  fi
-  sleep 1
-done
-systemctl --user is-active --quiet aoe-serve.service || fail 'AoE service did not start'
-
-# A service restart may already have replaced a worker. Restart only captured
-# workers still present, never sessions created after consent was granted.
-mapfile -t sessions < <(jq -r 'unique_by(.session_id) | .[].session_id' <<<"$captured")
-for session in "${sessions[@]}"; do
-  current="$(read_workers)" || fail 'unable to inspect ACP workers after service restart'
-  if jq -e --arg session "$session" --argjson captured "$captured" '
-    any(.[]; . as $worker | .session_id == $session and .alive and
-      any($captured[]; .session_id == $worker.session_id and .pid == $worker.pid))
-  ' <<<"$current" >/dev/null; then
-    aoe acp restart "$session" || fail 'ACP worker restart failed'
-  fi
-done
-
-# Success means each captured session has a new live, current worker and none of
-# its old workers is still alive. Missing, stale and unchanged workers fail closed.
-for (( attempt=0; attempt<10; attempt++ )); do
-  current="$(read_workers)" || fail 'unable to verify ACP workers'
-  if jq -e --argjson captured "$captured" '
-    . as $current | all($captured[]; . as $before |
-      any($current[]; .session_id == $before.session_id and
-        .pid != $before.pid and .alive and (.build_stale | not)) and
-      all($current[]; .session_id != $before.session_id or
-        .pid != $before.pid or (.alive | not)))
-  ' <<<"$current" >/dev/null \
-    && systemctl --user is-active --quiet aoe-serve.service \
-    && aoe acp doctor; then
-    printf 'Agent tools updated and AoE workers verified.\n'
-    exit 0
-  fi
-  sleep 1
-done
-fail 'post-activation verification failed: AoE service, diagnostics or ACP worker replacement'
+printf 'Agent tools updated.\n'
