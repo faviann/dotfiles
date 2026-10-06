@@ -43,17 +43,13 @@ workstation-setup
 
 It runs `chezmoi init/update`, applies the `#workstation` Home Manager flake,
 authenticates GitHub CLI from the `dotfiles/github-cli-token` Bitwarden item,
-and validates the expected tools. Chezmoi installs AoE first. Home Manager then
-installs the base tools, loads the user units, and hands off to
+and validates the expected tools. Home Manager installs the base tools, loads the user units, and hands off to
 `update-agent-tools` if any managed agent command is missing. This installs the
 [complete agent toolchain](docs/workstation/toolchain.md) without another
 package-discovery or Ansible step.
 
 The bootstrap handoff is part of `workstation-setup`, not SSH login or a
-background schedule. A fresh bootstrap has no ACP workers and needs no
-disruption consent. If repairing missing tools with active workers cannot
-prompt, run `update-agent-tools --yes` explicitly, then retry
-`workstation-setup`; bootstrap never supplies restart consent on your behalf.
+background schedule.
 
 Chezmoi also recovers agent skills on the workstation. If `~/repos/skillset`
 is absent, it clones `faviann/skillset` and initializes its pinned submodule
@@ -191,7 +187,7 @@ branch that is not on the fork.
 
 After bootstrap, use `workstation-update` for routine maintenance. See the
 canonical [workstation maintenance guidance](docs/workstation/maintenance.md)
-for source guards, Bitwarden sessions, restart consent, and failure recovery.
+for source guards, Bitwarden sessions, and failure recovery.
 
 ## Clone ServerManagementScripts
 

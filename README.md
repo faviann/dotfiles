@@ -48,8 +48,7 @@ flake files is repository-only and never applied to a home directory.
 | Component | Document |
 | --- | --- |
 | Home Manager profile, agent toolchain, .NET policy | [toolchain](docs/workstation/toolchain.md) |
-| `workstation-update`, consent, recovery, login ownership | [maintenance](docs/workstation/maintenance.md) |
-| Agent of Empires | [aoe](docs/workstation/aoe.md) |
+| `workstation-update`, recovery, login ownership | [maintenance](docs/workstation/maintenance.md) |
 | herdr | [herdr](docs/workstation/herdr.md) |
 | `dev-session` issue workers | [dev sessions](docs/workstation/dev-sessions.md) |
 | Moraine | [moraine](docs/workstation/moraine.md) |
