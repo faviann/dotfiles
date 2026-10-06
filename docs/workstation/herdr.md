@@ -1,8 +1,6 @@
 # Workstation herdr
 
-[herdr](https://herdr.dev) is a terminal agent multiplexer, installed for
-evaluation alongside [AoE](aoe.md). It is not an AoE replacement: AoE serves
-conversations over HTTP, while herdr is a TUI.
+[herdr](https://herdr.dev) is a terminal agent multiplexer.
 
 - **Install**: `.chezmoiscripts/run_once_install-herdr.sh.tmpl` uses the
   upstream installer until there is a clean Nix package path. herdr is packaged

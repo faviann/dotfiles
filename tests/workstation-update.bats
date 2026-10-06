@@ -84,13 +84,13 @@ publish_change() {
 }
 
 @test "test_workstation_update_reconciles_in_order_and_retries_without_a_success_cache" {
-  run bash "$COMMAND" --yes
+  run bash "$COMMAND"
   [ "$status" -eq 0 ]
   [ "$(cat "$HOME/.managed")" = 'version one' ]
   diff -u <(printf '%s\n' 'chezmoi source-path' fetch 'chezmoi init' \
     'bw unlock --check' \
     'chezmoi apply --dry-run --verbose --force=false' 'chezmoi apply --force=false' \
-    'chezmoi verify --exclude scripts' workstation-setup 'agent-tools --yes' \
+    'chezmoi verify --exclude scripts' workstation-setup 'agent-tools ' \
     'github-token check-expiry') "$PHASE_LOG"
 
   # Even unchanged source must retry the configuration owner's reconciliation.
@@ -115,10 +115,10 @@ publish_change() {
   grep -q '^new-agent-tools $' "$PHASE_LOG"
 }
 
-@test "test_workstation_update_preserves_local_source_content_even_with_yes" {
+@test "test_workstation_update_preserves_local_source_content" {
   for path in dot_managed untracked ignored-local; do
     printf 'operator work\n' >"$SOURCE_REPO/$path"
-    run bash "$COMMAND" --yes
+    run bash "$COMMAND"
     [ "$status" -ne 0 ]
     [[ "$output" == *'source has local content'* ]]
     [ "$(cat "$SOURCE_REPO/$path")" = 'operator work' ]
@@ -195,7 +195,7 @@ publish_change() {
   printf 'operator target work\n' >"$HOME/.managed"
   publish_change
   : >"$PHASE_LOG"
-  run bash "$COMMAND" --yes </dev/null
+  run bash "$COMMAND" </dev/null
   [ "$status" -ne 0 ]
   [ "$(cat "$HOME/.managed")" = 'operator target work' ]
   run ! grep -q '^workstation-setup' "$PHASE_LOG"
@@ -216,7 +216,7 @@ publish_change() {
 }
 
 @test "test_workstation_update_requires_unlocked_credentials_for_unattended_apply" {
-  run env BW_SESSION= bash "$COMMAND" --yes </dev/null
+  run env BW_SESSION= bash "$COMMAND" </dev/null
   [ "$status" -ne 0 ]
   [[ "$output" == *'Bitwarden is locked'* ]]
   run ! grep -q '^chezmoi apply' "$PHASE_LOG"
@@ -236,7 +236,7 @@ publish_change() {
   [[ "$output" == *'setup is incomplete'* ]]
   run bash "$COMMAND" --force
   [ "$status" -ne 0 ]
-  [[ "$output" == *'expected no arguments or --yes'* ]]
+  [[ "$output" == *'expected no arguments'* ]]
   [ ! -e "$PHASE_LOG" ]
 }
 

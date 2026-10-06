@@ -75,8 +75,8 @@ HELPER
   local bin_dir
   test_dir="$(mktemp -d)"
   bin_dir="$test_dir/.local/bin"
+  mkdir -p "$bin_dir"
 
-  make_stub "$bin_dir/aoe"
   printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
   cat >>"$bin_dir/update-agent-tools" <<'STUB'
 set -euo pipefail
@@ -102,7 +102,7 @@ STUB
   bin_dir="$test_dir/.local/bin"
 
   for command in \
-    aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
+    bun codex claude pi opencode omp; do
     make_stub "$bin_dir/$command"
   done
   printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
@@ -130,7 +130,7 @@ STUB
     test_dir="$(mktemp -d)"
     bin_dir="$test_dir/.local/bin"
     for command in \
-      aoe bun codex claude pi opencode omp codex-acp claude-agent-acp pi-acp; do
+      bun codex claude pi opencode omp; do
       if [[ "$command" != "$missing_harness" ]]; then
         make_stub "$bin_dir/$command"
       fi
@@ -158,8 +158,8 @@ STUB
   local bin_dir
   test_dir="$(mktemp -d)"
   bin_dir="$test_dir/.local/bin"
+  mkdir -p "$bin_dir"
 
-  make_stub "$bin_dir/aoe"
   printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
   cat >>"$bin_dir/update-agent-tools" <<'STUB'
 exit 23
@@ -182,7 +182,7 @@ STUB
 }
 
 # The updater's other dependencies come from the profile (npm) or Home Manager's
-# own activation PATH (jq, sed, date, mktemp); these have no other source.
+# own activation PATH (bash, coreutils, grep); these have no other source.
 readonly updater_host_tools=(flock curl unzip)
 
 @test "test_updater_host_tools_are_reachable_from_the_bootstrap_handoff" {
@@ -190,8 +190,8 @@ readonly updater_host_tools=(flock curl unzip)
   local bin_dir
   test_dir="$(mktemp -d)"
   bin_dir="$test_dir/.local/bin"
+  mkdir -p "$bin_dir"
 
-  make_stub "$bin_dir/aoe"
   printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
   cat >>"$bin_dir/update-agent-tools" <<'STUB'
 set -euo pipefail
@@ -207,26 +207,9 @@ STUB
     || fail "handoff ran the updater without $(cat "$test_dir/command-log.missing" 2>/dev/null || printf 'its host tools') on PATH"
 }
 
-# systemctl cannot be probed by running it: Home Manager's activation PATH
-# replaces the environment's own and drops the system directories, and no build
-# sandbox has a systemd to find. The rendering is the assertable part.
-@test "test_bootstrap_handoff_keeps_system_directories_for_systemctl" {
-  local path_line
-
-  path_line="$(activation_script | grep '^export PATH=')" \
-    || fail "the bootstrap handoff no longer exports a PATH"
-
-  [[ "$path_line" == *':/usr/local/bin:/usr/bin:/bin"' ]] \
-    || fail "the handoff PATH lost the system directories systemctl comes from: $path_line"
-  # $PATH stays literal: this asserts the rendered text, not an expansion.
-  # shellcheck disable=SC2016
-  [[ "$path_line" == *'/bin:$PATH:/usr/local/bin'* ]] \
-    || fail "the system directories must come after everything the store supplies"
-}
-
 @test "test_bootstrap_dry_run_does_not_install_missing_tools" {
   local test_dir="$BATS_TEST_TMPDIR/home"
-  make_stub "$test_dir/.local/bin/aoe"
+  mkdir -p "$test_dir/.local/bin"
   # shellcheck disable=SC2016
   printf '#!%s\nprintf installed >"$HOME/installed"\n' "$REAL_BASH" \
     >"$test_dir/.local/bin/update-agent-tools"
@@ -235,27 +218,4 @@ STUB
   TEST_DRY_RUN_CMD=echo TEST_ISOLATE_ACTIVATION_PATH=1 run_activation "$test_dir"
 
   [[ ! -e "$test_dir/installed" ]]
-}
-
-@test "test_bootstrap_cannot_authorize_disruption_of_existing_workers" {
-  local test_dir="$BATS_TEST_TMPDIR/home"
-  local bin_dir="$test_dir/.local/bin"
-  local tool
-  mkdir -p "$bin_dir"
-  for tool in bash mkdir flock jq; do
-    ln -s "$(command -v "$tool")" "$bin_dir/$tool"
-  done
-  sed "1c #!$REAL_BASH" "$REPO_ROOT/dot_local/bin/executable_update-agent-tools" \
-    >"$bin_dir/update-agent-tools"
-  printf '#!%s\n' "$REAL_BASH" >"$bin_dir/aoe"
-  cat >>"$bin_dir/aoe" <<'STUB'
-printf '[{"session_id":"existing-session","pid":123,"alive":true,"build_stale":false}]\n'
-STUB
-  chmod +x "$bin_dir/aoe" "$bin_dir/update-agent-tools"
-
-  TEST_ISOLATE_ACTIVATION_PATH=1 run run_activation "$test_dir" </dev/null
-
-  [[ "$status" -ne 0 ]]
-  [[ "$output" == *'running ACP workers would be disrupted'* ]]
-  [[ "$output" == *'rerun with --yes'* ]]
 }

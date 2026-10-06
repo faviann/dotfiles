@@ -28,11 +28,7 @@ ensure_bitwarden_session() {
     || fail 'credential phase failed: Bitwarden returned an invalid session'
 }
 
-# Only ACP replacement consent is accepted here. Dotfile conflict decisions
-# belong to chezmoi and are never authorized by --yes.
-if (( $# > 1 )) || { (( $# == 1 )) && [[ "$1" != --yes ]]; }; then
-  fail 'expected no arguments or --yes'
-fi
+(( $# == 0 )) || fail 'expected no arguments'
 
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/workstation-update"
 mkdir -p "$state_dir"
@@ -110,7 +106,7 @@ workstation-setup || fail 'workstation-setup failed'
 agent_tools="$HOME/.local/bin/update-agent-tools"
 [[ -x "$agent_tools" ]] || fail 'managed update-agent-tools is not executable'
 printf 'Agent tools: updating...\n'
-"$agent_tools" "$@" || fail 'update-agent-tools failed'
+"$agent_tools" || fail 'update-agent-tools failed'
 # Token expiry is advisory; a failed check must not fail the update.
 "$HOME/.local/bin/github-token" check-expiry \
   || printf 'workstation-update: GitHub token expiry check failed; continuing\n' >&2
