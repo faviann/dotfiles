@@ -145,9 +145,6 @@
             workstationHomeConfiguration.config.systemd.user.sockets.collie-origin-forwarder;
           collieOriginService =
             workstationHomeConfiguration.config.systemd.user.services.collie-origin-forwarder;
-          aoeLanProxySocket = workstationHomeConfiguration.config.systemd.user.sockets.aoe-lan-proxy;
-          aoeLanProxyService = workstationHomeConfiguration.config.systemd.user.services.aoe-lan-proxy;
-          aoeServeService = workstationHomeConfiguration.config.systemd.user.services.aoe-serve;
           herdrService = workstationHomeConfiguration.config.systemd.user.services.herdr;
           lobuService = workstationHomeConfiguration.config.systemd.user.services.lobu;
           lobuBootstrap = workstationHomeConfiguration.config.home.activation.bootstrapLobu;
