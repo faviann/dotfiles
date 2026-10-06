@@ -29,3 +29,8 @@ home/**
 .config/fish/
 .config/fish/**
 {{- end }}
+
+{{- if not .is_workstation }}
+.config/github-tokens/
+.config/github-tokens/**
+{{- end }}

@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# A caller's environment token would shadow the stored main token everywhere
+# below; this command always speaks about the stored tokens.
+unset GH_TOKEN GITHUB_TOKEN
+
+readonly PROFILES=(main work)
+readonly WORK_TOKEN_FILE="$HOME/.config/github-tokens/work"
+
+fail() {
+  printf 'github-token: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  fail 'usage: github-token credential PROFILE ACTION | rotate PROFILE | check-expiry'
+}
+
+# The profile registry. Each profile names its Bitwarden item, how to read its
+# live token, and how to reload the live token from Bitwarden.
+select_profile() {
+  case "$1" in
+    main)
+      profile_item=dotfiles/github-cli-token
+      read_live_token() { gh auth token --hostname github.com; }
+      reload_live_token() {
+        bitwarden_notes | gh auth login --hostname github.com --with-token
+      }
+      ;;
+    work)
+      profile_item=dotfiles/github-token-work
+      read_live_token() { cat "$WORK_TOKEN_FILE"; }
+      reload_live_token() { chezmoi apply "$WORK_TOKEN_FILE"; }
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  profile="$1"
+}
+
+require_profile() {
+  [[ $# -eq 1 ]] || usage
+  select_profile "$1" || fail "unknown profile $1; expected one of: ${PROFILES[*]}"
+}
+
+live_token() {
+  local token
+
+  token="$(read_live_token 2>/dev/null)" || return 1
+  token="${token//[[:space:]]/}"
+  [[ -n "$token" ]] || return 1
+  printf '%s' "$token"
+}
+
+# Sets http_status and token_expiry from GitHub's view of the token. An empty
+# http_status means GitHub could not be reached.
+inspect_token() {
+  local response line
+
+  http_status=''
+  token_expiry=''
+  response="$(GH_TOKEN="$1" gh api -i user 2>/dev/null)" || true
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    [[ -n "$line" ]] || break
+    if [[ "$line" =~ ^HTTP/[0-9.]+\ ([0-9]{3}) ]]; then
+      http_status="${BASH_REMATCH[1]}"
+    elif [[ "${line%%:*}" == [Gg]ithub-[Aa]uthentication-[Tt]oken-[Ee]xpiration ]]; then
+      token_expiry="${line#*:}"
+      token_expiry="${token_expiry# }"
+    fi
+  done <<<"$response"
+}
+
+credential() {
+  local token
+
+  [[ $# -eq 2 ]] || usage
+  require_profile "$1"
+  # Git writes the request on stdin; consume it so git never sees a broken pipe.
+  cat >/dev/null
+  [[ "$2" == get ]] || return 0
+  # Printing nothing lets git fail with its own missing-credential error.
+  token="$(live_token)" || return 0
+  printf 'username=x-access-token\npassword=%s\n' "$token"
+}
+
+ensure_bitwarden_session() {
+  command -v bw >/dev/null 2>&1 || fail 'Bitwarden CLI is missing'
+  bw unlock --check >/dev/null 2>&1 \
+    || fail "Bitwarden is locked; run: export BW_SESSION=\$(bw unlock --raw)"
+}
+
+bitwarden_notes() {
+  bw get item "$item_id" | jq -r '.notes'
+}
+
+rotate() {
+  local new_token
+
+  require_profile "$@"
+  if [[ -t 0 ]]; then
+    IFS= read -rsp "New $profile GitHub token: " new_token
+    printf '\n' >&2
+  else
+    IFS= read -r new_token || true
+  fi
+  new_token="${new_token//[[:space:]]/}"
+  [[ -n "$new_token" ]] || fail 'no token entered'
+
+  inspect_token "$new_token"
+  [[ "$http_status" == 200 ]] \
+    || fail "GitHub rejected the new token (HTTP ${http_status:-unreachable}); Bitwarden is unchanged"
+  [[ -n "$token_expiry" ]] \
+    || fail 'GitHub reported no expiry for the new token; expected a fine-grained token'
+
+  ensure_bitwarden_session
+  item_id="$(bw get item "$profile_item" | jq -r .id)" \
+    || fail "cannot find Bitwarden item $profile_item"
+  # The token travels through the environment, never argv, which other local
+  # users can read.
+  bw get item "$item_id" \
+    | NEW_TOKEN="$new_token" jq '.notes = env.NEW_TOKEN' \
+    | bw encode \
+    | bw edit item "$item_id" >/dev/null \
+    || fail "cannot update Bitwarden item $profile_item"
+  bw sync >/dev/null || fail 'Bitwarden sync failed'
+  reload_live_token >/dev/null || fail "cannot reload the $profile token from Bitwarden"
+
+  [[ "$(live_token)" == "$new_token" ]] \
+    || fail "the live $profile token does not match Bitwarden after reload"
+  printf 'github-token: %s token rotated; expires %s\n' "$profile" "$token_expiry"
+}
+
+# Warnings only: this runs inside routine maintenance and must never fail it.
+check_expiry() {
+  local name token expiry_epoch now
+
+  [[ $# -eq 0 ]] || usage
+  now="$(date +%s)"
+
+  for name in "${PROFILES[@]}"; do
+    select_profile "$name"
+    token="$(live_token)" || continue
+    inspect_token "$token"
+    case "$http_status" in
+      200)
+        [[ -n "$token_expiry" ]] || continue
+        expiry_epoch="$(date -d "$token_expiry" +%s 2>/dev/null)" || continue
+        if (( expiry_epoch - now <= 7 * 86400 )); then
+          printf 'github-token: warning: the %s token expires %s; run github-token rotate %s\n' \
+            "$name" "$token_expiry" "$name" >&2
+        fi
+        ;;
+      401)
+        printf 'github-token: warning: GitHub rejects the %s token as invalid or expired; run github-token rotate %s\n' \
+          "$name" "$name" >&2
+        ;;
+    esac
+  done
+}
+
+(( $# > 0 )) || usage
+command="$1"
+shift
+case "$command" in
+  credential) credential "$@" ;;
+  rotate) rotate "$@" ;;
+  check-expiry) check_expiry "$@" ;;
+  *) usage ;;
+esac
