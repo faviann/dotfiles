@@ -68,7 +68,7 @@ run_chezmoi() {
   managed_file="$test_dir/managed"
   ignored_file="$test_dir/ignored"
   mkdir -p "$source_dir/docs" "$source_dir/tests" "$source_dir/scripts" \
-    "$source_dir/home" "$source_dir/.github/workflows" \
+    "$source_dir/home" "$source_dir/packages" "$source_dir/.github/workflows" \
     "$source_dir/dot_local/bin" "$destination_dir"
   cp "$REPO_ROOT/.chezmoiignore" "$source_dir/.chezmoiignore"
 
@@ -76,7 +76,7 @@ run_chezmoi() {
     README.md BOOTSTRAP.md AGENTS.md CLAUDE.md CONTRIBUTING.md \
     CONTEXT.md CONTEXT-MAP.md docs/guide.md tests/inventory.bats \
     scripts/update-dotnet-sdk .github/workflows/update-dotnet-sdk.yml \
-    flake.nix flake.lock home/workstation.nix; do
+    flake.nix flake.lock home/workstation.nix packages/moraine.nix; do
     printf 'repository only\n' >"$source_dir/$path"
   done
   printf 'intentional login profile\n' >"$source_dir/dot_bash_profile"
@@ -101,10 +101,11 @@ run_chezmoi() {
   done
   for path in \
     docs/guide.md tests/inventory.bats scripts/update-dotnet-sdk \
-    .github/workflows/update-dotnet-sdk.yml home/workstation.nix; do
+    .github/workflows/update-dotnet-sdk.yml home/workstation.nix \
+    packages/moraine.nix; do
     assert_lacks_line "$path" "$managed_file"
   done
-  for path in docs tests scripts home; do
+  for path in docs tests scripts home packages; do
     assert_has_line "$path" "$ignored_file"
   done
   assert_has_line '.bash_profile' "$managed_file"
