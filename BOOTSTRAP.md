@@ -64,6 +64,17 @@ has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
 before enabling the bind mount. For Collie's service-regeneration prerequisites
 and retry command, see [recovery after an LXC rebuild](docs/runbooks/collie.md#recovery-after-an-lxc-rebuild).
 
+Setup does not log in Azure CLI. There is no service principal, so agents act as
+your own account. Log in once; the session in `~/.azure` persists until it goes
+unused for about 90 days:
+
+```bash
+az login --use-device-code --tenant <tenant-id-or-domain>
+```
+
+Pass `--tenant`: the device-login page's "Sign in to an organization" option
+404s on `/common/oauth2/undefined`.
+
 ## Bitwarden SSH Key Item
 
 Create or maintain one Bitwarden item named:

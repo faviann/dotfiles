@@ -10,10 +10,10 @@ home-manager build --flake .#workstation
 
 ## Base tools
 
-The .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, `jq`, `ripgrep`, `fd`, `fzf`,
-Hermes, and Moraine. Hermes is installed from `github:NousResearch/hermes-agent`
-as a normal non-NixOS package; provider credentials and runtime configuration
-stay in `~/.hermes`.
+The .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, Azure CLI (`az`), `jq`,
+`ripgrep`, `fd`, `fzf`, Hermes, and Moraine. Hermes is installed from
+`github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
+credentials and runtime configuration stay in `~/.hermes`.
 
 Home Manager provides Node/npm and writes the npm prefix as
 `/home/faviann/.local`; all npm-managed commands resolve from `~/.local/bin`.

@@ -99,6 +99,7 @@ in
     nodejs
     uv
     gh
+    azure-cli
     jq
     ripgrep
     fd
