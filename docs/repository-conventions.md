@@ -3,9 +3,9 @@
 ## Repository-only files
 
 [`.chezmoiignore`](../.chezmoiignore) excludes repository documentation, tests,
-scripts, `flake.nix`, `flake.lock`, and `home/` from chezmoi's home-directory
-targets. Match target paths, not encoded source names (for example,
-`.config/fish`, not `dot_config/fish`). Excluding an entire subtree requires
+scripts, `flake.nix`, `flake.lock`, `home/`, and `packages/` from chezmoi's
+home-directory targets. Match target paths, not encoded source names (for
+example, `.config/fish`, not `dot_config/fish`). Excluding an entire subtree requires
 both its directory and contents patterns, such as `docs/` and `docs/**`.
 
 Git and chezmoi exclusions are independent: `.chezmoiignore` does not prevent

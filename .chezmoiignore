@@ -24,6 +24,8 @@ flake.nix
 flake.lock
 home/
 home/**
+packages/
+packages/**
 
 {{- if .is_workstation }}
 .config/fish/
