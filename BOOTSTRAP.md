@@ -27,8 +27,8 @@ chezmoi can render one from Bitwarden.
 chezmoi init --apply https://github.com/faviann/dotfiles.git
 ```
 
-After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`, and
-`~/.ssh/known_hosts`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
+After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
+`~/.ssh/known_hosts`, and the Ansible controller key pair in `~/.ansible/ssh/`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
 does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
 
@@ -80,6 +80,25 @@ The item must contain:
 Keep the private key only in the item notes. Do not duplicate it into docs,
 Ansible vars, shell history, or plaintext files. For later replacement, use the
 [SSH key rotation procedure](docs/ssh-key-rotation.md).
+
+## Bitwarden Ansible Controller Key Item
+
+homelab-iac authenticates to managed hosts with `~/.ansible/ssh/proxmox_lxc`.
+Every LXC in the fleet trusts this key, so a regenerated key would lock the
+controller out. Keep it in one Bitwarden item named:
+
+```text
+dotfiles/proxmox-lxc-ssh-key
+```
+
+The item must contain:
+
+- Notes: the private OpenSSH key for `~/.ansible/ssh/proxmox_lxc`
+- Custom field `public_key`: the matching public key for
+  `~/.ansible/ssh/proxmox_lxc.pub`
+
+Check the rendered pair the same way as the workstation key, with
+`~/.ansible/ssh/proxmox_lxc` in place of `~/.ssh/id_ed25519`.
 
 ## GitHub Registration
 
