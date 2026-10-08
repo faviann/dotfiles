@@ -30,8 +30,12 @@ Herdr, after finishing pane work:
 ```bash
 systemctl --user stop herdr.service
 herdr update
+chezmoi apply
 systemctl --user start herdr.service
 ```
+
+`chezmoi apply` reinstalls agent integrations the new Herdr reports as
+outdated; without current integrations, restored agent panes do not resume.
 
 ## Restore behavior
 

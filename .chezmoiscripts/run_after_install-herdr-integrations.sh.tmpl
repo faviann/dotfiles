@@ -1,0 +1,29 @@
+{{- if .is_workstation -}}
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Herdr resumes an agent pane after a server restart only through that agent's
+# integration. Install refuses until the agent's config directory exists, so
+# create it rather than wait for the agent's first launch; the directory holds
+# credentials once the agent runs. Reinstalling whatever Herdr no longer reports
+# as current is also how a Herdr update reaches the integrations.
+integrations=(
+  claude:.claude
+  codex:.codex
+  pi:.pi/agent
+  omp:.omp/agent
+  opencode:.config/opencode
+)
+
+# The Herdr installer's destination; a bootstrap shell may not have it on PATH.
+export PATH="$HOME/.local/bin:$PATH"
+status="$(herdr integration status)"
+for integration in "${integrations[@]}"; do
+  target="${integration%%:*}"
+  if grep -q "^$target: current " <<<"$status"; then
+    continue
+  fi
+  (umask 077 && mkdir -p "$HOME/${integration#*:}")
+  herdr integration install "$target"
+done
+{{- end }}
