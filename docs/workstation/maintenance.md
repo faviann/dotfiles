@@ -25,18 +25,31 @@ commands, not arbitrary concurrent Git commands or editors.
 publication happen through the dedicated GitHub workflow; maintenance delivers
 that validated commit through the same path as other workstation changes.
 
-## Source guards and credentials
+## Source guards
 
-The command refuses unsafe source states such as local content, a non-canonical
-origin, the wrong branch or upstream, and ahead or diverged history. It does
-not reset or discard local work.
+The command requires a clean canonical `main` checkout tracking `origin/main`.
+Local content, a different origin or upstream, and ahead or diverged history
+stop the update for manual resolution.
 
-When applying Bitwarden-backed templates, the command reuses a valid
-`BW_SESSION`. If the vault is locked during an interactive update, it prompts
-once and shares the resulting session with preview, apply, and verification.
-Unattended runs must export a valid session before invoking the updater.
-Chezmoi lifecycle scripts run and must succeed during apply; post-apply
-verification checks durable targets without rerunning those actions.
+## Secrets
+
+With Bitwarden locked, press Enter to keep existing secret-backed files. A valid
+`BW_SESSION` refreshes them automatically. Run `workstation-update --help` for
+explicit skip and refresh options.
+
+Missing, empty, or unreadable secret-backed files require unlocking; the command
+lists them before prompting. Unattended runs keep existing files when locked,
+but require an exported `BW_SESSION` when files need restoring.
+
+Skipping preserves **entire files**, including workstation `.gitconfig`, and
+excludes them from verification. Their nonsecret changes are deferred too.
+Use `--refresh-secrets` after rotation or credential failures: file presence
+alone cannot establish validity.
+
+Each phase announces its work. Completion reports deferred secret refreshes;
+preview output omits file contents to keep credentials out of terminal logs.
+Chezmoi lifecycle scripts must succeed during apply; verification checks files
+without rerunning those scripts.
 
 ## Failure recovery
 

@@ -2,7 +2,7 @@
 
 setup() {
   bats_require_minimum_version 1.5.0
-  COMMAND="$BATS_TEST_DIRNAME/../dot_local/bin/executable_workstation-update"
+  export COMMAND="$BATS_TEST_DIRNAME/../dot_local/bin/executable_workstation-update"
   export HOME="$BATS_TEST_TMPDIR/home"
   export XDG_STATE_HOME="$HOME/state"
   export XDG_CACHE_HOME="$HOME/cache" XDG_CONFIG_HOME="$HOME/config"
@@ -55,14 +55,23 @@ STUB
   cat >"$BATS_TEST_TMPDIR/bin/bw" <<'STUB'
 #!/usr/bin/env bash
 printf 'bw %s\n' "$*" >>"$PHASE_LOG"
-[[ "$*" == 'unlock --check' && "${BW_SESSION:-}" == fixture-session ]]
+case "$*" in
+  'unlock --check') [[ "${BW_SESSION:-}" == fixture-session ]] ;;
+  'unlock --raw')
+    [[ "${FAIL_UNLOCK:-}" != 1 ]] || exit 1
+    printf 'fixture-session\n' ;;
+  'get item fixture')
+    [[ "${BW_SESSION:-}" == fixture-session ]] || exit 1
+    printf '{"notes":"refreshed-secret","fields":[{"name":"owner","value":"work-owner"}]}\n' ;;
+  *) exit 1 ;;
+esac
 STUB
   cat >"$BATS_TEST_TMPDIR/bin/chezmoi" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'chezmoi %s\n' "$*" >>"$PHASE_LOG"
 [[ "${FAIL_PHASE:-}" != "$1" ]] || exit 1
-"$REAL_CHEZMOI" --source "$SOURCE_REPO" --destination "$HOME" \
+"$REAL_CHEZMOI" --color=false --progress=false --source "$SOURCE_REPO" --destination "$HOME" \
   --config "${CHEZMOI_CONFIG_FILE:-/dev/null}" --config-format toml \
   --persistent-state "$XDG_STATE_HOME/chezmoi.boltdb" "$@"
 STUB
@@ -87,11 +96,10 @@ publish_change() {
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
   [ "$(cat "$HOME/.managed")" = 'version one' ]
-  diff -u <(printf '%s\n' 'chezmoi source-path' fetch 'chezmoi init' \
-    'bw unlock --check' \
-    'chezmoi apply --dry-run --verbose --force=false' 'chezmoi apply --force=false' \
-    'chezmoi verify --exclude scripts' workstation-setup 'agent-tools ' \
-    'github-token check-expiry') "$PHASE_LOG"
+  local phases
+  phases="$(cat "$PHASE_LOG")"
+  [[ "$phases" == *fetch*'chezmoi init'*'chezmoi apply'*'chezmoi verify'*workstation-setup*agent-tools*'github-token check-expiry'* ]]
+  run ! grep -q '^bw ' "$PHASE_LOG"
 
   # Even unchanged source must retry the configuration owner's reconciliation.
   : >"$PHASE_LOG"
@@ -215,11 +223,140 @@ publish_change() {
   done
 }
 
-@test "test_workstation_update_requires_unlocked_credentials_for_unattended_apply" {
+publish_secret_templates() {
+  printf '{{ (bitwarden "item" "fixture").notes }}\n' >"$seed/private_dot_secret.tmpl"
+  printf 'owner={{ (bitwardenFields "item" "fixture").owner.value }}\n' >"$seed/dot_routing.tmpl"
+  git -C "$seed" add .
+  git -C "$seed" commit --quiet -m 'add secret-backed files'
+  git -C "$seed" push --quiet
+}
+
+@test "test_workstation_update_requires_unlock_for_missing_or_empty_secret_files" {
+  publish_secret_templates
+  printf 'existing routing\n' >"$HOME/.routing"
+  for state in missing empty directory broken-symlink; do
+    case "$state" in
+      empty) touch "$HOME/.secret" ;;
+      directory) mkdir "$HOME/.secret" ;;
+      broken-symlink) rmdir "$HOME/.secret"; ln -s absent "$HOME/.secret" ;;
+    esac
+    : >"$PHASE_LOG"
+    run env BW_SESSION= bash "$COMMAND" </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'unlocking is required'*'~/.secret'*'Bitwarden is locked'* ]]
+    run ! grep -q '^chezmoi apply' "$PHASE_LOG"
+    run env BW_SESSION= bash "$COMMAND" --skip-secrets </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'cannot skip required secrets'* ]]
+    [[ "$state" != empty ]] || rm "$HOME/.secret"
+  done
+}
+
+@test "test_workstation_update_keeps_existing_secrets_when_locked_and_reports_progress" {
+  publish_secret_templates
+  printf 'existing secret\n' >"$HOME/.secret"
+  printf 'existing routing\n' >"$HOME/.routing"
   run env BW_SESSION= bash "$COMMAND" </dev/null
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.secret")" = 'existing secret' ]
+  [ "$(cat "$HOME/.routing")" = 'existing routing' ]
+  [ "$(cat "$HOME/.managed")" = 'version one' ]
+  [[ "$output" == *'[1/9]'*'[2/9]'*'[3/9]'*'[4/9]'*'[5/9]'*'[6/9]'*'[7/9]'*'[8/9]'*'[9/9]'*'refresh deferred'* ]]
+  [[ "$output" != *'existing secret'* ]]
+  run ! grep -q '^bw get\|^bw unlock --raw' "$PHASE_LOG"
+}
+
+@test "test_workstation_update_can_skip_even_with_an_unlocked_session" {
+  publish_secret_templates
+  printf 'existing secret\n' >"$HOME/.secret"
+  printf 'existing routing\n' >"$HOME/.routing"
+  run bash "$COMMAND" --skip-secrets
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.secret")" = 'existing secret' ]
+  run ! grep -q '^bw ' "$PHASE_LOG"
+}
+
+@test "test_workstation_update_refreshes_secrets_with_a_valid_session_without_printing_them" {
+  publish_secret_templates
+  run bash "$COMMAND" --refresh-secrets
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.secret")" = refreshed-secret ]
+  [ "$(cat "$HOME/.routing")" = owner=work-owner ]
+  [[ "$output" != *'refreshed-secret'* ]]
+  [[ "$output" != *'refresh deferred'* ]]
+  run ! grep -q '^bw unlock --raw' "$PHASE_LOG"
+
+  run env BW_SESSION= bash "$COMMAND" --refresh-secrets </dev/null
   [ "$status" -ne 0 ]
   [[ "$output" == *'Bitwarden is locked'* ]]
+}
+
+interactive_update() {
+  local transcript="$BATS_TEST_TMPDIR/terminal"
+  : >"$transcript"
+  # Answer after fetch, which can consume terminal input. One deadline covers
+  # both the responder and updater; TERM=dumb avoids terminal color queries.
+  # shellcheck disable=SC2016
+  timeout 20s bash -c '
+    {
+      until grep -Fq "Unlock and refresh secrets?" "$2"; do
+        sleep 0.05
+      done
+      printf "%s\n" "$1"
+    } | env TERM=dumb BW_SESSION= script -q -e -f -O "$2" -c "bash \"\$COMMAND\""
+  ' bash "$1" "$transcript"
+}
+
+@test "test_workstation_update_interactive_enter_skips_and_yes_unlocks_once" {
+  publish_secret_templates
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  : >"$PHASE_LOG"
+  run interactive_update ''
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Unlock and refresh secrets? [y/N]'*'refresh deferred'* ]]
+  [ "$(cat "$HOME/.secret")" = refreshed-secret ]
+  run ! grep -q '^bw unlock --raw' "$PHASE_LOG"
+
+  : >"$PHASE_LOG"
+  run interactive_update y
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.secret")" = refreshed-secret ]
+  [ "$(grep -c '^bw unlock --raw' "$PHASE_LOG")" -eq 1 ]
+  [[ "$output" == *'unlocking Bitwarden to refresh'* ]]
+  [[ "$output" != *'fixture-session'* ]]
+}
+
+@test "test_workstation_update_explains_required_interactive_unlock_and_stops_on_failure" {
+  publish_secret_templates
+  # The child shell expands COMMAND from the environment.
+  # shellcheck disable=SC2016
+  run env TERM=dumb BW_SESSION= FAIL_UNLOCK=1 timeout 20s script -q -e -c 'bash "$COMMAND"' /dev/null </dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'unlocking is required'*'unlocking Bitwarden'*'Bitwarden unlock failed'* ]]
+  [[ "$output" != *'Unlock and refresh secrets?'* ]]
   run ! grep -q '^chezmoi apply' "$PHASE_LOG"
+
+  # The child shell expands COMMAND from the environment.
+  # shellcheck disable=SC2016
+  run env TERM=dumb BW_SESSION= timeout 20s script -q -e -c 'bash "$COMMAND"' /dev/null </dev/null
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.secret")" = refreshed-secret ]
+}
+
+@test "test_workstation_update_secret_inventory_respects_ignores_and_template_conditions" {
+  printf '.ignored-secret\n' >"$seed/.chezmoiignore"
+  printf '{{ (bitwarden "item" "fixture").notes }}\n' >"$seed/dot_ignored-secret.tmpl"
+  printf '{{ if false }}{{ (bitwarden "item" "fixture").notes }}{{ else }}ordinary{{ end }}\n' \
+    >"$seed/dot_conditional.tmpl"
+  publish_secret_templates
+  printf 'existing secret\n' >"$HOME/.secret"
+  printf 'existing routing\n' >"$HOME/.routing"
+  run env BW_SESSION= bash "$COMMAND" </dev/null
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.conditional")" = ordinary ]
+  [ ! -e "$HOME/.ignored-secret" ]
+  [[ "$output" != *'unlocking is required'* ]]
 }
 
 @test "test_workstation_update_rejects_concurrency_incomplete_setup_and_unknown_arguments" {
@@ -236,7 +373,7 @@ publish_change() {
   [[ "$output" == *'setup is incomplete'* ]]
   run bash "$COMMAND" --force
   [ "$status" -ne 0 ]
-  [[ "$output" == *'expected no arguments'* ]]
+  [[ "$output" == *'usage: workstation-update'* ]]
   [ ! -e "$PHASE_LOG" ]
 }
 
