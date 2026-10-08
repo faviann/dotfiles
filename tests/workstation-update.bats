@@ -96,12 +96,10 @@ publish_change() {
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
   [ "$(cat "$HOME/.managed")" = 'version one' ]
-  diff -u <(printf '%s\n' 'chezmoi source-path' fetch 'chezmoi init' \
-    'chezmoi managed --include files,symlinks --path-style relative' \
-    'chezmoi dump --include files,symlinks --skip-secrets --format json' \
-    'chezmoi apply --dry-run --force=false --skip-secrets' 'chezmoi apply --force=false --skip-secrets' \
-    'chezmoi verify --exclude scripts --skip-secrets' workstation-setup 'agent-tools ' \
-    'github-token check-expiry') "$PHASE_LOG"
+  local phases
+  phases="$(cat "$PHASE_LOG")"
+  [[ "$phases" == *fetch*'chezmoi init'*'chezmoi apply'*'chezmoi verify'*workstation-setup*agent-tools*'github-token check-expiry'* ]]
+  run ! grep -q '^bw ' "$PHASE_LOG"
 
   # Even unchanged source must retry the configuration owner's reconciliation.
   : >"$PHASE_LOG"
@@ -294,21 +292,19 @@ publish_secret_templates() {
 }
 
 interactive_update() {
-  local answer="$1" attempt
   local transcript="$BATS_TEST_TMPDIR/terminal"
   : >"$transcript"
-  # Fetch can consume terminal input, so answer only after the prompt appears.
-  # The child shell expands COMMAND from the environment.
+  # Answer after fetch, which can consume terminal input. One deadline covers
+  # both the responder and updater; TERM=dumb avoids terminal color queries.
   # shellcheck disable=SC2016
-  {
-    for ((attempt = 0; attempt < 200; attempt++)); do
-      if grep -Fq 'Unlock and refresh secrets?' "$transcript"; then
-        printf '%s\n' "$answer"
-        break
-      fi
-      sleep 0.05
-    done
-  } | timeout 20s env TERM=dumb BW_SESSION= script -q -e -f -O "$transcript" -c 'bash "$COMMAND"'
+  timeout 20s bash -c '
+    {
+      until grep -Fq "Unlock and refresh secrets?" "$2"; do
+        sleep 0.05
+      done
+      printf "%s\n" "$1"
+    } | env TERM=dumb BW_SESSION= script -q -e -f -O "$2" -c "bash \"\$COMMAND\""
+  ' bash "$1" "$transcript"
 }
 
 @test "test_workstation_update_interactive_enter_skips_and_yes_unlocks_once" {

@@ -25,43 +25,31 @@ commands, not arbitrary concurrent Git commands or editors.
 publication happen through the dedicated GitHub workflow; maintenance delivers
 that validated commit through the same path as other workstation changes.
 
-## Source guards and credentials
+## Source guards
 
-The command refuses unsafe source states such as local content, a non-canonical
-origin, the wrong branch or upstream, and ahead or diverged history. It does
-not reset or discard local work.
+The command requires a clean canonical `main` checkout tracking `origin/main`.
+Local content, a different origin or upstream, and ahead or diverged history
+stop the update for manual resolution.
 
-Each phase announces its work before starting: source update, chezmoi
-configuration, secrets, preview, apply, verification, workstation configuration,
-agent tools, and token expiry. Preview checks changes without printing rendered
-file contents, which can contain credentials.
+## Secrets
 
-The command discovers secret-backed files through chezmoi's
-[`--skip-secrets`](https://www.chezmoi.io/reference/command-line-flags/global/#--skip-secrets)
-rendering, respecting host conditions and ignored targets. It lists the affected
-paths without reading their credentials. A valid `BW_SESSION` is reused. If
-Bitwarden is locked and all those files are readable and nonempty, the prompt
-`Unlock and refresh secrets? [y/N]` lets you press Enter to keep them. Unattended
-runs keep those files automatically when the vault is locked.
-
-- `workstation-update --skip-secrets` keeps existing secret-backed files without
-  prompting or contacting Bitwarden, even with an unlocked session.
-- `workstation-update --refresh-secrets` requires a vault session and refreshes
-  secret-backed files along with the other targets.
+With Bitwarden locked, press Enter to keep existing secret-backed files. A valid
+`BW_SESSION` refreshes them automatically. Run `workstation-update --help` for
+explicit skip and refresh options.
 
 Missing, empty, or unreadable secret-backed files require unlocking; the command
-names them before prompting. `--skip-secrets` fails in that situation. An
-unattended run requiring secrets must export a valid `BW_SESSION` first.
-Interactive unlocking happens once and shares the session with preview, apply,
-and verification.
+lists them before prompting. Unattended runs keep existing files when locked,
+but require an exported `BW_SESSION` when files need restoring.
 
-Skipping preserves entire files, including `.gitconfig` on the workstation;
-changes to their nonsecret settings are deferred too. Skipped files are excluded
-from verification, and the completion message explicitly reports the deferral.
-File presence does not prove a token or key is current or valid: use
-`--refresh-secrets` after rotation or when credentials stop working.
-Chezmoi lifecycle scripts run and must succeed during apply; post-apply
-verification checks durable targets without rerunning those actions.
+Skipping preserves **entire files**, including workstation `.gitconfig`, and
+excludes them from verification. Their nonsecret changes are deferred too.
+Use `--refresh-secrets` after rotation or credential failures: file presence
+alone cannot establish validity.
+
+Each phase announces its work. Completion reports deferred secret refreshes;
+preview output omits file contents to keep credentials out of terminal logs.
+Chezmoi lifecycle scripts must succeed during apply; verification checks files
+without rerunning those scripts.
 
 ## Failure recovery
 
