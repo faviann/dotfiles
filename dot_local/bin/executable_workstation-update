@@ -18,6 +18,7 @@ ensure_bitwarden_session() {
   [[ -t 0 && -t 2 ]] \
     || fail 'credential phase failed: Bitwarden is locked; run bw unlock --raw and export its output as BW_SESSION before unattended use'
 
+  printf 'Secrets: unlocking Bitwarden to refresh credential-backed files...\n' >&2
   unset BW_SESSION
   unlocked_session="$(bw unlock --raw)" \
     || fail 'credential phase failed: Bitwarden unlock failed'
@@ -28,7 +29,81 @@ ensure_bitwarden_session() {
     || fail 'credential phase failed: Bitwarden returned an invalid session'
 }
 
-(( $# == 0 )) || fail 'expected no arguments'
+secrets_mode=auto
+case "${1:-}" in
+  '') (( $# == 0 )) || fail 'usage: workstation-update [--skip-secrets | --refresh-secrets]' ;;
+  --skip-secrets) secrets_mode=skip ;;
+  --refresh-secrets) secrets_mode=refresh ;;
+  --help|-h)
+    printf 'Usage: workstation-update [--skip-secrets | --refresh-secrets]\n'
+    printf 'By default, offer to keep existing secrets when Bitwarden is locked.\n'
+    exit 0 ;;
+  *) fail 'usage: workstation-update [--skip-secrets | --refresh-secrets]' ;;
+esac
+(( $# <= 1 )) || fail 'usage: workstation-update [--skip-secrets | --refresh-secrets]'
+
+select_secrets_mode() {
+  local managed rendered skipped target answer
+  local -a missing=()
+
+  # managed lists source entries without rendering them. dump omits templates
+  # skipped by secret functions, respecting host conditions and ignores. Compare
+  # the two inventories instead of maintaining a second list of secret files.
+  managed="$(chezmoi managed --include files,symlinks --path-style relative)" \
+    || fail 'cannot inventory managed files'
+  rendered="$(chezmoi dump --include files,symlinks --skip-secrets --format json)" \
+    || fail 'cannot inspect files without secrets'
+  skipped="$(jq -r --arg managed "$managed" '
+    ($managed | split("\n")[] | select(length > 0)) as $path
+    | select(has($path) | not) | $path
+  ' <<<"$rendered")" || fail 'cannot identify secret-backed files'
+
+  if [[ -z "$skipped" ]]; then
+    printf 'Secrets: no credential-backed files need a vault session.\n'
+    chezmoi_secret_args=(--skip-secrets)
+    return
+  fi
+  printf 'Secrets: credential-backed files (skipping defers all changes to these files):\n'
+  while IFS= read -r target; do
+    printf '  ~/%s\n' "$target"
+    if [[ ! -f "$HOME/$target" || ! -s "$HOME/$target" || ! -r "$HOME/$target" ]]; then
+      missing+=("$target")
+    fi
+  done <<<"$skipped"
+
+  if (( ${#missing[@]} > 0 )); then
+    printf 'Secrets: these files are missing, empty, or unreadable; unlocking is required:\n' >&2
+    printf '  ~/%s\n' "${missing[@]}" >&2
+    [[ "$secrets_mode" != skip ]] \
+      || fail 'cannot skip required secrets; rerun with --refresh-secrets'
+    ensure_bitwarden_session
+    return
+  fi
+  if [[ "$secrets_mode" == refresh ]]; then
+    ensure_bitwarden_session
+    return
+  fi
+  if [[ "$secrets_mode" == auto ]]; then
+    if command -v bw >/dev/null 2>&1 && bw unlock --check >/dev/null 2>&1; then
+      printf 'Secrets: reusing the unlocked Bitwarden session.\n'
+      return
+    fi
+    if [[ -t 0 && -t 2 ]]; then
+      printf 'Secrets: Bitwarden is locked. Keep existing files to avoid entering your password.\n' >&2
+      printf 'Unlock and refresh secrets? [y/N] ' >&2
+      IFS= read -r answer || answer=
+      case "$answer" in
+        y|Y|yes|YES) ensure_bitwarden_session; return ;;
+      esac
+    fi
+  fi
+  chezmoi_secret_args=(--skip-secrets)
+  secrets_skipped=true
+  printf 'Secrets: keeping existing files; refresh later with workstation-update --refresh-secrets.\n'
+}
+
+chezmoi_secret_args=()
+secrets_skipped=false
 
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/workstation-update"
 mkdir -p "$state_dir"
@@ -72,7 +147,7 @@ validate_source() {
   [[ -z "$source_status" ]] || fail 'source has local content; commit or move it first'
 }
 
-printf 'Dotfiles: checking...\n'
+printf '[1/9] Dotfiles: checking source and fetching origin/main...\n'
 validate_source
 git -C "$source_repository" fetch origin \
   '+refs/heads/main:refs/remotes/origin/main' || fail 'fetch failed'
@@ -92,22 +167,33 @@ validate_source
 # time and apply never refreshes it. Fast-forwarding the source alone leaves
 # it stale, so a template reading a data key the old config lacks aborts the
 # apply. Regenerate it from the source just fetched, before anything renders.
+printf '[2/9] Dotfiles: refreshing chezmoi configuration...\n'
 chezmoi init || fail 'chezmoi configuration refresh failed'
 
-ensure_bitwarden_session
-chezmoi apply --dry-run --verbose --force=false || fail 'chezmoi preview failed'
-chezmoi apply --force=false || fail 'chezmoi apply failed'
-chezmoi verify --exclude scripts || fail 'chezmoi verification failed'
+printf '[3/9] Secrets: checking whether unlocking is needed...\n'
+select_secrets_mode
+# Do not print rendered diffs: they can contain passwords and private keys.
+printf '[4/9] Dotfiles: checking planned changes...\n'
+chezmoi apply --dry-run --force=false "${chezmoi_secret_args[@]}" || fail 'chezmoi preview failed'
+printf '[5/9] Dotfiles: applying changes and running lifecycle scripts...\n'
+chezmoi apply --force=false "${chezmoi_secret_args[@]}" || fail 'chezmoi apply failed'
+printf '[6/9] Dotfiles: verifying applied files...\n'
+chezmoi verify --exclude scripts "${chezmoi_secret_args[@]}" || fail 'chezmoi verification failed'
 
 # These commands already reconcile their own state. Always delegate so a
 # previously interrupted apply or activation needs no local success cache.
-printf 'Workstation configuration: checking...\n'
+printf '[7/9] Workstation configuration: checking...\n'
 workstation-setup || fail 'workstation-setup failed'
 agent_tools="$HOME/.local/bin/update-agent-tools"
 [[ -x "$agent_tools" ]] || fail 'managed update-agent-tools is not executable'
-printf 'Agent tools: updating...\n'
+printf '[8/9] Agent tools: updating...\n'
 "$agent_tools" || fail 'update-agent-tools failed'
+printf '[9/9] GitHub tokens: checking expiry...\n'
 # Token expiry is advisory; a failed check must not fail the update.
 "$HOME/.local/bin/github-token" check-expiry \
   || printf 'workstation-update: GitHub token expiry check failed; continuing\n' >&2
-printf 'Workstation update complete\n'
+if [[ "$secrets_skipped" == true ]]; then
+  printf 'Workstation update complete (secret-backed files kept unchanged; refresh deferred).\n'
+else
+  printf 'Workstation update complete\n'
+fi

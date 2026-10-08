@@ -31,10 +31,35 @@ The command refuses unsafe source states such as local content, a non-canonical
 origin, the wrong branch or upstream, and ahead or diverged history. It does
 not reset or discard local work.
 
-When applying Bitwarden-backed templates, the command reuses a valid
-`BW_SESSION`. If the vault is locked during an interactive update, it prompts
-once and shares the resulting session with preview, apply, and verification.
-Unattended runs must export a valid session before invoking the updater.
+Each phase announces its work before starting: source update, chezmoi
+configuration, secrets, preview, apply, verification, workstation configuration,
+agent tools, and token expiry. Preview checks changes without printing rendered
+file contents, which can contain credentials.
+
+The command discovers secret-backed files through chezmoi's
+[`--skip-secrets`](https://www.chezmoi.io/reference/command-line-flags/global/#--skip-secrets)
+rendering, respecting host conditions and ignored targets. It lists the affected
+paths without reading their credentials. A valid `BW_SESSION` is reused. If
+Bitwarden is locked and all those files are readable and nonempty, the prompt
+`Unlock and refresh secrets? [y/N]` lets you press Enter to keep them. Unattended
+runs keep those files automatically when the vault is locked.
+
+- `workstation-update --skip-secrets` keeps existing secret-backed files without
+  prompting or contacting Bitwarden, even with an unlocked session.
+- `workstation-update --refresh-secrets` requires a vault session and refreshes
+  secret-backed files along with the other targets.
+
+Missing, empty, or unreadable secret-backed files require unlocking; the command
+names them before prompting. `--skip-secrets` fails in that situation. An
+unattended run requiring secrets must export a valid `BW_SESSION` first.
+Interactive unlocking happens once and shares the session with preview, apply,
+and verification.
+
+Skipping preserves entire files, including `.gitconfig` on the workstation;
+changes to their nonsecret settings are deferred too. Skipped files are excluded
+from verification, and the completion message explicitly reports the deferral.
+File presence does not prove a token or key is current or valid: use
+`--refresh-secrets` after rotation or when credentials stop working.
 Chezmoi lifecycle scripts run and must succeed during apply; post-apply
 verification checks durable targets without rerunning those actions.
 
