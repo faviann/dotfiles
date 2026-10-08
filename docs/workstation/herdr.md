@@ -12,7 +12,8 @@
   `.chezmoiscripts/run_after_install-herdr-integrations.sh.tmpl`, which
   installs the Claude Code, Codex, Pi, OMP, and OpenCode integrations that
   Herdr does not report as current. Herdr resumes agent panes after a server
-  restart only through these integrations; see the runbook for the update
+  restart only through these integrations. A running agent loads a new
+  integration only after it restarts. See the runbook for the update
   sequence.
 - **Supervision**: Home Manager owns the foreground `herdr.service` under
   `default.target`, with user lingering for boot startup and a five-second
