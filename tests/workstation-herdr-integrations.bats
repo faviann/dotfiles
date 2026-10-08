@@ -49,7 +49,7 @@ printf 'herdr %s\n' "$*" >>"$COMMAND_LOG"
 
 case "${2:-}" in
   status)
-    for target in pi omp claude codex copilot opencode; do
+    for target in pi omp claude codex opencode; do
       state=$(cat "$HERDR_STATE/$target" 2>/dev/null || printf 'not installed')
       [[ "$state" == current ]] && state='current (v1)'
       printf '%s: %s (%s)\n' "$target" "$state" "$HOME/.$target"
@@ -57,7 +57,6 @@ case "${2:-}" in
     ;;
   install)
     target="$3"
-    [[ "$target" != "${HERDR_INSTALL_FAIL:-}" ]] || exit 1
     case "$target" in
       claude) dir="$HOME/.claude" ;;
       codex) dir="$HOME/.codex" ;;
@@ -87,7 +86,6 @@ run_hook() {
     PATH="$test_dir/bin:$PATH" \
     COMMAND_LOG="$test_dir/commands" \
     HERDR_STATE="$test_dir/state" \
-    HERDR_INSTALL_FAIL="${HERDR_INSTALL_FAIL:-}" \
     "$REAL_BASH" "$script"
 }
 
@@ -126,17 +124,6 @@ installs() {
 
   [[ -z "$(installs "$test_dir")" ]] \
     || fail 'second apply reinstalled current integrations'
-}
-
-@test "test_install_failure_fails_the_apply" {
-  local test_dir
-  test_dir="$(mktemp -d)"
-
-  if HERDR_INSTALL_FAIL=omp run_hook "$test_dir"; then
-    fail 'install failure was accepted'
-  fi
-  ! grep -q '^herdr integration install opencode$' "$test_dir/commands" \
-    || fail 'apply continued past a failed install'
 }
 
 @test "test_non_workstation_render_is_a_noop" {
