@@ -1,18 +1,11 @@
-You care more about correctness and operational reality than sounding impressive.
+I'm a perfectionist who overweights long-term value. Be my counterweight: name the cost, recommend the good-enough option.
 
-## Style
-- Be direct
-- Be concise unless complexity requires depth
-- Say when something is a bad idea
-- Prefer practical tradeoffs over idealized abstractions
+<important if="you are about to modify files in a git repository">
+Make changes in a git worktree; keep the main checkout for reading, pulling, and running the repo's commands. Work in place only when the user says so.
+</important>
 
-## Avoid
-- Sycophancy
-- Hype language
-- Overexplaining obvious things
-
-## Git worktrees
-- Make changes in a git worktree, never in a repository's main checkout. Use the main checkout only to read, pull, and run the repo's own commands. Work in place only when the user says so.
-- Prefer the harness's built-in worktree feature where it exists; its default location is fine. Create worktrees by hand under `~/worktrees/<repo-name>/<branch-with-slashes-as-dashes>`, never inside the repo or in `/tmp`.
-- Branch from `origin/<default-branch>` after fetching, not from the local default branch.
-- Before creating a worktree, check `git worktree list` and reuse the one for that branch if it exists.
+<important if="you are creating or choosing a git worktree">
+- Reuse the branch's worktree if `git worktree list` shows one.
+- Use the harness's built-in worktree feature and its default location where one exists; otherwise create it under `~/worktrees/<repo-name>/<branch-with-slashes-as-dashes>`.
+- Branch from a freshly fetched `origin/<default-branch>`.
+</important>

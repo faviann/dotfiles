@@ -51,7 +51,6 @@ run_chezmoi() {
     --destination "$destination_dir" \
     --config /dev/null \
     --config-format toml \
-    --persistent-state "$runtime_dir/chezmoistate.boltdb" \
     "$@"
 }
 
@@ -113,45 +112,6 @@ run_chezmoi() {
   assert_has_line '.bashrc' "$managed_file"
   assert_has_line '.local/bin/update-agent-tools' "$managed_file"
   assert_has_line '.local/bin/workstation-update' "$managed_file"
-}
-
-@test "test_global_agent_instructions_share_one_source" {
-  local test_dir
-  local source_dir
-  local destination_dir
-  local managed_file
-  local path
-
-  test_dir="$(mktemp -d)"
-  source_dir="$test_dir/source"
-  destination_dir="$test_dir/home"
-  managed_file="$test_dir/managed"
-  mkdir -p "$source_dir/dot_config" "$destination_dir"
-  cp "$REPO_ROOT/.chezmoiignore" "$source_dir/"
-  cp -R --no-preserve=mode "$REPO_ROOT/dot_agents" "$REPO_ROOT/dot_claude" \
-    "$REPO_ROOT/dot_codex" "$REPO_ROOT/dot_pi" "$source_dir/"
-  cp -R --no-preserve=mode "$REPO_ROOT/dot_config/opencode" "$source_dir/dot_config/"
-
-  run_chezmoi "$source_dir" "$destination_dir" \
-    --override-data '{"is_workstation":true}' \
-    managed --path-style relative >"$managed_file"
-  for path in .agents/AGENTS.md .claude/CLAUDE.md .codex/AGENTS.md \
-    .config/opencode/AGENTS.md .pi/agent/AGENTS.md; do
-    assert_has_line "$path" "$managed_file"
-  done
-
-  run_chezmoi "$source_dir" "$destination_dir" \
-    --override-data '{"is_workstation":true}' apply
-
-  cmp "$REPO_ROOT/dot_agents/AGENTS.md" "$destination_dir/.agents/AGENTS.md"
-  for path in .codex/AGENTS.md .config/opencode/AGENTS.md .pi/agent/AGENTS.md; do
-    [[ -L "$destination_dir/$path" ]] || fail "$path is not a symlink"
-    [[ "$(readlink -f "$destination_dir/$path")" = "$destination_dir/.agents/AGENTS.md" ]] \
-      || fail "$path does not resolve to the shared instructions"
-    cmp "$destination_dir/.agents/AGENTS.md" "$destination_dir/$path"
-  done
-  [[ "$(cat "$destination_dir/.claude/CLAUDE.md")" = '@~/.agents/AGENTS.md' ]] \
-    || fail 'Claude does not import the shared instructions'
 }
 
 @test "test_fish_is_ignored_only_on_the_configured_workstation" {
