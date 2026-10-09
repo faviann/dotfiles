@@ -78,6 +78,7 @@ STUB
   cat >"$BATS_TEST_TMPDIR/bin/workstation-setup" <<'STUB'
 #!/usr/bin/env bash
 printf 'workstation-setup\n' >>"$PHASE_LOG"
+sleep "${SETUP_DELAY:-0}"
 [[ "${FAIL_PHASE:-}" != workstation-setup ]]
 STUB
   sed -i "1c #!$(command -v bash)" "$BATS_TEST_TMPDIR/bin/"*
@@ -412,4 +413,17 @@ interactive_update() {
   run env FAIL_PHASE=github-token bash "$COMMAND"
   [ "$status" -eq 0 ]
   [[ "$output" == *'expiry check failed; continuing'*'Workstation update complete'* ]]
+}
+
+@test "test_workstation_update_reports_phase_and_total_elapsed_time" {
+  run env SETUP_DELAY=1 bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^  Completed in [0-9][0-9]*s$' <<<"$output")" -eq 9 ]
+  [[ "$output" =~ \[7/9\].*Completed\ in\ [1-9][0-9]*s.*\[8/9\] ]]
+  [[ "$output" =~ Total\ time:\ [1-9][0-9]*s ]]
+
+  run env SETUP_DELAY=1 FAIL_PHASE=workstation-setup bash "$COMMAND"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ Failed\ after\ [1-9][0-9]*s ]]
+  [[ "$output" != *'Workstation update complete'* ]]
 }

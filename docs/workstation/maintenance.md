@@ -46,8 +46,13 @@ excludes them from verification. Their nonsecret changes are deferred too.
 Use `--refresh-secrets` after rotation or credential failures: file presence
 alone cannot establish validity.
 
-Each phase announces its work. Completion reports deferred secret refreshes;
-preview output omits file contents to keep credentials out of terminal logs.
+Each phase announces its work and reports elapsed seconds when it finishes.
+The final line reports total time; a failed phase reports its elapsed time and
+the total so far. Timings include time spent answering prompts. Use them to identify
+the slow phase before investigating its commands.
+
+Completion reports deferred secret refreshes; preview output omits file contents
+to keep credentials out of terminal logs.
 Chezmoi lifecycle scripts must succeed during apply; verification checks files
 without rerunning those scripts.
 

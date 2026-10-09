@@ -1,10 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+update_started=$SECONDS
+phase_started=
+
 fail() {
   printf 'workstation-update: %s; correct the problem, then rerun workstation-update\n' \
     "$*" >&2
+  if [[ -n "$phase_started" ]]; then
+    printf '  Failed after %ss (total: %ss)\n' \
+      "$((SECONDS - phase_started))" "$((SECONDS - update_started))" >&2
+  fi
   exit 1
+}
+
+start_phase() {
+  phase_started=$SECONDS
+  printf '%s\n' "$1"
+}
+
+finish_phase() {
+  printf '  Completed in %ss\n' "$((SECONDS - phase_started))"
+  phase_started=
 }
 
 ensure_bitwarden_session() {
@@ -149,7 +166,7 @@ validate_source() {
   [[ -z "$source_status" ]] || fail 'source has local content; commit or move it first'
 }
 
-printf '[1/9] Dotfiles: checking source and fetching origin/main...\n'
+start_phase '[1/9] Dotfiles: checking source and fetching origin/main...'
 validate_source
 git -C "$source_repository" fetch origin \
   '+refs/heads/main:refs/remotes/origin/main' || fail 'fetch failed'
@@ -164,38 +181,48 @@ git -C "$source_repository" merge --ff-only --no-autostash \
 validate_source
 [[ "$(git -C "$source_repository" rev-parse HEAD)" == "$target_commit" ]] \
   || fail 'source changed during update'
+finish_phase
 
 # The config file is generated from the source's .chezmoi.toml.tmpl at init
 # time and apply never refreshes it. Fast-forwarding the source alone leaves
 # it stale, so a template reading a data key the old config lacks aborts the
 # apply. Regenerate it from the source just fetched, before anything renders.
-printf '[2/9] Dotfiles: refreshing chezmoi configuration...\n'
+start_phase '[2/9] Dotfiles: refreshing chezmoi configuration...'
 chezmoi init || fail 'chezmoi configuration refresh failed'
+finish_phase
 
-printf '[3/9] Secrets: checking whether unlocking is needed...\n'
+start_phase '[3/9] Secrets: checking whether unlocking is needed...'
 select_secrets_mode
+finish_phase
 # Keep preview output to phase messages: rendered diffs can expose secrets.
-printf '[4/9] Dotfiles: checking planned changes...\n'
+start_phase '[4/9] Dotfiles: checking planned changes...'
 chezmoi apply --dry-run --force=false "${chezmoi_secret_args[@]}" || fail 'chezmoi preview failed'
-printf '[5/9] Dotfiles: applying changes and running lifecycle scripts...\n'
+finish_phase
+start_phase '[5/9] Dotfiles: applying changes and running lifecycle scripts...'
 chezmoi apply --force=false "${chezmoi_secret_args[@]}" || fail 'chezmoi apply failed'
-printf '[6/9] Dotfiles: verifying applied files...\n'
+finish_phase
+start_phase '[6/9] Dotfiles: verifying applied files...'
 chezmoi verify --exclude scripts "${chezmoi_secret_args[@]}" || fail 'chezmoi verification failed'
+finish_phase
 
 # These commands already reconcile their own state. Always delegate so a
 # previously interrupted apply or activation needs no local success cache.
-printf '[7/9] Workstation configuration: checking...\n'
+start_phase '[7/9] Workstation configuration: checking...'
 workstation-setup || fail 'workstation-setup failed'
+finish_phase
+start_phase '[8/9] Agent tools: updating...'
 agent_tools="$HOME/.local/bin/update-agent-tools"
 [[ -x "$agent_tools" ]] || fail 'managed update-agent-tools is not executable'
-printf '[8/9] Agent tools: updating...\n'
 "$agent_tools" || fail 'update-agent-tools failed'
-printf '[9/9] GitHub tokens: checking expiry...\n'
+finish_phase
+start_phase '[9/9] GitHub tokens: checking expiry...'
 # Token expiry is advisory; a failed check must not fail the update.
 "$HOME/.local/bin/github-token" check-expiry \
   || printf 'workstation-update: GitHub token expiry check failed; continuing\n' >&2
+finish_phase
 if [[ "$secrets_skipped" == true ]]; then
   printf 'Workstation update complete (secret-backed files kept unchanged; refresh deferred).\n'
 else
   printf 'Workstation update complete\n'
 fi
+printf 'Total time: %ss\n' "$((SECONDS - update_started))"
