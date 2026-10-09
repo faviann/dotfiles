@@ -77,7 +77,7 @@ set -euo pipefail
 printf 'chezmoi %s\n' "$*" >>"$CALLS"
 exec "$REAL_CHEZMOI" --source "$CHEZMOI_SOURCE" --destination "$HOME" \
   --config /dev/null --config-format toml \
-  --override-data "{\"is_workstation\":${IS_WORKSTATION:-true}}" \
+  --override-data '{"profile":"workstation"}' \
   --persistent-state "$XDG_STATE_HOME/chezmoi.boltdb" "$@"
 STUB
   cp "$REPO_ROOT/dot_local/bin/executable_github-token" "$bin/github-token"
@@ -115,16 +115,6 @@ token_expires() {
   run --separate-stderr github-token credential work get <<<$'protocol=https\nhost=github.com\n'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
-}
-
-@test "test_non_workstation_render_needs_no_work_token" {
-  rm -rf "$HOME" "$XDG_STATE_HOME"
-  mkdir -p "$HOME"
-  jq 'map(select(.name != "dotfiles/github-token-work"))' "$STATE/items.json" >"$STATE/items.next"
-  mv "$STATE/items.next" "$STATE/items.json"
-  IS_WORKSTATION=false chezmoi apply
-  run ! grep -q 'github-token' "$HOME/.gitconfig"
-  [ ! -e "$HOME/.config/github-tokens" ]
 }
 
 @test "test_rotate_rejects_an_invalid_token_without_touching_bitwarden" {

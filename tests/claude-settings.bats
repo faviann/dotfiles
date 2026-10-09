@@ -42,7 +42,7 @@ apply_settings() {
     --config /dev/null \
     --config-format toml \
     --persistent-state "$runtime_dir/chezmoistate.boltdb" \
-    --override-data '{"is_workstation":false}' \
+    --override-data '{"profile":"workstation"}' \
     apply --force "$home/.claude/settings.json"
 }
 

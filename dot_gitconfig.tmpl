@@ -33,7 +33,6 @@
 [credential "https://gist.github.com"]
     helper =
     helper = !gh auth git-credential
-{{- if .is_workstation }}
 
 # The work token's resource owner. A path-prefixed section wins over the
 # github.com one for repositories under that owner; the gh wrapper reads
@@ -41,4 +40,3 @@
 [credential "https://github.com/{{ (bitwardenFields "item" "dotfiles/github-token-work").owner.value }}"]
     helper =
     helper = !github-token credential work
-{{- end }}

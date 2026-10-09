@@ -12,8 +12,7 @@ readonly REAL_BASH
 export REAL_BASH
 
 render_hook() {
-  local is_workstation="$1"
-  local output="$2"
+  local output="$1"
   local destination
   local render_dir
 
@@ -26,7 +25,6 @@ render_hook() {
     --config /dev/null \
     --config-format toml \
     --persistent-state "$render_dir/chezmoistate.boltdb" \
-    --override-data "{\"is_workstation\":$is_workstation}" \
     execute-template \
     --file "$REPO_ROOT/.chezmoiscripts/run_after_install-herdr-integrations.sh.tmpl" \
     >"$output"
@@ -79,7 +77,7 @@ run_hook() {
   local script="$test_dir/hook"
 
   mkdir -p "$test_dir/home" "$test_dir/state"
-  [[ -x "$script" ]] || render_hook true "$script"
+  [[ -x "$script" ]] || render_hook "$script"
   make_herdr_stub "$test_dir/bin"
   env \
     HOME="$test_dir/home" \
@@ -124,16 +122,4 @@ installs() {
 
   [[ -z "$(installs "$test_dir")" ]] \
     || fail 'second apply reinstalled current integrations'
-}
-
-@test "test_non_workstation_render_is_a_noop" {
-  local test_dir
-  local script
-  test_dir="$(mktemp -d)"
-  script="$test_dir/hook"
-
-  render_hook false "$script"
-  if grep -q '[^[:space:]]' "$script"; then
-    fail 'non-workstation render contained executable work'
-  fi
 }

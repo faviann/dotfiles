@@ -1,12 +1,35 @@
 # Bootstrap - New Machine Setup
 
-Run these steps in order on any new workstation.
+Run these steps in order on a new workstation or desktop. The bootstrap node
+has its [own path](#bootstrap-node).
+
+## Machine Profiles
+
+`chezmoi init` derives the machine profile from the hostname, without a
+prompt, and `.chezmoiignore` applies only that profile's targets:
+
+| Hostname | Profile | Gets | Bitwarden items |
+| --- | --- | --- | --- |
+| `workstation` | `workstation` | Everything below, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
+| `bootstrap` | `bootstrap` | Bash config, global git ignore, Ansible controller key and vault password | `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, GitHub token routing and `gh` wrapper, agent setup, fish | `dotfiles/workstation-ssh-key`, `dotfiles/github-token-work`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
+
+The workstation also gets the Ansible controller key and vault password. Only
+the workstation and the desktop get a personal GitHub identity; the bootstrap
+node pulls public repositories over HTTPS and keeps an HTTPS chezmoi origin.
+Desktops get agent configuration but no agent binaries or Home Manager yet.
 
 ## 1. Install chezmoi and Bitwarden CLI
 
 ```bash
 sh -c "$(curl -fsLS get.chezmoi.io)" -- -b ~/.local/bin
 sudo snap install bw
+```
+
+On a desktop, also install the tools the dotfiles call:
+
+```bash
+sudo apt install git curl jq gh
 ```
 
 ## 2. Unlock Bitwarden
@@ -28,11 +51,23 @@ chezmoi init --apply https://github.com/faviann/dotfiles.git
 ```
 
 After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
-`~/.ssh/known_hosts`, the Ansible controller key pair in `~/.ansible/ssh/`, and
-the [Claude Code gateway](#bitwarden-claude-code-gateway-items) credentials in
-`~/.config/claude/`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
+`~/.ssh/known_hosts`, and the
+[Claude Code gateway](#bitwarden-claude-code-gateway-items) credentials in
+`~/.config/claude/`; the workstation also gets the Ansible controller key pair
+in `~/.ansible/ssh/`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
 does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
+
+Apply also clones `faviann/skillset` over HTTPS, without credentials, for the
+agent skills, so that repository must stay public. Until this repository is
+public too, the HTTPS `chezmoi init` above needs GitHub credentials.
+
+On a desktop, log `gh` in once with the `main` token:
+
+```bash
+bw get notes dotfiles/github-cli-token \
+  | gh auth login --hostname github.com --with-token
+```
 
 ## 4. Apply Home Manager on the Workstation LXC
 
@@ -116,8 +151,8 @@ Check the rendered pair the same way as the workstation key, with
 ## Bitwarden Claude Code Gateway Items
 
 Claude Code reaches Anthropic through the sub2api gateway at
-`gateway.ai.faviann.com`. On every machine, chezmoi renders two credentials
-that sub2api issued, each from the Notes of one Bitwarden item:
+`gateway.ai.faviann.com`. On the workstation and desktops, chezmoi renders two
+credentials that sub2api issued, each from the Notes of one Bitwarden item:
 
 - `dotfiles/sub2api-gateway-token`: the gateway API key Claude Code
   authenticates with, rendered to `~/.config/claude/gateway-token`. The
@@ -162,7 +197,7 @@ GitHub should identify the account and report that shell access is not provided.
 
 ## GitHub Tokens
 
-On the workstation, HTTPS git and `gh` use two fine-grained personal access
+On the workstation and desktops, HTTPS git and `gh` use two fine-grained personal access
 tokens for the same GitHub account. Each token is a profile. The `main`
 profile's resource owner is the personal account; its Bitwarden item is
 `dotfiles/github-cli-token`, and its live copy is `gh`'s own login. The `work`
@@ -170,13 +205,9 @@ profile's resource owner is the employer organization; its Bitwarden item is
 `dotfiles/github-token-work`, and its live copy is
 `~/.config/github-tokens/work`.
 
-`workstation-setup` logs `gh` in with the `main` token. Other hosts have no
-`work` profile; if you use `gh` there, log in without generating or uploading
-another SSH key:
-
-```bash
-gh auth login --git-protocol ssh --skip-ssh-key
-```
+`workstation-setup` logs `gh` in with the `main` token; on a desktop you log
+in once by hand, as in [step 3](#3-bootstrap-over-https). The bootstrap node
+has no GitHub tokens.
 
 Both items keep the token in Notes. The `work` item also needs a custom field
 `owner` containing the organization's login, in GitHub's canonical casing:
@@ -234,9 +265,11 @@ branch that is not on the fork.
 
 ## Day-to-Day Updates
 
-After bootstrap, use `workstation-update` for routine maintenance. See the
-canonical [workstation maintenance guidance](docs/workstation/maintenance.md)
-for source guards, Bitwarden sessions, and failure recovery.
+After bootstrap, use `workstation-update` for routine maintenance on the
+workstation. See the canonical
+[workstation maintenance guidance](docs/workstation/maintenance.md) for source
+guards, Bitwarden sessions, and failure recovery. Desktops and the bootstrap
+node use `chezmoi update`.
 
 ## Clone ServerManagementScripts
 
@@ -250,11 +283,24 @@ cd ServerManagementScripts
 ./setup.sh
 ```
 
-## Hostname Contract
+## Bootstrap Node
 
-The LXC workstation must be named `workstation` as set by the Ansible repo.
-That hostname triggers `is_workstation = true` in `.chezmoi.toml.tmpl`, which
-skips fish config on that machine.
+The `bootstrap` LXC is a root-only control node that deploys the workstation.
+It gets only the Ansible controller key and vault password, with no personal
+GitHub identity. homelab-iac#534 sets the node up with chezmoi and the
+Bitwarden CLI. Until this repository is public (#136), the HTTPS
+`chezmoi init` below needs GitHub credentials. As root, with `$HOME=/root`:
+
+```bash
+bw login                                  # first time only
+export BW_SESSION=$(bw unlock --raw)
+chezmoi init --apply https://github.com/faviann/dotfiles.git
+bw lock
+```
+
+Its chezmoi origin stays HTTPS, so `chezmoi update` works without an SSH key.
+
+## Lifecycle Playbooks on the Workstation
 
 When lifecycle playbooks run from the workstation itself, they exclude that host
 by default. To manage it intentionally, run:

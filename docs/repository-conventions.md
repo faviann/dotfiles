@@ -14,12 +14,25 @@ Keep private or machine-local notes outside the canonical source checkout;
 [workstation maintenance](workstation/maintenance.md) rejects local content,
 including ignored files.
 
+## Machine profiles
+
+`.chezmoiignore` is the only place that decides which
+[machine profile](../CONTEXT.md) gets which target, scripts in
+`.chezmoiscripts/` included. Gate a target there on `.profile`; do not turn its
+source into a template to gate it. The table in
+[`tests/chezmoi-target-inventory.bats`](../tests/chezmoi-target-inventory.bats)
+lists every managed target with its profiles, and the suite fails when a
+profile's managed inventory differs from it. Add a new target to that table
+with the profiles that get it.
+
 After changing the target inventory, inspect it before applying:
 
 ```bash
 chezmoi -S "$PWD" ignored --tree
 chezmoi -S "$PWD" managed --path-style=source-relative --tree
 ```
+
+Add `--override-data '{"profile":"desktop"}'` to inspect another profile.
 
 ## Validation
 

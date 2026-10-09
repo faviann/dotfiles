@@ -27,12 +27,53 @@ home/**
 packages/
 packages/**
 
-{{- if .is_workstation }}
-.config/fish/
-.config/fish/**
-{{- end }}
+{{- /* Machine profiles: each block ignores what its profiles do not get. */}}
 
-{{- if not .is_workstation }}
+{{- if not (eq .profile "workstation" "desktop") }}
+# Workstation and desktop only: personal GitHub identity and agent setup
+.gitconfig
+.ssh/
+.ssh/**
+.local/bin/gh
+.local/bin/github-token
 .config/github-tokens/
 .config/github-tokens/**
+.agents/
+.agents/**
+.claude/
+.claude/**
+.codex/
+.codex/**
+.config/opencode/
+.config/opencode/**
+.pi/
+.pi/**
+.config/claude/
+.config/claude/**
+.npmrc
+.chezmoiscripts/github-known-hosts.sh
+.chezmoiscripts/switch-chezmoi-origin-to-ssh.sh
+.chezmoiscripts/install-herdr.sh
+.chezmoiscripts/install-herdr-integrations.sh
+.chezmoiscripts/reconcile-agent-skills.sh
+{{- end }}
+
+{{- if not (eq .profile "workstation" "bootstrap") }}
+# Workstation and bootstrap only: Ansible controller
+.ansible/
+.ansible/**
+{{- end }}
+
+{{- if ne .profile "desktop" }}
+# Desktop only
+.config/fish/
+.config/fish/**
+.chezmoiscripts/install-packages.sh
+{{- end }}
+
+{{- if ne .profile "workstation" }}
+# Workstation only until Home Manager reaches desktops
+.local/bin/workstation-update
+.local/bin/dev-session
+.local/bin/update-agent-tools
 {{- end }}
