@@ -26,14 +26,23 @@ case "$name" in
     ;;
   curl)
     [[ "${FAIL_AT:-}" != bun ]] || exit 1
-    printf '[[ "$BUN_INSTALL" == "$HOME/.local" ]]\n'
+    printf '[[ "$BUN_INSTALL" == "$HOME/.local" ]]\ncp "$BUN_FIXTURE" "$BUN_INSTALL/bin/bun"\n'
     ;;
-  bun|opencode|omp|pi) [[ "${FAIL_AT:-}" != "$name" ]] ;;
+  bun)
+    if [[ "$*" == 'upgrade --stable' ]]; then
+      [[ "${FAIL_AT:-}" != bun-upgrade ]]
+    else
+      [[ "${FAIL_AT:-}" != bun ]]
+    fi
+    ;;
+  opencode|omp|pi) [[ "${FAIL_AT:-}" != "$name" ]] ;;
   *) exit 92 ;;
 esac
 STUB
     chmod +x "$HOME/.local/bin/$tool"
   done
+  export BUN_FIXTURE="$BATS_TEST_TMPDIR/bun"
+  cp "$HOME/.local/bin/bun" "$BUN_FIXTURE"
 }
 
 @test "test_npm_engine_preflight_failure_preserves_installed_tools" {
@@ -45,7 +54,8 @@ STUB
   [ "$(grep -c '^npm install ' "$COMMAND_LOG")" -eq 1 ]
 }
 
-@test "test_update_installs_bun_and_npm_tools" {
+@test "test_update_installs_missing_bun_and_npm_tools" {
+  rm "$HOME/.local/bin/bun"
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
   [[ "$output" == *'Agent tools updated'* ]]
@@ -61,7 +71,7 @@ STUB
 
 @test "test_failed_installation_or_harness_fails_update" {
   local phase
-  for phase in bun npm opencode omp pi; do
+  for phase in bun bun-upgrade npm opencode omp pi; do
     run env FAIL_AT="$phase" bash "$COMMAND"
     [ "$status" -ne 0 ]
     [[ "$output" != *'Agent tools updated'* ]]
@@ -73,4 +83,21 @@ STUB
   [ "$status" -ne 0 ]
   [[ "$output" == *'usage:'* ]]
   [ ! -s "$COMMAND_LOG" ]
+}
+
+@test "test_update_uses_buns_upgrader_when_the_managed_binary_runs" {
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  grep -qx 'bun upgrade --stable' "$COMMAND_LOG"
+  run ! grep -q '^curl ' "$COMMAND_LOG"
+  [ "$(readlink "$HOME/.local/bin/bunx")" = bun ]
+}
+
+@test "test_update_reinstalls_a_broken_bun" {
+  printf '#!%s\nexit 1\n' "$(command -v bash)" >"$HOME/.local/bin/bun"
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  grep -q '^curl ' "$COMMAND_LOG"
+  run "$HOME/.local/bin/bun" --version
+  [ "$status" -eq 0 ]
 }

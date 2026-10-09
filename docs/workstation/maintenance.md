@@ -73,7 +73,8 @@ that agent-tool state, then return to `workstation-update` for routine
 maintenance.
 
 Home Manager also uses `update-agent-tools` during bootstrap when managed
-commands are missing.
+commands are missing. Bun uses its native updater to skip downloads when current;
+the installer handles missing or broken binaries.
 
 ## Login and maintenance ownership
 

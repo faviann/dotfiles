@@ -48,11 +48,14 @@ npm install --global --prefix "$prefix" --force=false --engine-strict \
   --allow-scripts="$allowed_scripts" --dry-run "${packages[@]}" \
   || fail 'npm preflight failed; check package diagnostics and the Home Manager Node version'
 
-# The upstream installer selects a CPU-compatible build and renames the extracted
-# binary into place. This PATH already includes its destination, so the installer
-# does not edit shell profiles. Keep bunx available without another installation.
-curl -fsSL https://bun.sh/install | BUN_INSTALL="$prefix" bash \
-  || fail 'Bun installation failed'
+# Bun's updater skips downloading an already-current binary. Keep the installer
+# for bootstrap and repair; its destination is already on PATH.
+if "$prefix/bin/bun" --version >/dev/null 2>&1; then
+  "$prefix/bin/bun" upgrade --stable || fail 'Bun upgrade failed'
+else
+  curl -fsSL https://bun.sh/install | BUN_INSTALL="$prefix" bash \
+    || fail 'Bun installation failed'
+fi
 ln -sfn bun "$prefix/bin/bunx"
 bun --version >/dev/null || fail 'installed Bun does not run on this workstation'
 npm install --global --prefix "$prefix" --force=false --engine-strict \
