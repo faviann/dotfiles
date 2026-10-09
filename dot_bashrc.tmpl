@@ -12,7 +12,3 @@ if [ -r "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh" ]; then
 	# shellcheck disable=SC1091
 	. "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
 fi
-
-# Ansible lifecycle playbooks exclude workstation when run on that host.
-# Override intentionally, e.g.:
-# uv run --locked ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation
