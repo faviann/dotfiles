@@ -1,0 +1,25 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Claude Code and Herdr also write this file, so set only these keys. */ -}}
+{{- $settings := dict -}}
+{{- if trim .chezmoi.stdin -}}
+{{-   $settings = fromJson .chezmoi.stdin -}}
+{{- end -}}
+{{- $settings = setValueAtPath "statusLine" (dict "type" "command" "command" "~/.claude/statusline.sh" "refreshInterval" 60) $settings -}}
+{{- $settings = setValueAtPath "env.ANTHROPIC_BASE_URL" "https://gateway.ai.faviann.com" $settings -}}
+{{- $settings = setValueAtPath "env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" "1" $settings -}}
+{{- $settings = setValueAtPath "apiKeyHelper" "cat ~/.config/claude/gateway-token" $settings -}}
+{{- $trackPrs := dict "matcher" "Bash" "hooks" (list (dict "type" "command" "command" "bash \"$HOME/.claude/hooks/track-session-prs.sh\"" "timeout" 5)) -}}
+{{- $postToolUse := list -}}
+{{- if hasKey $settings "hooks" -}}
+{{-   $postToolUse = get $settings.hooks "PostToolUse" | default list -}}
+{{- end -}}
+{{- $present := false -}}
+{{- range $postToolUse -}}
+{{-   if eq (toJson .) (toJson $trackPrs) -}}
+{{-     $present = true -}}
+{{-   end -}}
+{{- end -}}
+{{- if not $present -}}
+{{-   $settings = setValueAtPath "hooks.PostToolUse" (append $postToolUse $trackPrs) $settings -}}
+{{- end -}}
+{{ toPrettyJson "  " $settings -}}

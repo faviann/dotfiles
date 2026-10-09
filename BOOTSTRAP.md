@@ -28,7 +28,9 @@ chezmoi init --apply https://github.com/faviann/dotfiles.git
 ```
 
 After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
-`~/.ssh/known_hosts`, and the Ansible controller key pair in `~/.ansible/ssh/`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
+`~/.ssh/known_hosts`, the Ansible controller key pair in `~/.ansible/ssh/`, and
+the [Claude Code gateway](#bitwarden-claude-code-gateway-items) credentials in
+`~/.config/claude/`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
 does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
 
@@ -110,6 +112,22 @@ The item must contain:
 
 Check the rendered pair the same way as the workstation key, with
 `~/.ansible/ssh/proxmox_lxc` in place of `~/.ssh/id_ed25519`.
+
+## Bitwarden Claude Code Gateway Items
+
+Claude Code reaches Anthropic through the sub2api gateway at
+`gateway.ai.faviann.com`. On every machine, chezmoi renders two credentials
+that sub2api issued, each from the Notes of one Bitwarden item:
+
+- `dotfiles/sub2api-gateway-token`: the gateway API key Claude Code
+  authenticates with, rendered to `~/.config/claude/gateway-token`. The
+  `apiKeyHelper` in `~/.claude/settings.json` reads it.
+- `dotfiles/sub2api-admin-key`: the sub2api admin API key, rendered to
+  `~/.config/claude/gateway-admin-key`. The status line uses it to read each
+  Claude account's 5-hour and weekly usage.
+
+Create both items before the first apply. Chezmoi sets only its own keys in
+`~/.claude/settings.json` and leaves the rest of the file to Claude Code.
 
 ## GitHub Registration
 
