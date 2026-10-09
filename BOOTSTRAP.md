@@ -59,8 +59,7 @@ does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
 
 Apply also clones `faviann/skillset` over HTTPS, without credentials, for the
-agent skills, so that repository must stay public. Until this repository is
-public too, the HTTPS `chezmoi init` above needs GitHub credentials.
+agent skills, so that repository must stay public.
 
 On a desktop, log `gh` in once with the `main` token:
 
@@ -288,8 +287,7 @@ cd ServerManagementScripts
 The `bootstrap` LXC is a root-only control node that deploys the workstation.
 It gets only the Ansible controller key and vault password, with no personal
 GitHub identity. homelab-iac#534 sets the node up with chezmoi and the
-Bitwarden CLI. Until this repository is public (#136), the HTTPS
-`chezmoi init` below needs GitHub credentials. As root, with `$HOME=/root`:
+Bitwarden CLI. As root, with `$HOME=/root`:
 
 ```bash
 bw login                                  # first time only
@@ -302,9 +300,16 @@ Its chezmoi origin stays HTTPS, so `chezmoi update` works without an SSH key.
 
 ## Lifecycle Playbooks on the Workstation
 
-When lifecycle playbooks run from the workstation itself, they exclude that host
-by default. To manage it intentionally, run:
+Lifecycle playbooks exclude the host they run on. To apply them to the
+workstation from the workstation, run this from a homelab-iac checkout:
 
 ```bash
-uv run --locked ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation
+./run.sh --include-controller
 ```
+
+It applies the workstation's non-interrupting changes in place. Host-config
+reconciliation, the package upgrade, and the reboot wait for the bootstrap
+node's nightly run, or for its recipe in homelab-iac `docs/bootstrap-node.md`.
+See homelab-iac's
+[Deploying](https://github.com/faviann/homelab-iac/blob/main/docs/workstation-persistent-state.md#deploying)
+for details.

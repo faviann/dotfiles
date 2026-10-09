@@ -1,6 +1,2 @@
 # PATH
 fish_add_path ~/.local/bin
-
-# Ansible lifecycle playbooks exclude workstation when run on that host.
-# Override intentionally, e.g.:
-# uv run --locked ansible-playbook site.yml -e proxmox_skip_self=false --limit workstation
