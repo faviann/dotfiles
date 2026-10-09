@@ -28,6 +28,7 @@ _Avoid_: is_workstation, is_lxc, container flag
 **Accepted exposure**:
 The facts this public repository deliberately discloses — the git identity, the
 `/home/faviann` path, the Proxmox/LXC topology, and the `admin.faviann.com`,
-`public.faviann.com`, and `ai.faviann.com` endpoints — as distinct from a
-leak. Enumerated in [ADR 0001](docs/adr/0001-public-repo-accepted-exposure.md).
+`public.faviann.com`, and `ai.faviann.com` endpoints, and the homelab LAN
+addresses and historical hostnames in git history — as distinct from a leak.
+Enumerated in [ADR 0001](docs/adr/0001-public-repo-accepted-exposure.md).
 _Avoid_: Leak, disclosure risk, sensitive data

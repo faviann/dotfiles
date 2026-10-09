@@ -4,6 +4,11 @@ Personal dotfiles managed with [chezmoi](https://chezmoi.io) + Bitwarden CLI,
 plus the `workstation` Home Manager flake that provisions the Debian LXC
 workstation and its agent toolchain.
 
+This is a personal repository: no support, no stability guarantees. It is not
+directly reusable, because chezmoi renders secrets from the maintainer's
+Bitwarden vault at apply time. It serves three machine profiles:
+`workstation`, `bootstrap`, and `desktop`.
+
 Setting up a new machine? Start with **[BOOTSTRAP.md](BOOTSTRAP.md)**.
 
 ## Common commands
