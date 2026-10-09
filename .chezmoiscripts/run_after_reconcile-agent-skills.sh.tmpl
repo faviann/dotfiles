@@ -1,4 +1,3 @@
-{{- if .is_workstation -}}
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -29,4 +28,3 @@ fi
 # (workstation-update exports BW_SESSION before chezmoi apply), and linking
 # skills never needs it, so withhold it.
 env -u BW_SESSION "$reconciler"
-{{- end }}

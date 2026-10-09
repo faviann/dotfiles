@@ -17,11 +17,13 @@ _Avoid_: Shared Moraine, Overmind Moraine
 Moraine's per-user local Unix-socket backend within Workstation-local Moraine.
 _Avoid_: Remote backend, central database
 
-**Workstation applicability**:
-The chezmoi `is_workstation` data value, true only on the host named
-`workstation`. It expresses host identity, not container membership: another
-LXC guest is not a workstation and gets none of the workstation treatment.
-_Avoid_: is_lxc, LXC applicability, container flag
+**Machine profile**:
+The chezmoi `profile` data value that selects which targets a machine gets:
+`workstation` and `bootstrap` for the LXC hosts of those names, `desktop` for
+every other host. It expresses host identity, not container membership.
+Distinct from the Home Manager `workstation` profile and the GitHub token
+profiles.
+_Avoid_: is_workstation, is_lxc, container flag
 
 **Accepted exposure**:
 The facts this public repository deliberately discloses — the git identity, the

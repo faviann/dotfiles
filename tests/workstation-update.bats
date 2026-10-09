@@ -379,30 +379,31 @@ interactive_update() {
 }
 
 @test "test_workstation_update_refreshes_source_owned_chezmoi_configuration" {
-  local expected=other
+  local expected=desktop
 
-  # An installation whose persisted config predates the source rename.
+  # An installation whose persisted config predates the profile key.
   export CHEZMOI_CONFIG_FILE="$XDG_CONFIG_HOME/chezmoi/chezmoi.toml"
   mkdir -p "$(dirname "$CHEZMOI_CONFIG_FILE")"
-  printf '[data]\n  is_lxc = true\n' >"$CHEZMOI_CONFIG_FILE"
+  printf '[data]\n  is_workstation = true\n' >"$CHEZMOI_CONFIG_FILE"
 
   # The source publishes this repository's config template plus a consumer of
-  # the renamed key. Under chezmoi's missingkey=error that consumer cannot
-  # render until the config is regenerated, so an update path that only
+  # the new key. Under chezmoi's missingkey=error that consumer cannot render
+  # until the config is regenerated, so an update path that only
   # fast-forwards the source fails here.
   cp "$BATS_TEST_DIRNAME/../.chezmoi.toml.tmpl" "$seed/.chezmoi.toml.tmpl"
-  printf '{{ if .is_workstation }}workstation{{ else }}other{{ end }}\n' \
-    >"$seed/dot_applicability.tmpl"
+  printf '{{ .profile }}\n' >"$seed/dot_machine-profile.tmpl"
   git -C "$seed" add .
-  git -C "$seed" commit --quiet -m 'rename the applicability key'
+  git -C "$seed" commit --quiet -m 'introduce the profile key'
   git -C "$seed" push --quiet
 
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
-  [[ "$(hostname -s)" != workstation ]] || expected=workstation
-  [ "$(cat "$HOME/.applicability")" = "$expected" ]
-  grep -q 'is_workstation' "$CHEZMOI_CONFIG_FILE"
-  run ! grep -q 'is_lxc' "$CHEZMOI_CONFIG_FILE"
+  case "$(hostname -s)" in
+    workstation|bootstrap) expected="$(hostname -s)" ;;
+  esac
+  [ "$(cat "$HOME/.machine-profile")" = "$expected" ]
+  grep -q 'profile' "$CHEZMOI_CONFIG_FILE"
+  run ! grep -q 'is_workstation' "$CHEZMOI_CONFIG_FILE"
 }
 
 @test "test_workstation_update_completes_despite_token_expiry_warnings_or_failure" {

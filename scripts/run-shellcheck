@@ -29,22 +29,17 @@ render_dir="$(mktemp -d)"
 trap 'rm -rf "$render_dir"' EXIT
 
 rendered_inputs=()
-for is_workstation in true false; do
-  variant_dir="$render_dir/is_workstation-$is_workstation"
-  mkdir -p "$variant_dir/destination"
-
-  for template in "${template_inputs[@]}"; do
-    rendered="$variant_dir/$(basename "${template%.tmpl}")"
-    chezmoi \
-      --source "$REPO_ROOT" \
-      --destination "$variant_dir/destination" \
-      --config /dev/null \
-      --config-format toml \
-      --persistent-state "$variant_dir/chezmoistate.boltdb" \
-      --override-data "{\"is_workstation\":$is_workstation}" \
-      execute-template --file "$template" >"$rendered"
-    rendered_inputs+=("$rendered")
-  done
+mkdir -p "$render_dir/destination"
+for template in "${template_inputs[@]}"; do
+  rendered="$render_dir/$(basename "${template%.tmpl}")"
+  chezmoi \
+    --source "$REPO_ROOT" \
+    --destination "$render_dir/destination" \
+    --config /dev/null \
+    --config-format toml \
+    --persistent-state "$render_dir/chezmoistate.boltdb" \
+    execute-template --file "$template" >"$rendered"
+  rendered_inputs+=("$rendered")
 done
 
 shellcheck \

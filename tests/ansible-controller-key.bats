@@ -49,7 +49,7 @@ apply_controller_key() {
     --config /dev/null \
     --config-format toml \
     --persistent-state "$runtime_dir/chezmoistate.boltdb" \
-    --override-data '{"is_workstation":false}' \
+    --override-data '{"profile":"workstation"}' \
     apply --force "$destination_dir/.ansible/ssh"
 }
 

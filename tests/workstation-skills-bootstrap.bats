@@ -12,8 +12,7 @@ readonly REAL_BASH
 export REAL_BASH
 
 render_hook() {
-  local is_workstation="$1"
-  local output="$2"
+  local output="$1"
   local destination
   local render_dir
 
@@ -26,7 +25,6 @@ render_hook() {
     --config /dev/null \
     --config-format toml \
     --persistent-state "$render_dir/chezmoistate.boltdb" \
-    --override-data "{\"is_workstation\":$is_workstation}" \
     execute-template \
     --file "$REPO_ROOT/.chezmoiscripts/run_after_reconcile-agent-skills.sh.tmpl" \
     >"$output"
@@ -97,7 +95,7 @@ run_hook() {
   local bin_dir="$test_dir/bin"
 
   mkdir -p "$home"
-  render_hook true "$script"
+  render_hook "$script"
   make_git_stub "$bin_dir"
   env \
     HOME="$home" \
@@ -204,20 +202,4 @@ run_hook() {
     <(printf 'bw=<unset>\n') \
     "$test_dir/bw-probe" \
     || fail 'reconciler inherited the unlocked vault session'
-}
-
-@test "test_non_workstation_render_is_a_noop" {
-  local test_dir
-  local script
-  test_dir="$(mktemp -d)"
-  script="$test_dir/hook"
-
-  render_hook false "$script"
-  if grep -q '[^[:space:]]' "$script"; then
-    fail 'non-workstation render contained executable work'
-  fi
-  HOME="$test_dir/home" "$REAL_BASH" "$script" \
-    || fail 'non-workstation no-op failed'
-  [[ ! -e "$test_dir/home/repos/skillset" ]] \
-    || fail 'non-workstation no-op created a skillset checkout'
 }

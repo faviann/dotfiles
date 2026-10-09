@@ -1,7 +1,7 @@
-{{- $is_workstation := false -}}
-{{- if eq .chezmoi.hostname "workstation" -}}
-{{-   $is_workstation = true -}}
+{{- $profile := "desktop" -}}
+{{- if has .chezmoi.hostname (list "workstation" "bootstrap") -}}
+{{-   $profile = .chezmoi.hostname -}}
 {{- end -}}
 
 [data]
-  is_workstation = {{ $is_workstation }}
+  profile = {{ $profile | quote }}
