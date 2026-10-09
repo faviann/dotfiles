@@ -4,6 +4,8 @@ set -euo pipefail
 readonly REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 shell_inputs=(
+  "$REPO_ROOT/dot_claude/executable_statusline.sh"
+  "$REPO_ROOT/dot_claude/hooks/executable_track-session-prs.sh"
   "$REPO_ROOT/dot_local/bin/executable_dev-session"
   "$REPO_ROOT/dot_local/bin/executable_gh"
   "$REPO_ROOT/dot_local/bin/executable_github-token"

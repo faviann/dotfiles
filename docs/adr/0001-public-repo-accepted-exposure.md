@@ -6,7 +6,8 @@ Bitwarden — but the repository does disclose the workstation's operating
 context: the git identity `faviann@gmail.com`, the `/home/faviann` path, the
 Proxmox/LXC topology in `BOOTSTRAP.md` and `docs/`, and the internet-reachable
 endpoints `collie.admin.faviann.com`, `lobu.admin.faviann.com`, and
-`artifacts.public.faviann.com`. That disclosure is accepted rather than
+`artifacts.public.faviann.com`, plus the LAN/VPN-only
+`gateway.ai.faviann.com`. That disclosure is accepted rather than
 redacted: `faviann/homelab-iac` is already public and already names the same
 hosts and domain, so redacting here would buy inconsistency, not secrecy.
 
@@ -19,6 +20,11 @@ the publisher exists to produce links that are handed to other people, so its
 root is public by construction and nothing private is published into it. The
 protection there is what gets written to `/ephemeral/workstation/artifacts`,
 not who can reach it.
+
+The `ai.faviann.com` tier, which serves the sub2api gateway that Claude Code
+routes through, is reachable only from the LAN or VPN. Naming its host
+discloses no more than homelab-iac does; its API needs a credential that
+chezmoi renders from Bitwarden.
 
 ## Consequences
 

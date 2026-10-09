@@ -178,6 +178,8 @@
         root = ./.;
         fileset = nixpkgs.lib.fileset.unions [
           ./.chezmoiscripts
+          ./dot_claude/executable_statusline.sh
+          ./dot_claude/hooks/executable_track-session-prs.sh
           ./dot_bash_profile.tmpl
           ./dot_bashrc.tmpl
           ./dot_local/bin/executable_dev-session
