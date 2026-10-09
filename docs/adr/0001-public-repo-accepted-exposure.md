@@ -26,11 +26,23 @@ routes through, is reachable only from the LAN or VPN. Naming its host
 discloses no more than homelab-iac does; its API needs a credential that
 chezmoi renders from Bitwarden.
 
+Git history and PR bodies also carry `10.1.x.x` homelab LAN addresses, such as
+the portal at `10.1.0.2`, and the historical hostnames `aoe.local.faviann.com`
+and `lobu.faviann.com`. These are accepted on the same grounds: homelab-iac
+already publishes the same subnet (for example in
+`inventory/host_vars/portal.yml`) and the `*.local.faviann.com` tier the `aoe`
+host sat on, and `lobu.faviann.com` is a superseded name for the host
+homelab-iac names as `lobu.admin.faviann.com`. Rewriting history is rejected
+below.
+
 ## Consequences
 
 Full git history is kept at the flip, because 106 of its commits reference
 issue and PR numbers that remain live on GitHub, and squashing would sever
 every one of those links.
+
+A gitleaks scan before the flip, over all pushed history and every issue, PR
+and comment, found no secrets.
 
 Secret prevention going forward is GitHub's native secret scanning and push
 protection, not a scanner wired into `nix flake check`. The realistic failure
