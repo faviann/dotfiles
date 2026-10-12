@@ -399,7 +399,7 @@ interactive_update() {
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
   case "$(hostname -s)" in
-    workstation|bootstrap) expected="$(hostname -s)" ;;
+    workstation) expected=workstation ;;
   esac
   [ "$(cat "$HOME/.machine-profile")" = "$expected" ]
   grep -q 'profile' "$CHEZMOI_CONFIG_FILE"

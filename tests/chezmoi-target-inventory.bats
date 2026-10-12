@@ -14,8 +14,8 @@ readonly INVENTORY='
 .ansible/ssh/proxmox_lxc                        workstation
 .ansible/ssh/proxmox_lxc.pub                    workstation
 .ansible/vault-pass                             workstation
-.bash_profile                                   workstation bootstrap desktop
-.bashrc                                         workstation bootstrap desktop
+.bash_profile                                   workstation desktop
+.bashrc                                         workstation desktop
 .chezmoiscripts/github-known-hosts.sh           workstation desktop
 .chezmoiscripts/install-herdr-integrations.sh   workstation desktop
 .chezmoiscripts/install-herdr.sh                workstation desktop
@@ -31,7 +31,7 @@ readonly INVENTORY='
 .config/claude/gateway-token                    workstation desktop
 .config/fish/config.fish                        desktop
 .config/fish/functions/fish_greeting.fish       desktop
-.config/git/ignore                              workstation bootstrap desktop
+.config/git/ignore                              workstation desktop
 .config/github-tokens/work                      workstation desktop
 .config/opencode/AGENTS.md                      workstation desktop
 .gitconfig                                      workstation desktop
@@ -87,10 +87,6 @@ assert_profile_inventory() {
 
 @test "test_workstation_profile_manages_its_inventory" {
   assert_profile_inventory workstation
-}
-
-@test "test_bootstrap_profile_manages_its_inventory" {
-  assert_profile_inventory bootstrap
 }
 
 @test "test_desktop_profile_manages_its_inventory" {
