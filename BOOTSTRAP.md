@@ -11,7 +11,7 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
 | `workstation` | `workstation` | Everything below, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
-| `bootstrap` | `bootstrap` | Bash config, global git ignore, Ansible controller key and vault password | `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass` |
+| `bootstrap` | `bootstrap` | Bash config, global git ignore | None |
 | anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, GitHub token routing and `gh` wrapper, agent setup, fish | `dotfiles/workstation-ssh-key`, `dotfiles/github-token-work`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
 
 The workstation also gets the Ansible controller key and vault password. Only
@@ -284,16 +284,16 @@ cd ServerManagementScripts
 
 ## Bootstrap Node
 
-The `bootstrap` LXC is a root-only control node that deploys the workstation.
-It gets only the Ansible controller key and vault password, with no personal
-GitHub identity. homelab-iac#534 sets the node up with chezmoi and the
-Bitwarden CLI. As root, with `$HOME=/root`:
+The `bootstrap` LXC is a root-only control node that deploys the workstation,
+with no personal GitHub identity. Its Ansible controller key and vault
+password come from the workstation: every homelab-iac run against the node
+copies them from the workstation's `~/.ansible`, so its profile does not
+manage them and needs no Bitwarden item. Its profile gets only the bash
+config and the global git ignore, which are optional. As root, with
+`$HOME=/root`:
 
 ```bash
-bw login                                  # first time only
-export BW_SESSION=$(bw unlock --raw)
 chezmoi init --apply https://github.com/faviann/dotfiles.git
-bw lock
 ```
 
 Its chezmoi origin stays HTTPS, so `chezmoi update` works without an SSH key.

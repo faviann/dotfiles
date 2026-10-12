@@ -11,9 +11,9 @@ setup() {
 # Every managed target and the machine profiles that get it.
 readonly INVENTORY='
 .agents/AGENTS.md                               workstation desktop
-.ansible/ssh/proxmox_lxc                        workstation bootstrap
-.ansible/ssh/proxmox_lxc.pub                    workstation bootstrap
-.ansible/vault-pass                             workstation bootstrap
+.ansible/ssh/proxmox_lxc                        workstation
+.ansible/ssh/proxmox_lxc.pub                    workstation
+.ansible/vault-pass                             workstation
 .bash_profile                                   workstation bootstrap desktop
 .bashrc                                         workstation bootstrap desktop
 .chezmoiscripts/github-known-hosts.sh           workstation desktop
