@@ -1,7 +1,6 @@
 # Bootstrap - New Machine Setup
 
-Run these steps in order on a new workstation or desktop. The bootstrap node
-has its [own path](#bootstrap-node).
+Run these steps in order on a new workstation or desktop.
 
 ## Machine Profiles
 
@@ -11,12 +10,9 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
 | `workstation` | `workstation` | Everything below, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
-| `bootstrap` | `bootstrap` | Bash config, global git ignore | None |
 | anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, GitHub token routing and `gh` wrapper, agent setup, fish | `dotfiles/workstation-ssh-key`, `dotfiles/github-token-work`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
 
-The workstation also gets the Ansible controller key and vault password. Only
-the workstation and the desktop get a personal GitHub identity; the bootstrap
-node pulls public repositories over HTTPS and keeps an HTTPS chezmoi origin.
+The workstation also gets the Ansible controller key and vault password.
 Desktops get agent configuration but no agent binaries or Home Manager yet.
 
 ## 1. Install chezmoi and Bitwarden CLI
@@ -205,8 +201,7 @@ profile's resource owner is the employer organization; its Bitwarden item is
 `~/.config/github-tokens/work`.
 
 `workstation-setup` logs `gh` in with the `main` token; on a desktop you log
-in once by hand, as in [step 3](#3-bootstrap-over-https). The bootstrap node
-has no GitHub tokens.
+in once by hand, as in [step 3](#3-bootstrap-over-https).
 
 Both items keep the token in Notes. The `work` item also needs a custom field
 `owner` containing the organization's login, in GitHub's canonical casing:
@@ -267,8 +262,8 @@ branch that is not on the fork.
 After bootstrap, use `workstation-update` for routine maintenance on the
 workstation. See the canonical
 [workstation maintenance guidance](docs/workstation/maintenance.md) for source
-guards, Bitwarden sessions, and failure recovery. Desktops and the bootstrap
-node use `chezmoi update`.
+guards, Bitwarden sessions, and failure recovery. Desktops use
+`chezmoi update`.
 
 ## Clone ServerManagementScripts
 
@@ -281,22 +276,6 @@ git clone git@github.com:faviann/ServerManagementScripts.git
 cd ServerManagementScripts
 ./setup.sh
 ```
-
-## Bootstrap Node
-
-The `bootstrap` LXC is a root-only control node that deploys the workstation,
-with no personal GitHub identity. Its Ansible controller key and vault
-password come from the workstation: every homelab-iac run against the node
-copies them from the workstation's `~/.ansible`, so its profile does not
-manage them and needs no Bitwarden item. Its profile gets only the bash
-config and the global git ignore, which are optional. As root, with
-`$HOME=/root`:
-
-```bash
-chezmoi init --apply https://github.com/faviann/dotfiles.git
-```
-
-Its chezmoi origin stays HTTPS, so `chezmoi update` works without an SSH key.
 
 ## Lifecycle Playbooks on the Workstation
 

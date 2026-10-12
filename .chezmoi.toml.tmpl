@@ -1,5 +1,5 @@
 {{- $profile := "desktop" -}}
-{{- if has .chezmoi.hostname (list "workstation" "bootstrap") -}}
+{{- if eq .chezmoi.hostname "workstation" -}}
 {{-   $profile = .chezmoi.hostname -}}
 {{- end -}}
 

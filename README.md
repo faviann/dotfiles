@@ -6,8 +6,8 @@ workstation and its agent toolchain.
 
 This is a personal repository: no support, no stability guarantees. It is not
 directly reusable, because chezmoi renders secrets from the maintainer's
-Bitwarden vault at apply time. It serves three machine profiles:
-`workstation`, `bootstrap`, and `desktop`.
+Bitwarden vault at apply time. It serves two machine profiles:
+`workstation` and `desktop`.
 
 Setting up a new machine? Start with **[BOOTSTRAP.md](BOOTSTRAP.md)**.
 
