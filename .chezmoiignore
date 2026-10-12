@@ -59,8 +59,8 @@ packages/**
 .chezmoiscripts/reconcile-agent-skills.sh
 {{- end }}
 
-{{- if not (eq .profile "workstation" "bootstrap") }}
-# Workstation and bootstrap only: Ansible controller
+{{- if ne .profile "workstation" }}
+# Workstation only: Ansible controller; homelab-iac copies it to the bootstrap node
 .ansible/
 .ansible/**
 {{- end }}
