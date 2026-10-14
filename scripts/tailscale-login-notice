@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Login-shell notice: silent unless the running daemon is signed out. The
+# timeout keeps a hung daemon from holding up shell startup.
+[[ -e "${XDG_RUNTIME_DIR:-}/tailscale/tailscaled.sock" ]] || exit 0
+state="$(timeout 1 tailscale status --json --peers=false 2>/dev/null \
+  | jq -r '.BackendState' 2>/dev/null)" || exit 0
+if [[ "$state" == NeedsLogin ]]; then
+  printf '%s\n' "Work Tailscale is signed out: run \`tailscale login\`" >&2
+fi

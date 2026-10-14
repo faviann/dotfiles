@@ -19,6 +19,10 @@ the verified test run.
   socket is `$XDG_RUNTIME_DIR/tailscale/tailscaled.sock`.
 - **CLI**: the `tailscale` command on the workstation is a wrapper that passes
   the user socket. Use it in place of `tailscale --socket=...`.
+- **Node preferences**: the node runs with `--shields-up`, `--accept-routes`
+  and `--accept-dns=false`. The CLI wrapper adds them to every
+  `tailscale login`, and the service applies them again with `tailscale set`
+  each time it starts. If that `set` fails, the service fails to start.
 - **Tailnet access**: only two paths reach the tailnet. The daemon serves an
   HTTP proxy on `127.0.0.1:1055`, and `tailscale nc` opens connections through
   the control socket. Both send tailnet addresses through the tailnet and dial
@@ -57,20 +61,29 @@ Before the first sign-in, deploy
 `~/.local/share/tailscale` across LXC rebuilds. A sign-in before it's deployed
 writes node state that the next rebuild discards.
 
-Signing in is a human step. Do it once per node state:
+Signing in is a human step. A login shell prints this notice while the node
+is signed out:
+
+```text
+Work Tailscale is signed out: run `tailscale login`
+```
+
+Sign in:
 
 ```bash
-systemctl --user status tailscaled
-tailscale up --accept-routes --accept-dns=false --shields-up
+tailscale login
 ```
 
 Open the printed URL and sign in with your own work account. Don't add `--ssh`.
+The wrapper adds the node preferences for you:
 
 - `--accept-routes` accepts the router's route to the gateway.
 - `--accept-dns=false` keeps the tailnet's DNS settings out of the node.
 - `--shields-up` refuses incoming tailnet connections.
 
-The node keeps these settings in its state, so restarts don't need them again.
+Sign in through the wrapper only. The unwrapped binary's `login` resets every
+preference it isn't given, which turns shields-up off until the service next
+restarts.
 
 ### Never remove `--shields-up`
 
@@ -80,6 +93,12 @@ Because the node signs in as the user, the work tailnet's playtest grant opens
 tailnet connections arrive as connections from localhost. They would get past
 the origin firewall to Collie on port 8788. This machine also holds the vault
 passphrase and the fleet SSH key.
+
+The service turns shields-up back on when it starts, so a runtime change lasts
+only until the next restart. Never remove `--shields-up` from
+`tailscaleNodePrefs` in [`home/workstation.nix`](../../home/workstation.nix).
+That list feeds both the `tailscale login` wrapper and the service's
+`ExecStartPost=... tailscale set --shields-up ...` line.
 
 ## Verify
 

@@ -90,9 +90,16 @@ let
   # Userspace mode leaves the container's routes and resolv.conf untouched, so
   # only this proxy and `tailscale nc` can reach the tailnet.
   tailscaleProxyListen = "127.0.0.1:1055";
+  # Applied at every sign-in and every daemon start. A bare `tailscale login`
+  # would otherwise reset them to the defaults, shields-up off included.
+  tailscaleNodePrefs = [ "--shields-up" "--accept-routes" "--accept-dns=false" ];
   tailscaleCli = pkgs.writeShellApplication {
     name = "tailscale";
     text = ''
+      if [[ "''${1:-}" == login ]]; then
+        shift
+        set -- login ${lib.escapeShellArgs tailscaleNodePrefs} "$@"
+      fi
       exec ${pkgs.tailscale}/bin/tailscale --socket="$XDG_RUNTIME_DIR/tailscale/tailscaled.sock" "$@"
     '';
   };
@@ -102,6 +109,11 @@ let
       export HTTPS_PROXY=http://${tailscaleProxyListen}
       exec "$@"
     '';
+  };
+  tailscaleLoginNotice = pkgs.writeShellApplication {
+    name = "tailscale-login-notice";
+    runtimeInputs = [ pkgs.coreutils pkgs.jq tailscaleCli ];
+    text = builtins.readFile ../scripts/tailscale-login-notice;
   };
 in
 {
@@ -124,6 +136,7 @@ in
     hermesPackage
     morainePackage
     tailscaleCli
+    tailscaleLoginNotice
     withJesGateway
   ];
 
@@ -197,9 +210,9 @@ in
     Install.WantedBy = [ "default.target" ];
   };
 
-  # Sign-in, route acceptance, and shields-up are node preferences set once by
-  # `tailscale up`, a human step. Shields-up must never be removed; see
-  # docs/workstation/tailscale.md.
+  # Sign-in is a human step; see docs/workstation/tailscale.md. Type=notify
+  # runs ExecStartPost after the control socket listens, and tailscaled holds
+  # requests until its backend is up. A failed `set` fails the start.
   systemd.user.services.tailscaled = {
     Unit.Description = "Tailscale userspace node for the work tailnet";
     Service = {
@@ -212,6 +225,11 @@ in
         "--socket=%t/tailscale/tailscaled.sock"
         "--outbound-http-proxy-listen=${tailscaleProxyListen}"
       ];
+      ExecStartPost = lib.concatStringsSep " " ([
+        "${pkgs.tailscale}/bin/tailscale"
+        "--socket=%t/tailscale/tailscaled.sock"
+        "set"
+      ] ++ tailscaleNodePrefs);
       Restart = "on-failure";
       RestartSec = 5;
       UMask = "0077";
