@@ -94,3 +94,30 @@ exec_start_flag() {
   diff -u <(printf '%s\n' login --shields-up --accept-routes --accept-dns=false --qr) \
     <(tail -n +3 <<<"$argv") || fail 'a bare sign-in would reset shields-up to off'
 }
+
+login_shell_notice() {
+  local bash
+  bash="$(command -v bash)"
+  export HOME="$BATS_TEST_TMPDIR/home" XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/run"
+  mkdir -p "$HOME/.local/bin" "$XDG_RUNTIME_DIR/tailscale"
+  touch "$XDG_RUNTIME_DIR/tailscale/tailscaled.sock"
+  cp "$REPO_ROOT/dot_bash_profile.tmpl" "$HOME/.bash_profile"
+  printf '#!%s\nexec %q %q\n' "$bash" "$bash" "$REPO_ROOT/scripts/tailscale-login-notice" \
+    >"$HOME/.local/bin/tailscale-login-notice"
+  printf '#!%s\nprintf %q\n' "$bash" "{\"BackendState\": \"$1\"}" >"$HOME/.local/bin/tailscale"
+  chmod +x "$HOME/.local/bin/tailscale-login-notice" "$HOME/.local/bin/tailscale"
+  env -i HOME="$HOME" PATH="$PATH" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+    "$bash" --login -c true 2>&1
+}
+
+@test "test_login_shell_asks_for_a_tailscale_sign_in" {
+  # shellcheck disable=SC2016
+  [[ "$(login_shell_notice NeedsLogin)" == 'Work Tailscale is signed out: run `tailscale login`' ]] \
+    || fail 'a signed-out node went unreported at login'
+}
+
+@test "test_login_shell_is_silent_while_tailscale_runs" {
+  local output
+  output="$(login_shell_notice Running)"
+  [[ -z "$output" ]] || fail "a running node printed at login: $output"
+}

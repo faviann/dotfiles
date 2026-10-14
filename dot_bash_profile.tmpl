@@ -12,3 +12,7 @@ if [ -r "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh" ]; then
 	# shellcheck disable=SC1091
 	. "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
 fi
+
+if command -v tailscale-login-notice >/dev/null 2>&1; then
+	tailscale-login-notice
+fi

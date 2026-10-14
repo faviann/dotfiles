@@ -206,6 +206,7 @@
           ./scripts/lobu-bootstrap
           ./scripts/moraine-service
           ./scripts/reclaim-runner-disk
+          ./scripts/tailscale-login-notice
           ./scripts/run-shellcheck
           ./scripts/update-dotnet-sdk
           ./scripts/update-flake-lock

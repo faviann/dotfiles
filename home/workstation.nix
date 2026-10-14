@@ -110,6 +110,11 @@ let
       exec "$@"
     '';
   };
+  tailscaleLoginNotice = pkgs.writeShellApplication {
+    name = "tailscale-login-notice";
+    runtimeInputs = [ pkgs.coreutils pkgs.jq tailscaleCli ];
+    text = builtins.readFile ../scripts/tailscale-login-notice;
+  };
 in
 {
   home.username = "faviann";
@@ -131,6 +136,7 @@ in
     hermesPackage
     morainePackage
     tailscaleCli
+    tailscaleLoginNotice
     withJesGateway
   ];
 
