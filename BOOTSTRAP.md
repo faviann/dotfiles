@@ -9,8 +9,8 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
-| `workstation` | `workstation` | Everything below, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, GitHub token routing and `gh` wrapper, agent setup, fish | `dotfiles/workstation-ssh-key`, `dotfiles/github-token-work`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
+| `workstation` | `workstation` | Everything below, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All five items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, fish | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
 
 The workstation also gets the Ansible controller key and vault password.
 Desktops get agent configuration but no agent binaries or Home Manager yet.
@@ -190,72 +190,48 @@ ssh -T git@github.com
 
 GitHub should identify the account and report that shell access is not provided.
 
-## GitHub Tokens
+## GitHub Token
 
-On the workstation and desktops, HTTPS git and `gh` use two fine-grained personal access
-tokens for the same GitHub account. Each token is a profile. The `main`
-profile's resource owner is the personal account; its Bitwarden item is
-`dotfiles/github-cli-token`, and its live copy is `gh`'s own login. The `work`
-profile's resource owner is the employer organization; its Bitwarden item is
-`dotfiles/github-token-work`, and its live copy is
-`~/.config/github-tokens/work`.
+On the workstation and desktops, HTTPS git and `gh` use one classic personal
+access token. Its Bitwarden item is `dotfiles/github-cli-token`, with the token
+in Notes, and its live copy is `gh`'s own login. Git reaches it through
+`gh auth git-credential`. `workstation-setup` logs `gh` in with it; on a
+desktop you log in once by hand, as in [step 3](#3-bootstrap-over-https).
 
-`workstation-setup` logs `gh` in with the `main` token; on a desktop you log
-in once by hand, as in [step 3](#3-bootstrap-over-https).
+Create the token with an expiration date and these scopes:
 
-Both items keep the token in Notes. The `work` item also needs a custom field
-`owner` containing the organization's login, in GitHub's canonical casing:
-git matches the owner case-sensitively, so remotes must use the same casing.
-The organization name lives only in Bitwarden and in rendered files under
-`$HOME`; this repository is public, so never commit it. Give the `work` token
-read-only Contents, read and write Issues and Pull requests, and read-only
-Actions and Commit statuses.
+- `repo`, with all of its sub-scopes
+- `workflow`
+- `write:packages`, which includes `read:packages`
+- `read:org`, under `admin:org`; `gh` refuses to log in without it
 
-### Routing
+If the organization enforces SAML single sign-on, authorize the token for it
+under **Configure SSO**.
 
-Git's credential configuration is the only routing table. Chezmoi renders a
-`[credential "https://github.com/<owner>"]` section into `~/.gitconfig` that
-sends repositories under the `owner` to `github-token credential work`. Every
-other `github.com` repository uses `gh auth git-credential`, the `main` login.
-
-`~/.local/bin/gh` wraps the Nix `gh` and gives each call the token git's
-configuration assigns to its target repository. Like `gh`, it takes the target
-from `--repo`, the `OWNER/REPO` argument of `repo view` or `repo clone`, a
-`github.com` pull request or issue URL argument, an `api repos/OWNER/REPO/...`
-endpoint, or the checkout's base remote. It does
-not change `gh auth` commands or calls that already have `GH_TOKEN` or
-`GITHUB_TOKEN`. Git operations that `gh` itself runs during a `work`-routed
-call also use the `work` token.
+A classic token reaches every repository the account can, in the personal
+account and in every organization. Fine-grained tokens can be narrower, but
+each covers a single resource owner, cannot open a pull request from a
+personal fork into a private organization repository, and cannot use GitHub
+Packages. One classic token keeps both owners, fork pull requests, and
+packages on one credential.
 
 ### Rotation and expiry
 
-To replace a token, create the new token on GitHub and run:
+To replace the token, create the new token on GitHub and run:
 
 ```bash
-github-token rotate work    # or: github-token rotate main
+github-token rotate
 ```
 
 The command reads the token from standard input, without echoing it on a
 terminal. It needs an unlocked Bitwarden session. It checks the token with
-GitHub, writes it to the profile's Bitwarden Notes, and syncs Bitwarden. It
-then reloads the live copy: `gh auth login` for `main`, and `chezmoi apply` of
-the token file for `work`. An invalid token leaves Bitwarden unchanged.
+GitHub, refuses a token without an expiration date, writes the token to the
+item's Notes, syncs Bitwarden, and logs `gh` in with it. An invalid token
+leaves Bitwarden unchanged.
 
 At the end of every run, `workstation-update` runs
-`github-token check-expiry`. This prints a warning for each token that expires
-within 7 days or that GitHub rejects. The warnings never fail the update.
-
-### Pull requests from a private fork
-
-A fine-grained token cannot open a pull request from a personal fork into a
-private organization repository. When `gh pr create` targets such a
-repository with the `work` token, the wrapper does not call `gh`. Instead, it
-prints a GitHub compare URL that carries the title and body, followed by
-instructions for an agent. Then it exits with status 3, which `gh` itself
-never uses. Open the URL and click **Create pull request**. Set draft state,
-labels, reviewers, and assignees on that page or after the pull request
-exists. Push the branch to `origin` first; the wrapper refuses to hand off a
-branch that is not on the fork.
+`github-token check-expiry`. This prints a warning when the token expires
+within 7 days or GitHub rejects it. The warning never fails the update.
 
 ## Day-to-Day Updates
 
