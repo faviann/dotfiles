@@ -73,3 +73,24 @@ exec_start_flag() {
     any(. == "https_proxy" or . == "http_proxy" or . == "all_proxy") | not
   ' <<<"$rendered" >/dev/null || fail 'a proxy was exported to every session'
 }
+
+@test "test_tailscaled_reapplies_the_node_prefs_on_every_start" {
+  local rendered argv
+  rendered="$(rendered_tailscale)"
+  argv="$(jq -r '.service.Service.ExecStartPost' <<<"$rendered")"
+  [[ "$argv" =~ ^/nix/store/[^\ ]+/bin/tailscale\  ]] \
+    || fail "a failed ExecStartPost would not fail the start: $argv"
+  diff -u <(printf '%s\n' "--socket=$(exec_start_flag "$rendered" --socket)" set \
+      --shields-up --accept-routes --accept-dns=false) \
+    <(tr ' ' '\n' <<<"$argv" | tail -n +2) || fail 'the daemon start does not reapply the node prefs'
+}
+
+@test "test_tailscale_login_keeps_the_node_prefs" {
+  local rendered argv
+  rendered="$(rendered_tailscale)"
+  # shellcheck disable=SC2016
+  argv="$(XDG_RUNTIME_DIR=/run/user/4242 SCRIPT="$(jq -r .cli <<<"$rendered")" \
+    bash -c 'exec() { printf "%s\n" "$@"; }; eval "$SCRIPT"' tailscale login --qr)"
+  diff -u <(printf '%s\n' login --shields-up --accept-routes --accept-dns=false --qr) \
+    <(tail -n +3 <<<"$argv") || fail 'a bare sign-in would reset shields-up to off'
+}
