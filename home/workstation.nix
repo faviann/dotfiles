@@ -86,6 +86,23 @@ let
     directory = "/ephemeral/workstation/artifacts";
     baseUrl = "https://artifacts.public.faviann.com";
   };
+  # The work tailnet routes the JES AI gateway through jes-aigateway-router.
+  # Userspace mode leaves the container's routes and resolv.conf untouched, so
+  # only traffic sent through this proxy can reach the tailnet.
+  tailscaleProxyListen = "127.0.0.1:1055";
+  tailscaleCli = pkgs.writeShellApplication {
+    name = "tailscale";
+    text = ''
+      exec ${pkgs.tailscale}/bin/tailscale --socket="$XDG_RUNTIME_DIR/tailscale/tailscaled.sock" "$@"
+    '';
+  };
+  withJesGateway = pkgs.writeShellApplication {
+    name = "with-jes-gateway";
+    text = ''
+      export HTTPS_PROXY=http://${tailscaleProxyListen}
+      exec "$@"
+    '';
+  };
 in
 {
   home.username = "faviann";
@@ -106,6 +123,8 @@ in
     fzf
     hermesPackage
     morainePackage
+    tailscaleCli
+    withJesGateway
   ];
 
   home.sessionPath = [
@@ -173,6 +192,27 @@ in
       # unit's lifetime and does not reset on a successful start.
       Restart = "on-failure";
       RestartSec = 30;
+      UMask = "0077";
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  # Sign-in, route acceptance, and shields-up are node preferences set once by
+  # `tailscale up`, a human step; see docs/workstation/tailscale.md.
+  systemd.user.services.tailscaled = {
+    Unit.Description = "Tailscale userspace node for the JES AI gateway";
+    Service = {
+      Type = "notify";
+      RuntimeDirectory = "tailscale";
+      ExecStart = lib.concatStringsSep " " [
+        "${pkgs.tailscale}/bin/tailscaled"
+        "--tun=userspace-networking"
+        "--statedir=%h/.local/share/tailscale"
+        "--socket=%t/tailscale/tailscaled.sock"
+        "--outbound-http-proxy-listen=${tailscaleProxyListen}"
+      ];
+      Restart = "on-failure";
+      RestartSec = 5;
       UMask = "0077";
     };
     Install.WantedBy = [ "default.target" ];

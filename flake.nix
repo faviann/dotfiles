@@ -148,6 +148,21 @@
           herdrService = workstationHomeConfiguration.config.systemd.user.services.herdr;
           lobuService = workstationHomeConfiguration.config.systemd.user.services.lobu;
           lobuBootstrap = workstationHomeConfiguration.config.home.activation.bootstrapLobu;
+          tailscale =
+            let
+              config = workstationHomeConfiguration.config;
+              script = name:
+                (builtins.head (
+                  builtins.filter (package: (package.pname or package.name) == name) config.home.packages
+                )).text;
+            in
+            {
+              service = config.systemd.user.services.tailscaled;
+              cli = script "tailscale";
+              withJesGateway = script "with-jes-gateway";
+              shell = config.home.sessionVariables;
+              systemd = config.systemd.user.sessionVariables;
+            };
           lobuSessionContext = {
             shell = workstationHomeConfiguration.config.home.sessionVariables;
             systemd = workstationHomeConfiguration.config.systemd.user.sessionVariables;
