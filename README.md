@@ -59,6 +59,7 @@ flake files is repository-only and never applied to a home directory.
 | Moraine | [moraine](docs/workstation/moraine.md) |
 | Collie | [collie](docs/workstation/collie.md) |
 | Lobu | [lobu](docs/workstation/lobu.md) |
+| Tailscale for the JES AI gateway | [tailscale](docs/workstation/tailscale.md) |
 | `publish-artifact` mapping | [artifact publishing](docs/workstation/artifact-publishing.md) |
 
 **Operator runbooks**
