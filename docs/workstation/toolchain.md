@@ -11,7 +11,7 @@ home-manager build --flake .#workstation
 ## Base tools
 
 The .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, Azure CLI (`az`), `jq`,
-`ripgrep`, `fd`, `fzf`, Hermes, Moraine, OpenBSD `nc`, and Tailscale with the
+`ripgrep`, `fd`, `fzf`, Hermes, Moraine, and Tailscale with the
 `with-jes-gateway` wrapper ([tailscale](tailscale.md)). Hermes is installed from
 `github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
 credentials and runtime configuration stay in `~/.hermes`.

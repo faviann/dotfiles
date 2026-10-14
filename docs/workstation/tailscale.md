@@ -19,10 +19,10 @@ the verified test run.
   socket is `$XDG_RUNTIME_DIR/tailscale/tailscaled.sock`.
 - **CLI**: the `tailscale` command on the workstation is a wrapper that passes
   the user socket. Use it in place of `tailscale --socket=...`.
-- **Proxies**: the daemon serves an HTTP proxy and a SOCKS5 proxy, both on
-  `127.0.0.1:1055`. Only traffic sent through that port reaches the tailnet.
-  The proxies send tailnet addresses through the tailnet and dial everything
-  else directly.
+- **Tailnet access**: only two paths reach the tailnet. The daemon serves an
+  HTTP proxy on `127.0.0.1:1055`, and `tailscale nc` opens connections through
+  the control socket. Both send tailnet addresses through the tailnet and dial
+  everything else directly.
 
 ## Reach the AI gateway
 
@@ -37,26 +37,25 @@ exports a proxy to every shell or to the systemd user manager.
 
 ## SSH to a tailnet host
 
-Send the connection through the SOCKS5 proxy:
+Let `tailscaled` open the connection:
 
 ```bash
-ssh -o ProxyCommand='nc -X 5 -x 127.0.0.1:1055 %h %p' <host>
+ssh -o ProxyCommand='tailscale nc %h %p' <host>
 ```
 
-`<host>` is the server's MagicDNS name or tailnet IP. `nc` passes the name to
-`tailscaled` unresolved, and `tailscaled` resolves it. The workstation's own
-resolver can't, because the node runs with `--accept-dns=false`.
+`<host>` is the server's MagicDNS name or tailnet IP. `tailscale nc` passes the
+name to `tailscaled` over the control socket, and `tailscaled` resolves it. The
+workstation's own resolver can't, because the node runs with
+`--accept-dns=false`.
 
-Home Manager installs OpenBSD `nc`. Debian's `nc` (netcat-traditional) has no
-`-X` or `-x` option. This repository adds no `~/.ssh/config` entries for
-tailnet hosts.
+This repository adds no `~/.ssh/config` entries for tailnet hosts.
 
 ## Sign in
 
-Before the first sign-in, deploy homelab-iac's
-`feat/workstation-persist-tailscale`. It persists `~/.local/share/tailscale`
-across LXC rebuilds. A sign-in before it's deployed writes node state that the
-next rebuild discards.
+Before the first sign-in, deploy
+[homelab-iac#599](https://github.com/faviann/homelab-iac/pull/599). It persists
+`~/.local/share/tailscale` across LXC rebuilds. A sign-in before it's deployed
+writes node state that the next rebuild discards.
 
 Signing in is a human step. Do it once per node state:
 

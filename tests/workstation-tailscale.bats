@@ -29,7 +29,7 @@ exec_start_flag() {
     <<<"$1"
 }
 
-@test "test_tailscaled_runs_unprivileged_in_userspace_with_loopback_proxies" {
+@test "test_tailscaled_runs_unprivileged_in_userspace_under_the_user_manager" {
   local rendered
   rendered="$(rendered_tailscale)"
   jq -e '
@@ -48,8 +48,6 @@ exec_start_flag() {
     || fail 'node state is not under the user data directory'
   [[ "$(exec_start_flag "$rendered" --outbound-http-proxy-listen)" == 127.0.0.1:* ]] \
     || fail 'the gateway proxy listens beyond loopback'
-  [[ "$(exec_start_flag "$rendered" --socks5-server)" == "$(exec_start_flag "$rendered" --outbound-http-proxy-listen)" ]] \
-    || fail 'the SOCKS5 proxy does not share the loopback HTTP proxy listener'
 }
 
 @test "test_tailscale_cli_targets_the_user_service_socket" {
