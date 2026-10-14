@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# A caller's environment token would shadow the stored main token everywhere
-# below; this command always speaks about the stored tokens.
+# A caller's environment token would shadow the stored token everywhere below;
+# this command always speaks about the stored token.
 unset GH_TOKEN GITHUB_TOKEN
 
-readonly PROFILES=(main work)
-readonly WORK_TOKEN_FILE="$HOME/.config/github-tokens/work"
+readonly ITEM=dotfiles/github-cli-token
 
 fail() {
   printf 'github-token: %s\n' "$*" >&2
@@ -14,41 +13,13 @@ fail() {
 }
 
 usage() {
-  fail 'usage: github-token credential PROFILE ACTION | rotate PROFILE | check-expiry'
-}
-
-# The profile registry. Each profile names its Bitwarden item, how to read its
-# live token, and how to reload the live token from Bitwarden.
-select_profile() {
-  case "$1" in
-    main)
-      profile_item=dotfiles/github-cli-token
-      read_live_token() { gh auth token --hostname github.com; }
-      reload_live_token() {
-        bitwarden_notes | gh auth login --hostname github.com --with-token
-      }
-      ;;
-    work)
-      profile_item=dotfiles/github-token-work
-      read_live_token() { cat "$WORK_TOKEN_FILE"; }
-      reload_live_token() { chezmoi apply "$WORK_TOKEN_FILE"; }
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-  profile="$1"
-}
-
-require_profile() {
-  [[ $# -eq 1 ]] || usage
-  select_profile "$1" || fail "unknown profile $1; expected one of: ${PROFILES[*]}"
+  fail 'usage: github-token rotate | check-expiry'
 }
 
 live_token() {
   local token
 
-  token="$(read_live_token 2>/dev/null)" || return 1
+  token="$(gh auth token --hostname github.com 2>/dev/null)" || return 1
   token="${token//[[:space:]]/}"
   [[ -n "$token" ]] || return 1
   printf '%s' "$token"
@@ -74,35 +45,18 @@ inspect_token() {
   done <<<"$response"
 }
 
-credential() {
-  local token
-
-  [[ $# -eq 2 ]] || usage
-  require_profile "$1"
-  # Git writes the request on stdin; consume it so git never sees a broken pipe.
-  cat >/dev/null
-  [[ "$2" == get ]] || return 0
-  # Printing nothing lets git fail with its own missing-credential error.
-  token="$(live_token)" || return 0
-  printf 'username=x-access-token\npassword=%s\n' "$token"
-}
-
 ensure_bitwarden_session() {
   command -v bw >/dev/null 2>&1 || fail 'Bitwarden CLI is missing'
   bw unlock --check >/dev/null 2>&1 \
     || fail "Bitwarden is locked; run: export BW_SESSION=\$(bw unlock --raw)"
 }
 
-bitwarden_notes() {
-  bw get item "$item_id" | jq -r '.notes'
-}
-
 rotate() {
-  local new_token
+  local new_token item_id
 
-  require_profile "$@"
+  [[ $# -eq 0 ]] || usage
   if [[ -t 0 ]]; then
-    IFS= read -rsp "New $profile GitHub token: " new_token
+    IFS= read -rsp 'New GitHub token: ' new_token
     printf '\n' >&2
   else
     IFS= read -r new_token || true
@@ -114,59 +68,54 @@ rotate() {
   [[ "$http_status" == 200 ]] \
     || fail "GitHub rejected the new token (HTTP ${http_status:-unreachable}); Bitwarden is unchanged"
   [[ -n "$token_expiry" ]] \
-    || fail 'GitHub reported no expiry for the new token; expected a fine-grained token'
+    || fail 'GitHub reported no expiry for the new token; create it with an expiration date'
 
   ensure_bitwarden_session
-  item_id="$(bw get item "$profile_item" | jq -r .id)" \
-    || fail "cannot find Bitwarden item $profile_item"
+  item_id="$(bw get item "$ITEM" | jq -r .id)" \
+    || fail "cannot find Bitwarden item $ITEM"
   # The token travels through the environment, never argv, which other local
   # users can read.
   bw get item "$item_id" \
     | NEW_TOKEN="$new_token" jq '.notes = env.NEW_TOKEN' \
     | bw encode \
     | bw edit item "$item_id" >/dev/null \
-    || fail "cannot update Bitwarden item $profile_item"
+    || fail "cannot update Bitwarden item $ITEM"
   bw sync >/dev/null || fail 'Bitwarden sync failed'
-  reload_live_token >/dev/null || fail "cannot reload the $profile token from Bitwarden"
+  bw get item "$item_id" | jq -r '.notes' \
+    | gh auth login --hostname github.com --with-token >/dev/null \
+    || fail 'cannot reload the gh login from Bitwarden'
 
   [[ "$(live_token)" == "$new_token" ]] \
-    || fail "the live $profile token does not match Bitwarden after reload"
-  printf 'github-token: %s token rotated; expires %s\n' "$profile" "$token_expiry"
+    || fail 'the gh login does not match Bitwarden after reload'
+  printf 'github-token: token rotated; expires %s\n' "$token_expiry"
 }
 
 # Warnings only: this runs inside routine maintenance and must never fail it.
 check_expiry() {
-  local name token expiry_epoch now
+  local token expiry_epoch
 
   [[ $# -eq 0 ]] || usage
-  now="$(date +%s)"
-
-  for name in "${PROFILES[@]}"; do
-    select_profile "$name"
-    token="$(live_token)" || continue
-    inspect_token "$token"
-    case "$http_status" in
-      200)
-        [[ -n "$token_expiry" ]] || continue
-        expiry_epoch="$(date -d "$token_expiry" +%s 2>/dev/null)" || continue
-        if (( expiry_epoch - now <= 7 * 86400 )); then
-          printf 'github-token: warning: the %s token expires %s; run github-token rotate %s\n' \
-            "$name" "$token_expiry" "$name" >&2
-        fi
-        ;;
-      401)
-        printf 'github-token: warning: GitHub rejects the %s token as invalid or expired; run github-token rotate %s\n' \
-          "$name" "$name" >&2
-        ;;
-    esac
-  done
+  token="$(live_token)" || return 0
+  inspect_token "$token"
+  case "$http_status" in
+    200)
+      [[ -n "$token_expiry" ]] || return 0
+      expiry_epoch="$(date -d "$token_expiry" +%s 2>/dev/null)" || return 0
+      if (( expiry_epoch - $(date +%s) <= 7 * 86400 )); then
+        printf 'github-token: warning: the GitHub token expires %s; run github-token rotate\n' \
+          "$token_expiry" >&2
+      fi
+      ;;
+    401)
+      printf 'github-token: warning: GitHub rejects the token as invalid or expired; run github-token rotate\n' >&2
+      ;;
+  esac
 }
 
 (( $# > 0 )) || usage
 command="$1"
 shift
 case "$command" in
-  credential) credential "$@" ;;
   rotate) rotate "$@" ;;
   check-expiry) check_expiry "$@" ;;
   *) usage ;;

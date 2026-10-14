@@ -198,7 +198,6 @@
           ./dot_bash_profile.tmpl
           ./dot_bashrc.tmpl
           ./dot_local/bin/executable_dev-session
-          ./dot_local/bin/executable_gh
           ./dot_local/bin/executable_github-token
           ./dot_local/bin/executable_update-agent-tools
           ./dot_local/bin/executable_workstation-update

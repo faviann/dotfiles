@@ -33,7 +33,7 @@ STUB
   cat >"$seed/dot_local/bin/executable_github-token" <<'STUB'
 #!/usr/bin/env bash
 printf 'github-token %s\n' "$*" >>"$PHASE_LOG"
-printf 'github-token: warning: the work token expires soon; run github-token rotate work\n' >&2
+printf 'github-token: warning: the GitHub token expires soon; run github-token rotate\n' >&2
 [[ "${FAIL_PHASE:-}" != github-token ]]
 STUB
   sed -i "1c #!$(command -v bash)" "$seed/dot_local/bin/executable_"*
@@ -409,7 +409,7 @@ interactive_update() {
 @test "test_workstation_update_completes_despite_token_expiry_warnings_or_failure" {
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'run github-token rotate work'*'Workstation update complete'* ]]
+  [[ "$output" == *'run github-token rotate'*'Workstation update complete'* ]]
 
   run env FAIL_PHASE=github-token bash "$COMMAND"
   [ "$status" -eq 0 ]

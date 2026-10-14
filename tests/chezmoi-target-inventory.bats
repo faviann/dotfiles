@@ -32,11 +32,9 @@ readonly INVENTORY='
 .config/fish/config.fish                        desktop
 .config/fish/functions/fish_greeting.fish       desktop
 .config/git/ignore                              workstation desktop
-.config/github-tokens/work                      workstation desktop
 .config/opencode/AGENTS.md                      workstation desktop
 .gitconfig                                      workstation desktop
 .local/bin/dev-session                          workstation
-.local/bin/gh                                   workstation desktop
 .local/bin/github-token                         workstation desktop
 .local/bin/update-agent-tools                   workstation
 .local/bin/workstation-update                   workstation

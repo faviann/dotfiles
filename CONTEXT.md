@@ -21,8 +21,7 @@ _Avoid_: Remote backend, central database
 The chezmoi `profile` data value that selects which targets a machine gets:
 `workstation` for the LXC host of that name, `desktop` for every other host.
 It expresses host identity, not container membership.
-Distinct from the Home Manager `workstation` profile and the GitHub token
-profiles.
+Distinct from the Home Manager `workstation` profile.
 _Avoid_: is_workstation, is_lxc, container flag
 
 **Accepted exposure**:
