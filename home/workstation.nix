@@ -86,9 +86,10 @@ let
     directory = "/ephemeral/workstation/artifacts";
     baseUrl = "https://artifacts.public.faviann.com";
   };
-  # The work tailnet routes the JES AI gateway through jes-aigateway-router.
   # Userspace mode leaves the container's routes and resolv.conf untouched, so
-  # only traffic sent through this proxy can reach the tailnet.
+  # only traffic sent through this port can reach the work tailnet: HTTP for the
+  # JES AI gateway, SOCKS5 for SSH. tailscaled shares one listener between the
+  # two only when both flags are the same string.
   tailscaleProxyListen = "127.0.0.1:1055";
   tailscaleCli = pkgs.writeShellApplication {
     name = "tailscale";
@@ -125,6 +126,9 @@ in
     morainePackage
     tailscaleCli
     withJesGateway
+    # Debian's netcat-traditional lacks the -X/-x SOCKS5 options that SSH to
+    # tailnet hosts uses as its ProxyCommand.
+    netcat-openbsd
   ];
 
   home.sessionPath = [
@@ -198,9 +202,10 @@ in
   };
 
   # Sign-in, route acceptance, and shields-up are node preferences set once by
-  # `tailscale up`, a human step; see docs/workstation/tailscale.md.
+  # `tailscale up`, a human step. Shields-up must never be removed; see
+  # docs/workstation/tailscale.md.
   systemd.user.services.tailscaled = {
-    Unit.Description = "Tailscale userspace node for the JES AI gateway";
+    Unit.Description = "Tailscale userspace node for the work tailnet";
     Service = {
       Type = "notify";
       RuntimeDirectory = "tailscale";
@@ -210,6 +215,7 @@ in
         "--statedir=%h/.local/share/tailscale"
         "--socket=%t/tailscale/tailscaled.sock"
         "--outbound-http-proxy-listen=${tailscaleProxyListen}"
+        "--socks5-server=${tailscaleProxyListen}"
       ];
       Restart = "on-failure";
       RestartSec = 5;
