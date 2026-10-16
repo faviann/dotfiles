@@ -9,5 +9,9 @@ Make changes in a git worktree; keep the main checkout for reading, pulling, and
 <important if="you are creating or choosing a git worktree">
 - Reuse the branch's worktree if `git worktree list` shows one.
 - Use the harness's built-in worktree feature and its default location where one exists; otherwise create it under `~/worktrees/<repo-name>/<branch-with-slashes-as-dashes>`.
-- Branch from a freshly fetched `origin/<default-branch>`.
+- Branch from a freshly fetched `upstream/<default-branch>`, or `origin/<default-branch>` when there is no `upstream`.
+</important>
+
+<important if="you are about to create a worktree, push, or open a pull request">
+Push only to `origin`, and open PRs against `upstream` only when I ask. In a fork or someone else's clone, read `~/.agents/forks.md` first.
 </important>

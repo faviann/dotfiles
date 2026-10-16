@@ -11,6 +11,7 @@ setup() {
 # Every managed target and the machine profiles that get it.
 readonly INVENTORY='
 .agents/AGENTS.md                               workstation desktop
+.agents/forks.md                                workstation desktop
 .ansible/ssh/proxmox_lxc                        workstation
 .ansible/ssh/proxmox_lxc.pub                    workstation
 .ansible/vault-pass                             workstation
