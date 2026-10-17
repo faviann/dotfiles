@@ -34,12 +34,21 @@ configuration is:
 COLLIE_SKIP_SERVE=1
 COLLIE_HOST=127.0.0.1
 COLLIE_PORT=8787
-COLLIE_PUBLIC_HOSTS=collie.admin.faviann.com
-COLLIE_ALLOWED_ORIGINS=https://collie.admin.faviann.com
+COLLIE_PUBLIC_HOSTS=collie.admin.faviann.com,collie-mobile.admin.faviann.com
+COLLIE_ALLOWED_ORIGINS=https://collie.admin.faviann.com,https://collie-mobile.admin.faviann.com
 COLLIE_PUBLIC_URL=https://collie.admin.faviann.com
 COLLIE_STATE_DIR=/home/faviann/.local/state/collie
 COLLIE_MUX=herdr
 ```
+
+Collie answers on two hostnames. `collie.admin.faviann.com` accepts only
+LAN and WireGuard sources and is the recovery path. `collie-mobile.admin.faviann.com`
+accepts any source that presents the phone's client certificate, so the phone
+works while a commercial VPN holds its only tunnel. Traefik enforces both gates;
+homelab-iac's `stacks/portal/traefik3/README.md` covers the certificate.
+Collie refuses a hostname missing from either list with `host not allowed`.
+Pairing, push subscriptions, and the installed app are per origin, so set
+them up separately on each hostname.
 
 `COLLIE_MUX=herdr` is required for Collie 1.x here because both Herdr and tmux
 run on the workstation. Without an explicit multiplexer, start/restart can fail
