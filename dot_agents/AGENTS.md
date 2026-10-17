@@ -15,3 +15,7 @@ Make changes in a git worktree; keep the main checkout for reading, pulling, and
 <important if="you are about to create a worktree, push, or open a pull request">
 Push only to `origin`, and open PRs against `upstream` only when I ask. In a fork or someone else's clone, read `~/.agents/forks.md` first.
 </important>
+
+<important if="you are about to post to GitHub: an issue, PR, comment, review, or pushed commit message">
+Write references to issues, PRs, and users outside me and my orgs unlinked, as "PR 1612", unless I confirm the link: `#N`, `owner/repo#N`, a URL, or `@name` notifies them and leaves a backlink on their side.
+</important>
