@@ -23,6 +23,7 @@ MANAGED="{
     \"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC\": \"1\"
   },
   \"apiKeyHelper\": \"cat ~/.config/claude/gateway-token\",
+  \"attribution\": {\"commit\": \"\", \"pr\": \"\"},
   \"hooks\": {\"PostToolUse\": [$TRACK_PRS]}
 }"
 
@@ -57,6 +58,7 @@ apply_settings() {
   "model": "opus",
   "permissions": {"allow": ["Bash(ls:*)"]},
   "env": {"OTHER": "kept", "ANTHROPIC_BASE_URL": "https://stale.example"},
+  "attribution": {"pr": "stale"},
   "hooks": {
     "SessionStart": [{"matcher": "^(startup|resume)$", "hooks": [{"type": "command", "command": "bash 'herdr-agent-state.sh' session", "timeout": 10}]}],
     "PostToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "format && lint"}]}]
