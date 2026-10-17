@@ -83,6 +83,18 @@ line1+="${SEP}ctx $(color_used "$pct")${bar} ${pct}%${R}"
 ktok() { (( $1 >= 1000000 )) && echo "$(( $1 / 1000000 ))M" || echo "$(( $1 / 1000 ))k"; }
 tokens=$(j .context_window.total_input_tokens); size=$(j .context_window.context_window_size)
 [[ -n $tokens && -n $size ]] && line1+=" ${DIM}$(ktok "$tokens")/$(ktok "$size")${R}"
+# Time since Claude last answered, from the transcript. A green ● means the
+# prompt cache is still warm, a dim ○ that it went cold; Claude Code re-runs
+# this script at prompt_cache.expires_at, so the dot flips on time.
+now=$(date +%s)
+transcript=$(j .transcript_path)
+last=$([[ -f $transcript ]] && tac "$transcript" | jq -Rrn 'first(inputs | fromjson? | select(.type == "assistant") | .timestamp)')
+if [[ -n $last ]]; then
+  idle=$(( now - $(date -d "$last" +%s) ))
+  if (( idle < 3600 )); then age="$(( idle / 60 ))m"; else age="$(( idle / 3600 ))h"; fi
+  expires=$(j .prompt_cache.expires_at)
+  if [[ -n $expires ]] && (( expires > now )); then line1+=" ${GRN}●${R}${DIM}${age}${R}"; else line1+=" ${DIM}○${age}${R}"; fi
+fi
 [[ -n $cost ]] && line1+="${SEP}$(printf '$%.2f' "$cost")"
 line2=""
 
@@ -134,7 +146,6 @@ window() { # label, used%, reset epoch, date format
   printf '%s %s%d%%%s' "$1" "$(color_left "$left")" "$left" "$R"
   (( $3 > now )) && printf ' %s↻ %s%s' "$DIM" "$(TZ=America/Toronto date -d "@$3" +"$4")" "$R"
 }
-now=$(date +%s)
 prev=""
 while read -r id a w u r; do
   if [[ $a != "$prev" ]]; then
