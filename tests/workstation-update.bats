@@ -100,6 +100,7 @@ publish_change() {
   local phases
   phases="$(cat "$PHASE_LOG")"
   [[ "$phases" == *fetch*'chezmoi init'*'chezmoi apply'*'chezmoi verify'*workstation-setup*agent-tools*'github-token check-expiry'* ]]
+  [ "${lines[-1]}" = 'Restart agent sessions to load new versions.' ]
   run ! grep -q '^bw ' "$PHASE_LOG"
 
   # Even unchanged source must retry the configuration owner's reconciliation.
@@ -198,16 +199,51 @@ publish_change() {
   [ "$(git -C "$SOURCE_REPO" rev-parse HEAD)" = "$local_head" ]
 }
 
-@test "test_workstation_update_preserves_modified_chezmoi_targets_unattended" {
+@test "test_workstation_update_keeps_modified_targets_unless_unattended_which_overwrites_and_lists_them" {
+  printf 'kept\n' >"$seed/dot_removed"
+  git -C "$seed" add .
+  git -C "$seed" commit --quiet -m 'add removed target'
+  git -C "$seed" push --quiet
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
   printf 'operator target work\n' >"$HOME/.managed"
+  rm "$HOME/.removed"
   publish_change
   : >"$PHASE_LOG"
   run bash "$COMMAND" </dev/null
   [ "$status" -ne 0 ]
   [ "$(cat "$HOME/.managed")" = 'operator target work' ]
   run ! grep -q '^workstation-setup' "$PHASE_LOG"
+
+  run bash "$COMMAND" --unattended
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.managed")" = 'version two' ]
+  [ "$(cat "$HOME/.removed")" = kept ]
+  [[ "$output" == *$'Dotfiles: overwriting locally modified targets:\n  ~/.managed\n  ~/.removed\n'* ]]
+  [[ "$output" != *'operator target work'* ]]
+
+  run bash "$COMMAND" --unattended
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'overwriting locally modified targets'* ]]
+}
+
+piped_update() {
+  printf 'y\n' | bash "$COMMAND" "$@"
+}
+
+@test "test_workstation_update_unattended_gives_commands_no_input" {
+  cat >"$BATS_TEST_TMPDIR/bin/workstation-setup" <<STUB
+#!$(command -v bash)
+cat >"$BATS_TEST_TMPDIR/setup-stdin"
+STUB
+  run piped_update
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/setup-stdin")" = y ]
+
+  run piped_update --unattended
+  [ "$status" -eq 0 ]
+  [ -e "$BATS_TEST_TMPDIR/setup-stdin" ]
+  [ ! -s "$BATS_TEST_TMPDIR/setup-stdin" ]
 }
 
 @test "test_workstation_update_stops_at_failed_phases_and_can_be_rerun" {
@@ -292,6 +328,39 @@ publish_secret_templates() {
   [[ "$output" == *'Bitwarden is locked'* ]]
 }
 
+@test "test_workstation_update_unattended_follows_the_secrets_contract" {
+  publish_secret_templates
+  printf 'existing secret\n' >"$HOME/.secret"
+  printf 'existing routing\n' >"$HOME/.routing"
+  run env BW_SESSION= bash "$COMMAND" --unattended
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.secret")" = 'existing secret' ]
+  [[ "$output" == *'refresh deferred'* ]]
+  run ! grep -q '^bw unlock --raw' "$PHASE_LOG"
+
+  run env BW_SESSION= bash "$COMMAND" --refresh-secrets --unattended
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'Bitwarden is locked'* ]]
+  [ "$(cat "$HOME/.secret")" = 'existing secret' ]
+
+  run bash "$COMMAND" --unattended
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'reusing the unlocked Bitwarden session'* ]]
+  [[ "$output" != *'refresh deferred'* ]]
+  [ "$(cat "$HOME/.secret")" = refreshed-secret ]
+
+  rm "$HOME/.secret"
+  run env BW_SESSION= bash "$COMMAND" --unattended
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'unlocking is required'*'~/.secret'*'Bitwarden is locked'* ]]
+  [ ! -e "$HOME/.secret" ]
+  run ! grep -q '^bw unlock --raw' "$PHASE_LOG"
+
+  run env BW_SESSION= bash "$COMMAND" --unattended --skip-secrets
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'cannot skip required secrets'* ]]
+}
+
 interactive_update() {
   local transcript="$BATS_TEST_TMPDIR/terminal"
   : >"$transcript"
@@ -345,6 +414,23 @@ interactive_update() {
   [ "$(cat "$HOME/.secret")" = refreshed-secret ]
 }
 
+@test "test_workstation_update_unattended_neither_prompts_nor_waits_on_a_terminal" {
+  publish_secret_templates
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  printf 'operator target work\n' >"$HOME/.managed"
+  : >"$PHASE_LOG"
+  # The child shell expands COMMAND from the environment.
+  # shellcheck disable=SC2016
+  run env TERM=dumb BW_SESSION= timeout 20s script -q -e -c 'bash "$COMMAND" --unattended' /dev/null </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'Unlock and refresh secrets?'* ]]
+  [[ "$output" == *'  ~/.managed'*'refresh deferred'* ]]
+  [ "$(cat "$HOME/.managed")" = 'version one' ]
+  [ "$(cat "$HOME/.secret")" = refreshed-secret ]
+  run ! grep -q '^bw unlock --raw' "$PHASE_LOG"
+}
+
 @test "test_workstation_update_secret_inventory_respects_ignores_and_template_conditions" {
   printf '.ignored-secret\n' >"$seed/.chezmoiignore"
   printf '{{ (bitwarden "item" "fixture").notes }}\n' >"$seed/dot_ignored-secret.tmpl"
@@ -372,9 +458,12 @@ interactive_update() {
   run bash "$COMMAND"
   [ "$status" -ne 0 ]
   [[ "$output" == *'setup is incomplete'* ]]
-  run bash "$COMMAND" --force
-  [ "$status" -ne 0 ]
-  [[ "$output" == *'usage: workstation-update'* ]]
+  for arguments in --force '--skip-secrets --refresh-secrets' '--unattended --refresh-secrets --skip-secrets'; do
+    # shellcheck disable=SC2086
+    run bash "$COMMAND" $arguments
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'usage: workstation-update [--unattended] [--skip-secrets | --refresh-secrets]'* ]]
+  done
   [ ! -e "$PHASE_LOG" ]
 }
 

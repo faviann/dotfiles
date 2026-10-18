@@ -46,21 +46,36 @@ ensure_bitwarden_session() {
     || fail 'credential phase failed: Bitwarden returned an invalid session'
 }
 
+usage='usage: workstation-update [--unattended] [--skip-secrets | --refresh-secrets]'
+unattended=false
 secrets_mode=auto
-case "${1:-}" in
-  '') (( $# == 0 )) || fail 'usage: workstation-update [--skip-secrets | --refresh-secrets]' ;;
-  --skip-secrets) secrets_mode=skip ;;
-  --refresh-secrets) secrets_mode=refresh ;;
-  --help|-h)
-    printf 'Usage: workstation-update [--skip-secrets | --refresh-secrets]\n'
-    printf 'With Bitwarden locked, press Enter to keep existing secret-backed files.\n'
-    printf '  --skip-secrets     Keep existing files, even with an unlocked vault.\n'
-    printf '  --refresh-secrets  Unlock if needed and refresh secret-backed files.\n'
-    printf 'Missing, empty, or unreadable secret-backed files require unlocking.\n'
-    exit 0 ;;
-  *) fail 'usage: workstation-update [--skip-secrets | --refresh-secrets]' ;;
-esac
-(( $# <= 1 )) || fail 'usage: workstation-update [--skip-secrets | --refresh-secrets]'
+while (( $# > 0 )); do
+  case "$1" in
+    --unattended) unattended=true ;;
+    --skip-secrets) [[ "$secrets_mode" == auto ]] || fail "$usage"; secrets_mode=skip ;;
+    --refresh-secrets) [[ "$secrets_mode" == auto ]] || fail "$usage"; secrets_mode=refresh ;;
+    --help|-h)
+      printf 'Usage: workstation-update [--unattended] [--skip-secrets | --refresh-secrets]\n'
+      printf 'With Bitwarden locked, press Enter to keep existing secret-backed files.\n'
+      printf '  --unattended       For agents: no prompts, and commands read no input.\n'
+      printf '                     Locked secrets stay deferred; locally modified\n'
+      printf '                     targets are overwritten, with their paths listed.\n'
+      printf '  --skip-secrets     Keep existing files, even with an unlocked vault.\n'
+      printf '  --refresh-secrets  Unlock if needed and refresh secret-backed files.\n'
+      printf 'Missing, empty, or unreadable secret-backed files require unlocking.\n'
+      exit 0 ;;
+    *) fail "$usage" ;;
+  esac
+  shift
+done
+
+chezmoi_force=--force=false
+if [[ "$unattended" == true ]]; then
+  # End-of-input for every child and for this script's own prompt guards, so
+  # an unanticipated prompt fails instead of waiting for nobody.
+  exec </dev/null
+  chezmoi_force=--force=true
+fi
 
 select_secrets_mode() {
   local managed rendered skipped target answer
@@ -196,10 +211,19 @@ select_secrets_mode
 finish_phase
 # Keep preview output to phase messages: rendered diffs can expose secrets.
 start_phase '[4/9] Dotfiles: checking planned changes...'
-chezmoi apply --dry-run --force=false "${chezmoi_secret_args[@]}" || fail 'chezmoi preview failed'
+if [[ "$unattended" == true ]]; then
+  # A first-column mark is a target changed since chezmoi last wrote it:
+  # exactly the targets an interactive apply would prompt for.
+  overwritten="$(chezmoi status --exclude scripts "${chezmoi_secret_args[@]}" \
+    | awk 'substr($0, 1, 1) != " " { print "  ~/" substr($0, 4) }')" \
+    || fail 'cannot inspect locally modified targets'
+  [[ -z "$overwritten" ]] \
+    || printf 'Dotfiles: overwriting locally modified targets:\n%s\n' "$overwritten"
+fi
+chezmoi apply --dry-run "$chezmoi_force" "${chezmoi_secret_args[@]}" || fail 'chezmoi preview failed'
 finish_phase
 start_phase '[5/9] Dotfiles: applying changes and running lifecycle scripts...'
-chezmoi apply --force=false "${chezmoi_secret_args[@]}" || fail 'chezmoi apply failed'
+chezmoi apply "$chezmoi_force" "${chezmoi_secret_args[@]}" || fail 'chezmoi apply failed'
 finish_phase
 start_phase '[6/9] Dotfiles: verifying applied files...'
 chezmoi verify --exclude scripts "${chezmoi_secret_args[@]}" || fail 'chezmoi verification failed'
@@ -226,3 +250,5 @@ else
   printf 'Workstation update complete\n'
 fi
 printf 'Total time: %ss\n' "$((SECONDS - update_started))"
+# Running agent processes keep the binaries they started with.
+printf 'Restart agent sessions to load new versions.\n'
