@@ -6,6 +6,8 @@ Home Manager owns `herdr.service`, enabled under `default.target`. It runs
 boot activation. Collie's app-owned service has an independent lifecycle and
 reconnects when Herdr returns; restarting Herdr does not require restarting
 Collie.
+Home Manager never restarts Herdr on activation; unit changes apply on the next
+restart from outside Herdr, or at boot.
 
 ## Service control and manual updates
 

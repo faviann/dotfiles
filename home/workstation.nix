@@ -368,6 +368,9 @@ in
 
   # Boot supervision assumes the one-time detached-server cutover is complete.
   systemd.user.services.herdr.Install.WantedBy = [ "default.target" ];
+  # An update activation must never restart herdr: a restart ends every pane
+  # process, including the agent running the update.
+  systemd.user.services.herdr.Unit.X-RestartIfChanged = false;
   systemd.user.services.herdr.Service = {
     Type = "simple";
     Environment =
