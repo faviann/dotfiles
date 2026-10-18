@@ -17,9 +17,10 @@ Git owns index, worktree, and ref updates through
 [`merge --ff-only --no-autostash --no-overwrite-ignore`](https://git-scm.com/docs/git-merge).
 Chezmoi owns target reconciliation and
 [conflict prompts](https://www.chezmoi.io/reference/commands/apply/).
-The wrapper forces neither source convergence nor target overwrites. Run it
-with exclusive use of the source checkout; its lock serializes maintenance
-commands, not arbitrary concurrent Git commands or editors.
+The wrapper never forces source convergence, and forces target overwrites only
+in [unattended runs](#unattended-runs). Run it with exclusive use of the source
+checkout; its lock serializes maintenance commands, not arbitrary concurrent
+Git commands or editors.
 
 `workstation-update` never rewrites `flake.lock`. .NET release discovery and
 publication happen through the dedicated GitHub workflow; maintenance delivers
@@ -38,8 +39,8 @@ With Bitwarden locked, press Enter to keep existing secret-backed files. A valid
 explicit skip and refresh options.
 
 Missing, empty, or unreadable secret-backed files require unlocking; the command
-lists them before prompting. Unattended runs keep existing files when locked,
-but require an exported `BW_SESSION` when files need restoring.
+lists them before prompting. Runs without a terminal keep existing files when
+locked, but require an exported `BW_SESSION` when files need restoring.
 
 Skipping preserves **entire files**, including workstation `.gitconfig`, and
 excludes them from verification. Their nonsecret changes are deferred too.
@@ -47,14 +48,40 @@ Use `--refresh-secrets` after rotation or credential failures: file presence
 alone cannot establish validity.
 
 Each phase announces its work and reports elapsed seconds when it finishes.
-The final line reports total time; a failed phase reports its elapsed time and
-the total so far. Timings include time spent answering prompts. Use them to identify
+After the last phase, the command reports total time, then reminds you to
+restart agent sessions; a failed phase reports its elapsed time and the total
+so far. Timings include time spent answering prompts. Use them to identify
 the slow phase before investigating its commands.
 
 Completion reports deferred secret refreshes; preview output omits file contents
 to keep credentials out of terminal logs.
 Chezmoi lifecycle scripts must succeed during apply; verification checks files
 without rerunning those scripts.
+
+## Unattended runs
+
+Agents run `workstation-update --unattended`; use it whenever nobody will
+answer prompts. The mode is a flag rather than inferred from a missing
+terminal: a shell inside a Herdr pane has one, and chezmoi would open it and
+wait. The flag combines with `--skip-secrets` or `--refresh-secrets` and
+changes four defaults.
+
+Commands read no input. Standard input is `/dev/null`, so an unanticipated
+prompt fails instead of waiting.
+
+Secrets follow the terminal-free behavior above. A valid `BW_SESSION`
+refreshes secret-backed files; with Bitwarden locked, existing files are kept
+and completion reports the refresh as deferred. The run fails when a file is
+missing, empty, or unreadable, and for `--refresh-secrets` with a locked
+vault.
+
+Chezmoi overwrites targets changed since it last wrote them, instead of
+prompting. The preview phase lists each overwritten path, never a diff or file
+contents.
+
+Agent tools still update, and running agents keep the binaries they started
+with: restart agent sessions afterwards. Home Manager activation never restarts
+Herdr, so the update does not end the agent's own pane.
 
 ## Failure recovery
 
@@ -87,4 +114,5 @@ checks configuration freshness. Only maintenance lock files are active under
 there is no freshness cache or workstation-side update scheduler.
 
 An explicit maintenance run may replace agent tools under running sessions and
-restart changed user services, so choose an appropriate maintenance window.
+restart changed user services other than Herdr, so choose an appropriate
+maintenance window.
