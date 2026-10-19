@@ -115,3 +115,13 @@ rendered_workstation_activation() {
     <<<"$rendered_activation" >/dev/null \
     || fail 'workstation activation contains a Herdr lifecycle or migration action'
 }
+
+@test "test_herdr_service_keeps_running_when_an_activation_changes_it" {
+  local rendered_service
+
+  rendered_service="$(rendered_herdr_service)" \
+    || fail 'could not render the Herdr user service'
+
+  jq -e '.Unit."X-RestartIfChanged" == false' <<<"$rendered_service" >/dev/null \
+    || fail 'Home Manager activation may restart Herdr and end every pane process'
+}
