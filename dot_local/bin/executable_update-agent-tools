@@ -65,4 +65,14 @@ npm install --global --prefix "$prefix" --force=false --engine-strict \
 for harness in opencode omp pi; do
   "$harness" --version >/dev/null || fail "verification failed: $harness"
 done
+
+# Claude Code's background plugin updates are off on this workstation, so
+# maintenance updates these when present. Each update refreshes its marketplace.
+claude_plugins=(pstack@pstack-claude)
+installed_plugins="$(claude plugin list --json | jq -r '.[].id')" \
+  || fail 'listing Claude Code plugins failed'
+for plugin in "${claude_plugins[@]}"; do
+  grep -qxF "$plugin" <<<"$installed_plugins" || continue
+  claude plugin update "$plugin" || fail "Claude Code plugin update failed: $plugin"
+done
 printf 'Agent tools updated.\n'
