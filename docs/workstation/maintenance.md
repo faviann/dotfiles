@@ -86,7 +86,10 @@ Herdr, so the update does not end the agent's own pane.
 ## Failure recovery
 
 The agent-tool phase checks npm package compatibility before replacing any
-executable, then confirms that each Bun-run harness starts. There is no
+executable, then confirms that each Bun-run harness starts. Last, it updates
+each installed Claude Code plugin that `update-agent-tools` lists, currently
+pstack, and never installs a missing one. Running Claude Code sessions keep
+the plugin version they loaded; new sessions load the update. There is no
 automatic rollback. On failure, use the command's diagnostics to correct the
 problem, then rerun `workstation-update`. Success is reported only after these
 checks pass; no separate status cache needs repairing.

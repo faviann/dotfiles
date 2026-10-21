@@ -9,8 +9,10 @@ setup() {
   export COMMAND_LOG="$HOME/commands"
   : >"$COMMAND_LOG"
   export COMMAND="$BATS_TEST_DIRNAME/../dot_local/bin/executable_update-agent-tools"
+  export PLUGIN_LIST="$BATS_TEST_TMPDIR/plugins.json"
+  printf '[{"id":"codex@openai-codex","scope":"user"},{"id":"pstack@pstack-claude","scope":"user"}]\n' >"$PLUGIN_LIST"
   local tool
-  for tool in npm curl bun opencode omp pi; do
+  for tool in npm curl bun opencode omp pi claude; do
     printf '#!%s\n' "$(command -v bash)" >"$HOME/.local/bin/$tool"
     cat >>"$HOME/.local/bin/$tool" <<'STUB'
 set -euo pipefail
@@ -36,6 +38,16 @@ case "$name" in
     fi
     ;;
   opencode|omp|pi) [[ "${FAIL_AT:-}" != "$name" ]] ;;
+  claude)
+    case "$*" in
+      'plugin list --json')
+        [[ "${FAIL_AT:-}" != plugin-list ]]
+        cat "$PLUGIN_LIST"
+        ;;
+      'plugin update '*) [[ "${FAIL_AT:-}" != plugin-update ]] ;;
+      *) exit 92 ;;
+    esac
+    ;;
   *) exit 92 ;;
 esac
 STUB
@@ -71,7 +83,7 @@ STUB
 
 @test "test_failed_installation_or_harness_fails_update" {
   local phase
-  for phase in bun bun-upgrade npm opencode omp pi; do
+  for phase in bun bun-upgrade npm opencode omp pi plugin-list plugin-update; do
     run env FAIL_AT="$phase" bash "$COMMAND"
     [ "$status" -ne 0 ]
     [[ "$output" != *'Agent tools updated'* ]]
@@ -100,4 +112,28 @@ STUB
   grep -q '^curl ' "$COMMAND_LOG"
   run "$HOME/.local/bin/bun" --version
   [ "$status" -eq 0 ]
+}
+
+@test "test_update_refreshes_installed_claude_plugins_after_npm_install" {
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Agent tools updated'* ]]
+  [ "$(tail -n 1 "$COMMAND_LOG")" = 'claude plugin update pstack@pstack-claude' ]
+  [ "$(grep -c '^claude plugin update ' "$COMMAND_LOG")" -eq 1 ]
+}
+
+@test "test_update_skips_claude_plugins_that_are_not_installed" {
+  printf '[{"id":"codex@openai-codex","scope":"user"}]\n' >"$PLUGIN_LIST"
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Agent tools updated'* ]]
+  grep -qx 'claude plugin list --json' "$COMMAND_LOG"
+  run ! grep -q '^claude plugin update ' "$COMMAND_LOG"
+}
+
+@test "test_failed_claude_plugin_update_names_the_plugin" {
+  run env FAIL_AT=plugin-update bash "$COMMAND"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'Claude Code plugin update failed: pstack@pstack-claude'* ]]
+  [[ "$output" != *'Agent tools updated'* ]]
 }
