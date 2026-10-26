@@ -12,7 +12,10 @@ home-manager build --flake .#workstation
 
 The .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, Azure CLI (`az`), `jq`,
 `ripgrep`, `fd`, `fzf`, Hermes, Moraine, and Tailscale with the
-`with-jes-gateway` wrapper ([tailscale](tailscale.md)). Hermes is installed from
+`with-jes-gateway` wrapper ([tailscale](tailscale.md)). The workstation also
+gets the publishing toolchain it shares with desktops: the `artifactserver`
+CLI, Chromium, the DejaVu fonts, and the fontconfig tools
+([desktop toolchain](../desktop-toolchain.md)). Hermes is installed from
 `github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
 credentials and runtime configuration stay in `~/.hermes`.
 

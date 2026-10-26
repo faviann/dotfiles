@@ -1,8 +1,9 @@
 # dotfiles
 
 Personal dotfiles managed with [chezmoi](https://chezmoi.io) + Bitwarden CLI,
-plus the `workstation` Home Manager flake that provisions the Debian LXC
-workstation and its agent toolchain.
+plus a Home Manager flake with two profiles. The `workstation` profile
+provisions the Debian LXC workstation and its agent toolchain. The `desktop`
+profile gives every other machine the artifact-server publishing toolchain.
 
 This is a personal repository: no support, no stability guarantees. It is not
 directly reusable, because chezmoi renders secrets from the maintainer's
@@ -29,7 +30,7 @@ Setting up a new machine? Start with **[BOOTSTRAP.md](BOOTSTRAP.md)**.
 | `dot_*`, `private_dot_*`, `dot_config/` | chezmoi source for home-directory targets |
 | `.chezmoiscripts/` | chezmoi lifecycle scripts |
 | `.chezmoiignore`, `.chezmoi.toml.tmpl` | chezmoi target inventory and data |
-| `flake.nix`, `home/` | Home Manager flake and the `workstation` profile |
+| `flake.nix`, `home/` | Home Manager flake and the `workstation` and `desktop` profiles |
 | `packages/` | Nix package definitions and patches |
 | `scripts/` | Maintainer scripts (e.g. `update-dotnet-sdk`, `lobu-bootstrap`) |
 | `tests/` | Bats behavioral suites |
@@ -46,6 +47,8 @@ flake files is repository-only and never applied to a home directory.
 - [Repository conventions](docs/repository-conventions.md) — chezmoi inventory
   rules and how to run the tests
 - [SSH key rotation](docs/ssh-key-rotation.md)
+- [Desktop toolchain](docs/desktop-toolchain.md) for the `desktop` Home Manager
+  profile
 - [Domain glossary](CONTEXT.md) and [agent practices](AGENTS.md)
 
 **Workstation components**

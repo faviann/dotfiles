@@ -12,6 +12,8 @@ workstation profile, so both machines get the same pins.
 - Node.js, which the render check runs on.
 - Chromium and DejaVu fonts, with `fonts.fontconfig.enable`, so a headless
   screenshot shows readable text.
+- The fontconfig tools, such as `fc-list` and `fc-match`, to check which fonts
+  the profile provides.
 
 ## How it applies
 
