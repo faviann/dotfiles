@@ -1,0 +1,13 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Rewriting drops TOML comments, so leave the file untouched when the server is already current. */ -}}
+{{- $config := dict -}}
+{{- if trim .chezmoi.stdin -}}
+{{-   $config = fromToml .chezmoi.stdin -}}
+{{- end -}}
+{{- $current := get (get $config "mcp_servers" | default dict) "artifact_server" | default dict -}}
+{{- $server := mergeOverwrite (omit $current "bearer_token_env_var" "http_headers" "env_http_headers") (dict "url" (printf "%s/mcp" .artifactServer.url) "http_headers_helper" (joinPath .chezmoi.homeDir ".local/bin/artifact-server-mcp-headers" | squote)) -}}
+{{- if eq (toJson $server) (toJson $current) -}}
+{{-   .chezmoi.stdin -}}
+{{- else -}}
+{{-   toToml (setValueAtPath "mcp_servers.artifact_server" $server $config) -}}
+{{- end -}}

@@ -23,8 +23,14 @@ if [[ ! -x "$reconciler" ]]; then
   exit 1
 fi
 
+reconcile_args=()
+# A skillset profile, not the machine profile: skillset defines only workstation.
+if [[ ! -e "$HOME/.agents/.skillset/profile" && ! -L "$HOME/.agents/.skillset/profile" ]]; then
+  reconcile_args=(--profile workstation)
+fi
+
 # The reconciler is repository-owned code from a checkout this hook deliberately
 # does not pin or verify. Applying dotfiles can carry an unlocked vault session
 # (workstation-update exports BW_SESSION before chezmoi apply), and linking
 # skills never needs it, so withhold it.
-env -u BW_SESSION "$reconciler"
+env -u BW_SESSION "$reconciler" "${reconcile_args[@]}"

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "artifact-server": {
+      "type": "remote",
+      "url": "{{ .artifactServer.url }}/mcp",
+      "oauth": false,
+      "headers": {
+        "Authorization": "Bearer {file:~/.agents/artifact-server/api-key}"
+      }
+    }
+  }
+}

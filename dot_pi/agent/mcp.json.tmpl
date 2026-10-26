@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "artifact-server": {
+      "url": "{{ .artifactServer.url }}/mcp",
+      "headers": {
+        "Authorization": "!key=$(cat ~/.agents/artifact-server/api-key) && [ -n \"$key\" ] && printf 'Bearer %s' \"$key\""
+      }
+    }
+  }
+}

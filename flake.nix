@@ -209,6 +209,7 @@
           ./dot_claude/hooks/executable_track-session-prs.sh
           ./dot_bash_profile.tmpl
           ./dot_bashrc.tmpl
+          ./dot_local/bin/executable_artifact-server-mcp-headers
           ./dot_local/bin/executable_dev-session
           ./dot_local/bin/executable_github-token
           ./dot_local/bin/executable_update-agent-tools

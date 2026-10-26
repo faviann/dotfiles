@@ -11,6 +11,7 @@ setup() {
 # Every managed target and the machine profiles that get it.
 readonly INVENTORY='
 .agents/AGENTS.md                               workstation desktop
+.agents/artifact-server/api-key                 workstation desktop
 .agents/forks.md                                workstation desktop
 .ansible/ssh/proxmox_lxc                        workstation
 .ansible/ssh/proxmox_lxc.pub                    workstation
@@ -24,24 +25,30 @@ readonly INVENTORY='
 .chezmoiscripts/reconcile-agent-skills.sh       workstation desktop
 .chezmoiscripts/switch-chezmoi-origin-to-ssh.sh workstation desktop
 .chezmoiscripts/switch-home-manager.sh          desktop
+.claude.json                                    workstation desktop
 .claude/CLAUDE.md                               workstation desktop
 .claude/hooks/track-session-prs.sh              workstation desktop
 .claude/settings.json                           workstation desktop
 .claude/statusline.sh                           workstation desktop
 .codex/AGENTS.md                                workstation desktop
+.codex/config.toml                              workstation desktop
 .config/claude/gateway-admin-key                workstation desktop
 .config/claude/gateway-token                    workstation desktop
+.config/faviann-skills/artifact-server.json     workstation desktop
 .config/fish/config.fish                        desktop
 .config/fish/functions/fish_greeting.fish       desktop
 .config/git/ignore                              workstation desktop
 .config/opencode/AGENTS.md                      workstation desktop
+.config/opencode/opencode.json                  workstation desktop
 .gitconfig                                      workstation desktop
+.local/bin/artifact-server-mcp-headers          workstation desktop
 .local/bin/dev-session                          workstation
 .local/bin/github-token                         workstation desktop
 .local/bin/update-agent-tools                   workstation
 .local/bin/workstation-update                   workstation
 .npmrc                                          workstation desktop
 .pi/agent/AGENTS.md                             workstation desktop
+.pi/agent/mcp.json                              workstation desktop
 .ssh/allowed_signers                            workstation desktop
 .ssh/config                                     workstation desktop
 .ssh/id_ed25519                                 workstation desktop

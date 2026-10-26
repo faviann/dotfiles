@@ -9,8 +9,8 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
-| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All five items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
+| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
 
 The workstation also gets the Ansible controller key and vault password.
 Desktops get agent configuration and the `desktop` Home Manager profile, which
@@ -59,9 +59,11 @@ chezmoi init --apply https://github.com/faviann/dotfiles.git
 ```
 
 After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
-`~/.ssh/known_hosts`, and the
+`~/.ssh/known_hosts`, the
 [Claude Code gateway](#bitwarden-claude-code-gateway-items) credentials in
-`~/.config/claude/`; the workstation also gets the Ansible controller key pair
+`~/.config/claude/`, and the
+[artifact-server API key](#bitwarden-artifact-server-api-key-item); the
+workstation also gets the Ansible controller key pair
 in `~/.ansible/ssh/`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
 does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
@@ -103,12 +105,15 @@ package-discovery or Ansible step.
 The bootstrap handoff is part of `workstation-setup`, not SSH login or a
 background schedule.
 
-Chezmoi also recovers agent skills on the workstation. If `~/repos/skillset`
+Chezmoi also recovers agent skills on every profile. If `~/repos/skillset`
 is absent, it clones `faviann/skillset` and initializes its pinned submodule
 sources; it never updates an existing checkout or its sources. Skillset's
-reconciler then links the skills selected in its `skills.txt` into the
-supported harnesses. Skill reconciliation runs during `chezmoi apply`, never
-during shell login.
+reconciler then links the skills selected in its `profiles/workstation.txt`
+into the supported harnesses. When `~/.agents/.skillset/profile` is missing,
+the hook passes `--profile workstation`, which makes the reconciler record
+`workstation` there; skillset defines only that profile, so desktops use it
+too. Skill reconciliation runs during `chezmoi apply`, never during shell
+login.
 
 Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
 has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
@@ -177,6 +182,44 @@ credentials that sub2api issued, each from the Notes of one Bitwarden item:
 
 Create both items before the first apply. Chezmoi sets only its own keys in
 `~/.claude/settings.json` and leaves the rest of the file to Claude Code.
+
+## Bitwarden artifact-server API Key Item
+
+Agents publish to artifact-server at `artifact-server.public.faviann.com` and
+use its MCP server for comments and visibility. On the workstation and
+desktops, chezmoi renders one API key from the Notes of one Bitwarden item:
+
+```text
+dotfiles/artifact-server-api-key
+```
+
+The key goes to `~/.agents/artifact-server/api-key`, and every consumer reads
+that file when it connects:
+
+- The `publish-artifact` skill reads its path from
+  `~/.config/faviann-skills/artifact-server.json`.
+- Claude Code and Codex run `artifact-server-mcp-headers`, which prints the
+  `Authorization` header from the file.
+- OpenCode and pi read the file from their MCP configuration.
+
+Chezmoi sets only the `artifact-server` server in `~/.claude.json` and the
+`artifact_server` server in `~/.codex/config.toml`, and owns
+`~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. Other servers
+and other keys in those two files stay, as do keys of the artifact-server entry
+such as Codex's `enabled`. The entry's competing auth keys are removed so the
+helper is the only auth: Claude Code's `headers`, and Codex's
+`bearer_token_env_var`, `http_headers`, and `env_http_headers`. When the
+managed keys change, as on the first apply, apply rewrites
+`~/.codex/config.toml` as sorted TOML and drops its comments. A corrupt
+`~/.claude.json` or `~/.codex/config.toml` stops the whole apply with a
+`fromJson` or `fromToml` error that names the file. Fix or delete the file,
+then apply again. OpenCode refuses to start while the key file is missing.
+
+To rotate the key, put the new key in the item's Notes. Then, on each machine
+with Bitwarden unlocked, run `bw sync` so the CLI sees the edit, and run
+`workstation-update --refresh-secrets` on the workstation or `chezmoi apply` on
+a desktop. The harnesses need no other change. Apply fails unless the Notes
+hold one key of printable ASCII characters on one line.
 
 ## GitHub Registration
 

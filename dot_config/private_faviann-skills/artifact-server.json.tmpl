@@ -1,0 +1,1 @@
+{{ dict "server" .artifactServer.url "tokenFile" (joinPath .chezmoi.homeDir ".agents/artifact-server/api-key") | toPrettyJson "  " -}}
