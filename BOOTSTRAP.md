@@ -9,8 +9,8 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
-| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All five items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
+| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
 
 The workstation also gets the Ansible controller key and vault password.
 Desktops get agent configuration and the `desktop` Home Manager profile, which
@@ -59,9 +59,11 @@ chezmoi init --apply https://github.com/faviann/dotfiles.git
 ```
 
 After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
-`~/.ssh/known_hosts`, and the
+`~/.ssh/known_hosts`, the
 [Claude Code gateway](#bitwarden-claude-code-gateway-items) credentials in
-`~/.config/claude/`; the workstation also gets the Ansible controller key pair
+`~/.config/claude/`, and the
+[artifact-server API key](#bitwarden-artifact-server-api-key-item); the
+workstation also gets the Ansible controller key pair
 in `~/.ansible/ssh/`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
 does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
@@ -177,6 +179,34 @@ credentials that sub2api issued, each from the Notes of one Bitwarden item:
 
 Create both items before the first apply. Chezmoi sets only its own keys in
 `~/.claude/settings.json` and leaves the rest of the file to Claude Code.
+
+## Bitwarden artifact-server API Key Item
+
+Agents publish to artifact-server at `artifact-server.public.faviann.com` and
+use its MCP server for comments and visibility. On the workstation and
+desktops, chezmoi renders one API key from the Notes of one Bitwarden item:
+
+```text
+dotfiles/artifact-server-api-key
+```
+
+The key goes to `~/.agents/artifact-server/api-key`, and every consumer reads
+that file when it connects:
+
+- The `publish-artifact` skill reads its path from
+  `~/.config/faviann-skills/artifact-server.json`.
+- Claude Code and Codex run `artifact-server-mcp-headers`, which prints the
+  `Authorization` header from the file.
+- OpenCode and pi read the file from their MCP configuration.
+
+Chezmoi sets only the `artifact-server` server in `~/.claude.json` and the
+`artifact_server` server in `~/.codex/config.toml`, and owns
+`~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. The first apply
+rewrites `~/.codex/config.toml` and drops its comments.
+
+To rotate the key, put the new key in the item's Notes. Then run
+`workstation-update --refresh-secrets` on the workstation or `chezmoi apply` on
+a desktop. The harnesses need no other change.
 
 ## GitHub Registration
 
