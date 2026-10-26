@@ -1,4 +1,5 @@
 {
+  lib,
   stdenvNoCC,
   fetchurl,
   makeWrapper,
@@ -38,6 +39,7 @@ stdenvNoCC.mkDerivation {
   meta = {
     description = "Command-line client that publishes files to artifact-server";
     homepage = "https://github.com/plannotator/artifact-server";
+    license = lib.licenses.asl20;
     mainProgram = "artifactserver";
   };
 }
