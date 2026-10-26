@@ -105,12 +105,15 @@ package-discovery or Ansible step.
 The bootstrap handoff is part of `workstation-setup`, not SSH login or a
 background schedule.
 
-Chezmoi also recovers agent skills on the workstation. If `~/repos/skillset`
+Chezmoi also recovers agent skills on every profile. If `~/repos/skillset`
 is absent, it clones `faviann/skillset` and initializes its pinned submodule
 sources; it never updates an existing checkout or its sources. Skillset's
-reconciler then links the skills selected in its `skills.txt` into the
-supported harnesses. Skill reconciliation runs during `chezmoi apply`, never
-during shell login.
+reconciler then links the skills selected in its `profiles/workstation.txt`
+into the supported harnesses. When `~/.agents/.skillset/profile` is missing,
+the hook passes `--profile workstation`, which makes the reconciler record
+`workstation` there; skillset defines only that profile, so desktops use it
+too. Skill reconciliation runs during `chezmoi apply`, never during shell
+login.
 
 Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
 has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
@@ -201,18 +204,22 @@ that file when it connects:
 
 Chezmoi sets only the `artifact-server` server in `~/.claude.json` and the
 `artifact_server` server in `~/.codex/config.toml`, and owns
-`~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. Keys it does
-not manage in the Claude Code and Codex entries, such as Codex's `enabled`,
-stay. When the managed keys
-change, as on the first apply, apply rewrites `~/.codex/config.toml` as sorted
-TOML and drops its comments. OpenCode refuses to start while the key file is
-missing.
+`~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. Other servers
+and other keys in those two files stay, as do keys of the artifact-server entry
+such as Codex's `enabled`. The entry's competing auth keys are removed so the
+helper is the only auth: Claude Code's `headers`, and Codex's
+`bearer_token_env_var`, `http_headers`, and `env_http_headers`. When the
+managed keys change, as on the first apply, apply rewrites
+`~/.codex/config.toml` as sorted TOML and drops its comments. A corrupt
+`~/.claude.json` or `~/.codex/config.toml` stops the whole apply with a
+`fromJson` or `fromToml` error that names the file. Fix or delete the file,
+then apply again. OpenCode refuses to start while the key file is missing.
 
 To rotate the key, put the new key in the item's Notes. Then, on each machine
 with Bitwarden unlocked, run `bw sync` so the CLI sees the edit, and run
 `workstation-update --refresh-secrets` on the workstation or `chezmoi apply` on
 a desktop. The harnesses need no other change. Apply fails unless the Notes
-hold one key on one line.
+hold one key of printable ASCII characters on one line.
 
 ## GitHub Registration
 
