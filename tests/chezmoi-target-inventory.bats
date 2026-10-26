@@ -23,6 +23,7 @@ readonly INVENTORY='
 .chezmoiscripts/install-herdr-integrations.sh   workstation desktop
 .chezmoiscripts/install-herdr.sh                workstation desktop
 .chezmoiscripts/install-packages.sh             desktop
+.chezmoiscripts/login-github-cli.sh             workstation desktop
 .chezmoiscripts/reconcile-agent-skills.sh       workstation desktop
 .chezmoiscripts/register-claude-mcp-server.sh   workstation desktop
 .chezmoiscripts/switch-chezmoi-origin-to-ssh.sh workstation desktop
