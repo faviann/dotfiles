@@ -17,13 +17,13 @@ readonly INVENTORY='
 .ansible/vault-pass                             workstation
 .bash_profile                                   workstation desktop
 .bashrc                                         workstation desktop
-.chezmoiscripts/apply-home-manager.sh           desktop
 .chezmoiscripts/github-known-hosts.sh           workstation desktop
 .chezmoiscripts/install-herdr-integrations.sh   workstation desktop
 .chezmoiscripts/install-herdr.sh                workstation desktop
 .chezmoiscripts/install-packages.sh             desktop
 .chezmoiscripts/reconcile-agent-skills.sh       workstation desktop
 .chezmoiscripts/switch-chezmoi-origin-to-ssh.sh workstation desktop
+.chezmoiscripts/switch-home-manager.sh          desktop
 .claude/CLAUDE.md                               workstation desktop
 .claude/hooks/track-session-prs.sh              workstation desktop
 .claude/settings.json                           workstation desktop

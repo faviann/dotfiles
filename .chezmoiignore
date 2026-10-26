@@ -41,7 +41,7 @@ packages/**
 .config/fish/
 .config/fish/**
 .chezmoiscripts/install-packages.sh
-.chezmoiscripts/apply-home-manager.sh
+.chezmoiscripts/switch-home-manager.sh
 {{- end }}
 
 {{- if ne .profile "workstation" }}

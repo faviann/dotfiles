@@ -16,7 +16,7 @@ workstation profile, so both machines get the same pins.
 ## How it applies
 
 The desktop chezmoi profile runs
-[`run_onchange_after_apply-home-manager.sh.tmpl`](../.chezmoiscripts/run_onchange_after_apply-home-manager.sh.tmpl)
+[`run_onchange_after_switch-home-manager.sh.tmpl`](../.chezmoiscripts/run_onchange_after_switch-home-manager.sh.tmpl)
 on `chezmoi apply`. It runs `home-manager switch --impure` against the chezmoi
 source, with the Home Manager CLI the flake pins. Nix must be installed first,
 as in [BOOTSTRAP.md](../BOOTSTRAP.md#1-install-chezmoi-and-bitwarden-cli).
