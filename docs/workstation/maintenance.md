@@ -83,6 +83,23 @@ Agent tools still update, and running agents keep the binaries they started
 with: restart agent sessions afterwards. Home Manager activation never restarts
 Herdr, so the update does not end the agent's own pane.
 
+## In-place writes
+
+On the workstation, chezmoi writes targets in place instead of atomically.
+`~/.claude`, `~/.codex`, `~/.agents`, and the other agent directories are bind
+mounts of one device, and chezmoi stages atomic writes in one temporary
+directory per device, so the rename into a second mount fails with
+`invalid cross-device link`. The generated configuration sets `safe = false`
+for the workstation profile only; desktops keep atomic writes. The cost is that
+a program reading a target during an apply can find it empty, partial, or, for
+a symlink, missing; restart agent sessions afterwards. A crash or full disk
+during a write can leave a target truncated. Rerun
+`workstation-update --refresh-secrets` to rewrite it; an attended run asks
+before it overwrites the file. A truncated `~/.claude/settings.json` or
+`~/.codex/config.toml`, which chezmoi merges into instead of replacing, stops
+the apply with a parse error that names the file. Repair or delete it, then
+rerun.
+
 ## Failure recovery
 
 The agent-tool phase checks npm package compatibility before replacing any

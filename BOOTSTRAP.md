@@ -55,8 +55,14 @@ The first checkout uses HTTPS so a new machine does not need an SSH key before
 chezmoi can render one from Bitwarden.
 
 ```bash
-chezmoi init --apply https://github.com/faviann/dotfiles.git
+chezmoi init https://github.com/faviann/dotfiles.git
+chezmoi apply
 ```
+
+Run apply as a separate command. Chezmoi reads its write mode at startup,
+before `init` generates the configuration, and the workstation needs the
+[in-place writes](docs/workstation/maintenance.md#in-place-writes) that the
+configuration sets.
 
 After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
 `~/.ssh/known_hosts`, the
