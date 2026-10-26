@@ -2,6 +2,12 @@
 {{- if eq .chezmoi.hostname "workstation" -}}
 {{-   $profile = .chezmoi.hostname -}}
 {{- end -}}
+{{- if eq $profile "workstation" -}}
+# ~/.claude, ~/.codex, and the other agent directories are bind mounts of one
+# device. chezmoi stages atomic writes in one temporary directory per device,
+# so the rename into a different mount fails with EXDEV.
+safe = false
 
+{{ end -}}
 [data]
   profile = {{ $profile | quote }}
