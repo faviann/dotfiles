@@ -40,6 +40,8 @@ packages/**
 
 {{- if ne .profile "workstation" }}
 # Workstation only
+.ansible/collie-ca/
+.ansible/collie-ca/**
 .local/bin/workstation-update
 .local/bin/dev-session
 .pi/

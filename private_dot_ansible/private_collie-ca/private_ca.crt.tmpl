@@ -1,0 +1,14 @@
+{{- /* Bitwarden's apps drop line breaks from custom fields, so rebuild the PEM at openssl's 64-character width. */ -}}
+{{- $certificate := dig "certificate" "value" "" (bitwardenFields "item" "dotfiles/collie-ca") | trim -}}
+{{- $begin := "-----BEGIN CERTIFICATE-----" -}}
+{{- $end := "-----END CERTIFICATE-----" -}}
+{{- $body := "" -}}
+{{- if and (hasPrefix $begin $certificate) (hasSuffix $end $certificate) -}}
+{{-   $body = $certificate | trimPrefix $begin | trimSuffix $end | nospace -}}
+{{- end -}}
+{{- if not (regexMatch "^[A-Za-z0-9+/]+={0,2}$" $body) -}}
+{{-   fail "Bitwarden item dotfiles/collie-ca must hold the PEM certificate in its certificate field" -}}
+{{- end -}}
+{{ $begin }}
+{{ regexReplaceAll "(.{64})" $body "${1}\n" | trimSuffix "\n" }}
+{{ $end }}
