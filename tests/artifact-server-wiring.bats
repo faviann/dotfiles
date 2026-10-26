@@ -268,6 +268,39 @@ JSON
   cmp -s "$BATS_TEST_TMPDIR/corrupt.json" "$config" || fail 'apply changed a corrupt .claude.json'
 }
 
+@test "test_claude_json_failed_write_keeps_the_complete_new_copy" {
+  local config="$HOME_DIR/.claude.json"
+  local real_cat
+  local kept
+
+  real_cat="$(command -v cat)"
+  printf '{"theme":"dark"}\n' >"$config"
+  cat >"$BATS_TEST_TMPDIR/bin/cat" <<STUB
+#!$(command -v bash)
+if [[ "\${1:-}" == "$BATS_TEST_TMPDIR"/tmp.* ]]; then
+  printf 'cat: write error: No space left on device\n' >&2
+  exit 1
+fi
+exec "$real_cat" "\$@"
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/bin/cat"
+
+  if apply_workstation "$CLAUDE_MCP_TARGET" 2>"$BATS_TEST_TMPDIR/stderr"; then
+    fail 'apply succeeded although writing .claude.json failed'
+  fi
+
+  kept="$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -type f -name 'tmp.*')"
+  [[ -n "$kept" && "$kept" != *$'\n'* ]] \
+    || fail "expected one kept copy, found: ${kept:-none}"
+  grep -qF "$config" "$BATS_TEST_TMPDIR/stderr" \
+    || fail "apply error does not name the file: $(cat "$BATS_TEST_TMPDIR/stderr")"
+  grep -qF "$kept" "$BATS_TEST_TMPDIR/stderr" \
+    || fail "apply error does not name the kept copy: $(cat "$BATS_TEST_TMPDIR/stderr")"
+  jq -e --arg url "$ORIGIN/mcp" \
+    '.theme == "dark" and .mcpServers["artifact-server"].url == $url' "$kept" >/dev/null \
+    || fail 'kept copy is not the complete new .claude.json'
+}
+
 @test "test_codex_config_keeps_nested_tables_and_arrays_and_sets_the_server_once" {
   local config="$HOME_DIR/.codex/config.toml"
   local existing="$BATS_TEST_TMPDIR/existing.toml"

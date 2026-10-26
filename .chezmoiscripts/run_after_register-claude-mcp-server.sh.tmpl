@@ -29,7 +29,9 @@ if ! jq --slurp --arg url "$url" --arg helper "$helper" '
   exit 1
 fi
 
-if [[ -s "$tmp" ]]; then
-  cat "$tmp" >"$config"
+if [[ -s "$tmp" ]] && ! cat "$tmp" >"$config"; then
+  trap - EXIT
+  printf 'error: writing %s failed and may have left it incomplete; the complete new content is kept in %s\n' "$config" "$tmp" >&2
+  exit 1
 fi
 [[ "$(stat -c %a "$config")" == 600 ]] || chmod 600 "$config"

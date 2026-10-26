@@ -224,8 +224,12 @@ script skips the entry with a notice, and the next apply adds it.
 
 A corrupt `~/.codex/config.toml` stops the whole apply with a `fromToml` error
 that names the file. A corrupt `~/.claude.json` fails the apply script with an
-error that names the file. Fix the file, then apply again. OpenCode refuses to
-start while the key file is missing.
+error that names the file. The failure stops the scripts that sort after it,
+`switch-chezmoi-origin-to-ssh` and, on desktops, `switch-home-manager`. Fix the
+file, then run `chezmoi apply` again to finish them. If the script's write fails
+midway, for example on a full disk, it keeps the complete new content in a
+temporary file and the error names it. Copy that file over `~/.claude.json`.
+OpenCode refuses to start while the key file is missing.
 
 To rotate the key, put the new key in the item's Notes. Then, on each machine
 with Bitwarden unlocked, run `bw sync` so the CLI sees the edit, and run
