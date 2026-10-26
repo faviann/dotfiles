@@ -9,6 +9,11 @@ rendered_herdr_service() {
     "$REPO_ROOT#homeConfigurations.workstation.config.systemd.user.services.herdr"
 }
 
+rendered_desktop_herdr_service() {
+  rendered_json '.desktopHerdrService' \
+    "$REPO_ROOT#homeConfigurations.desktop.config.systemd.user.services.herdr"
+}
+
 rendered_workstation_activation() {
   rendered_json '.workstationActivation' \
     "$REPO_ROOT#homeConfigurations.workstation.config.home.activation" \
@@ -124,4 +129,17 @@ rendered_workstation_activation() {
 
   jq -e '.Unit."X-RestartIfChanged" == false' <<<"$rendered_service" >/dev/null \
     || fail 'Home Manager activation may restart Herdr and end every pane process'
+}
+
+@test "test_desktop_herdr_service_matches_the_workstation_service" {
+  local desktop_service
+  local workstation_service
+
+  workstation_service="$(rendered_herdr_service)" \
+    || fail 'could not render the workstation Herdr user service'
+  desktop_service="$(rendered_desktop_herdr_service)" \
+    || fail 'could not render the desktop Herdr user service'
+
+  diff -u <(jq -S . <<<"$workstation_service") <(jq -S . <<<"$desktop_service") \
+    || fail 'the desktop Herdr service differs from the workstation service under pure evaluation'
 }

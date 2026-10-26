@@ -91,15 +91,36 @@
         extraSpecialArgs = { inherit artifactServerPackage; };
         modules = [ ./home/desktop.nix ];
       };
+      homeConfigurationsByProfile = {
+        workstation = workstationHomeConfiguration;
+        desktop = desktopHomeConfiguration;
+      };
       artifactToolsOf = configuration: {
         packages = map (package: package.pname or package.name) configuration.config.home.packages;
         fontconfigEnabled = configuration.config.fonts.fontconfig.enable;
       };
-      bootstrapAgentToolsActivation = pkgs.writeText "bootstrap-agent-tools" (
-        workstationHomeConfiguration.config.home.activation.bootstrapAgentTools.data
-      );
-      bootstrapAgentToolsOrdering = pkgs.writeText "bootstrap-agent-tools-after" (
-        builtins.toJSON workstationHomeConfiguration.config.home.activation.bootstrapAgentTools.after
+      bootstrapAgentToolsActivations = pkgs.linkFarm "bootstrap-agent-tools" (
+        nixpkgs.lib.concatMap
+          (
+            profile:
+            let
+              activation =
+                homeConfigurationsByProfile.${profile}.config.home.activation.bootstrapAgentTools;
+            in
+            [
+              {
+                name = "${profile}/data";
+                path = pkgs.writeText "bootstrap-agent-tools-${profile}" activation.data;
+              }
+              {
+                name = "${profile}/after.json";
+                path = pkgs.writeText "bootstrap-agent-tools-${profile}-after" (
+                  builtins.toJSON activation.after
+                );
+              }
+            ]
+          )
+          (builtins.attrNames homeConfigurationsByProfile)
       );
       workstationRenderedConfiguration = pkgs.writeText "workstation-rendered-configuration.json" (
         builtins.toJSON {
@@ -164,6 +185,7 @@
           collieOriginService =
             workstationHomeConfiguration.config.systemd.user.services.collie-origin-forwarder;
           herdrService = workstationHomeConfiguration.config.systemd.user.services.herdr;
+          desktopHerdrService = desktopHomeConfiguration.config.systemd.user.services.herdr;
           lobuService = workstationHomeConfiguration.config.systemd.user.services.lobu;
           lobuBootstrap = workstationHomeConfiguration.config.home.activation.bootstrapLobu;
           tailscale =
@@ -295,8 +317,7 @@
             experimental-features = nix-command flakes
             offline = true
           '';
-          TEST_BOOTSTRAP_ACTIVATION_SCRIPT = bootstrapAgentToolsActivation;
-          TEST_BOOTSTRAP_ACTIVATION_AFTER = bootstrapAgentToolsOrdering;
+          TEST_BOOTSTRAP_ACTIVATIONS = bootstrapAgentToolsActivations;
           TEST_WORKSTATION_RENDERED_CONFIGURATION = workstationRenderedConfiguration;
         } ''
           export HOME="$TMPDIR/home"
@@ -314,7 +335,6 @@
         packages = behavioralTestInputs ++ [ pkgs.shellcheck ];
       };
 
-      homeConfigurations.workstation = workstationHomeConfiguration;
-      homeConfigurations.desktop = desktopHomeConfiguration;
+      homeConfigurations = homeConfigurationsByProfile;
     };
 }

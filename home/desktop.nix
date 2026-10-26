@@ -9,7 +9,10 @@ let
     if value == "" then fallback else value;
 in
 {
-  imports = [ ./artifact-tools.nix ];
+  imports = [
+    ./agent-tools.nix
+    ./artifact-tools.nix
+  ];
 
   home.username = envOrPureEvalFallback "USER" "faviann";
   home.homeDirectory = envOrPureEvalFallback "HOME" "/home/faviann";
