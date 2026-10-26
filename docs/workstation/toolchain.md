@@ -53,6 +53,19 @@ Bun engines: the updater installs the latest Bun and runs Bun and the Bun-using
 harnesses to confirm they start. If an upstream package needs a newer Node,
 update the nixpkgs input; the failed preflight leaves installed tools unchanged.
 
+## Agent defaults
+
+Agents on every machine run without approval prompts or a sandbox. Chezmoi pins
+these keys in `~/.codex/config.toml`:
+
+- `approval_policy = "never"`
+- `sandbox_mode = "danger-full-access"`
+- `agents.max_concurrent_threads_per_session = 24`
+- `personality = "pragmatic"`
+
+Apply leaves the file byte for byte unchanged when every managed key is
+current. Otherwise it rewrites the file as sorted TOML and drops its comments.
+
 ## .NET SDK policy
 
 The .NET policy floats within major 10 while each published workstation

@@ -63,6 +63,7 @@ launch-directory context.
 Home Manager does not manage `~/.codex/config.toml`. Chezmoi sets only the
 `artifact_server` MCP server in it, as in
 [BOOTSTRAP.md](../../BOOTSTRAP.md#bitwarden-artifact-server-api-key-item), and
-registers no Moraine server. Moraine's local producer and query backend operate
+the [agent defaults](toolchain.md#agent-defaults). It registers no Moraine
+server. Moraine's local producer and query backend operate
 without a Codex MCP registration; that integration can be added later if the
 workstation needs Codex to query Moraine directly.

@@ -212,7 +212,8 @@ that file when it connects:
 - OpenCode and pi read the file from their MCP configuration.
 
 Apply sets only the `artifact-server` server in `~/.claude.json` and the
-`artifact_server` server in `~/.codex/config.toml`, and owns
+`artifact_server` server in `~/.codex/config.toml`, plus the Codex
+[agent defaults](docs/workstation/toolchain.md#agent-defaults), and owns
 `~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. Other servers
 and other keys in those two files stay, as do keys of the artifact-server entry
 such as Codex's `enabled`. The entry's competing auth keys are removed so the
