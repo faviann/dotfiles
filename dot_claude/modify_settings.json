@@ -5,7 +5,11 @@
 {{-   $settings = fromJson .chezmoi.stdin -}}
 {{- end -}}
 {{- $settings = setValueAtPath "statusLine" (dict "type" "command" "command" "~/.claude/statusline.sh" "refreshInterval" 60) $settings -}}
-{{- $settings = setValueAtPath "env.ANTHROPIC_BASE_URL" "https://gateway.ai.faviann.com" $settings -}}
+{{- $gateway := "https://gateway.ai.faviann.com" -}}
+{{- if eq .profile "workstation" -}}
+{{-   $gateway = "https://ai-gateway.jungleservices.net" -}}
+{{- end -}}
+{{- $settings = setValueAtPath "env.ANTHROPIC_BASE_URL" $gateway $settings -}}
 {{- $settings = setValueAtPath "env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" "1" $settings -}}
 {{- $settings = setValueAtPath "apiKeyHelper" "cat ~/.config/claude/gateway-token" $settings -}}
 {{- $settings = setValueAtPath "attribution" (dict "commit" "" "pr" "") $settings -}}

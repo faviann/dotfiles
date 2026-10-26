@@ -145,9 +145,13 @@ Check the rendered pair the same way as the workstation key, with
 
 ## Bitwarden Claude Code Gateway Items
 
-Claude Code reaches Anthropic through the sub2api gateway at
-`gateway.ai.faviann.com`. On the workstation and desktops, chezmoi renders two
-credentials that sub2api issued, each from the Notes of one Bitwarden item:
+Claude Code reaches Anthropic through a gateway that depends on the profile.
+The workstation uses the JES AI gateway at `ai-gateway.jungleservices.net`,
+over its userspace Tailscale. Desktops use the sub2api gateway at
+`gateway.ai.faviann.com`. Chezmoi sets `env.ANTHROPIC_BASE_URL` in
+`~/.claude/settings.json` to match. On the workstation and desktops, chezmoi
+renders two credentials that sub2api issued, each from the Notes of one
+Bitwarden item. The gateway token works against both gateways.
 
 - `dotfiles/sub2api-gateway-token`: the gateway API key Claude Code
   authenticates with, rendered to `~/.config/claude/gateway-token`. The
