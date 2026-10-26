@@ -156,7 +156,7 @@ STUB
   local after="$BATS_TEST_TMPDIR/after.sh"
 
   mkdir -p "$source_dir"
-  cp -R "$REPO_ROOT/flake.nix" "$REPO_ROOT/flake.lock" "$REPO_ROOT/home" \
+  cp -R --no-preserve=mode "$REPO_ROOT/flake.nix" "$REPO_ROOT/flake.lock" "$REPO_ROOT/home" \
     "$REPO_ROOT/packages" "$source_dir"
 
   render_home_manager_script "$source_dir" "$before"
