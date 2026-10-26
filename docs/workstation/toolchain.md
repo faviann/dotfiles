@@ -24,20 +24,24 @@ Home Manager provides Node/npm and writes the npm prefix as
 
 ## Agent toolchain
 
-Dotfiles and the complete agent toolchain are maintained through one
-operator-facing command:
+`update-agent-tools` installs and updates the agent toolchain on every machine.
+On the workstation, dotfiles and the complete agent toolchain are maintained
+through one operator-facing command:
 
 ```bash
 workstation-update
 ```
+
+On a desktop, run `update-agent-tools` directly. On every profile, the Home
+Manager switch also runs it when a managed command is missing.
 
 The managed unit contains:
 
 - the Bun runtime the harnesses execute under
 - the standalone Codex CLI (`@openai/codex`)
 - Claude Code (`@anthropic-ai/claude-code`)
-- Pi (`@earendil-works/pi-coding-agent`)
 - OpenCode (`opencode-ai`)
+- Pi (`@earendil-works/pi-coding-agent`), on the workstation only
 
 [Bun's upstream installer](https://bun.sh/install) supplies its latest runtime,
 selects a CPU-compatible build (including baseline x64), and replaces the binary

@@ -15,7 +15,9 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 The workstation also gets the Ansible controller key and vault password.
 Desktops get agent configuration and the `desktop` Home Manager profile, which
 installs the artifact-server publishing toolchain: the `artifactserver` CLI,
-Node.js, Chromium, and the DejaVu fonts. Desktops still get no agent binaries.
+Node.js, Chromium, and the DejaVu fonts. The profile also runs the Herdr user
+service, and its switch hands off to `update-agent-tools` to install the
+[agent toolchain](docs/workstation/toolchain.md#agent-toolchain) without pi.
 Apply installs the profile, as in [step 3](#3-bootstrap-over-https); see the
 [desktop toolchain](docs/desktop-toolchain.md).
 
@@ -29,7 +31,7 @@ sudo snap install bw
 On a desktop, also install the tools the dotfiles call:
 
 ```bash
-sudo apt install git curl jq gh
+sudo apt install git curl jq gh unzip
 ```
 
 A desktop also needs Nix for its Home Manager profile. Install Determinate Nix,
@@ -326,9 +328,10 @@ After bootstrap, use `workstation-update` for routine maintenance on the
 workstation. See the canonical
 [workstation maintenance guidance](docs/workstation/maintenance.md) for source
 guards, Bitwarden sessions, and failure recovery. Desktops use
-`chezmoi update`. A desktop set up before the `desktop` Home Manager profile
-existed needs Nix, as in [step 1](#1-install-chezmoi-and-bitwarden-cli), before
-its next `chezmoi update`.
+`chezmoi update`, and `update-agent-tools` for the agent toolchain. A desktop
+set up before the `desktop` Home Manager profile existed needs Nix, as in
+[step 1](#1-install-chezmoi-and-bitwarden-cli), before its next
+`chezmoi update`.
 
 ## Clone ServerManagementScripts
 

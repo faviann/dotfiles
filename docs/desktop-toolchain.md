@@ -1,9 +1,11 @@
 # Desktop toolchain
 
 The `desktop` Home Manager profile gives every Ubuntu laptop and desktop the
-tools an agent needs to publish to artifact-server and check the render. It
-shares [`home/artifact-tools.nix`](../home/artifact-tools.nix) with the
-workstation profile, so both machines get the same pins.
+agent toolchain, the Herdr user service, and the tools an agent needs to
+publish to artifact-server and check the render. It shares
+[`home/agent-tools.nix`](../home/agent-tools.nix) and
+[`home/artifact-tools.nix`](../home/artifact-tools.nix) with the workstation
+profile, so both machines get the same pins.
 
 ## What it installs
 
@@ -14,6 +16,22 @@ workstation profile, so both machines get the same pins.
   screenshot shows readable text.
 - The fontconfig tools, such as `fc-list` and `fc-match`, to check which fonts
   the profile provides.
+- The `herdr.service` user unit, the same one the workstation runs
+  ([herdr](workstation/herdr.md)).
+
+## Agent toolchain
+
+The switch runs `update-agent-tools` when `bun`, `codex`, `claude`, or
+`opencode` is missing. The updater installs Bun, Codex, Claude Code, OpenCode,
+and the
+[declared Claude Code plugins](workstation/toolchain.md#claude-code-plugins).
+Desktops do not get pi. To update the toolchain later, run
+`update-agent-tools`.
+
+The switch checks only that the commands exist. If `update-agent-tools` fails
+after it installs them, for example while it installs a plugin, a new
+`chezmoi apply` does not run it again. Fix the cause and run
+`update-agent-tools`.
 
 ## How it applies
 
