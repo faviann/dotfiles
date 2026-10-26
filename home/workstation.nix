@@ -74,24 +74,6 @@ let
     service_bin_dir = "${morainePackage}/bin"
     managed_clickhouse_dir = "${moraineRoot}/clickhouse/current"
   '';
-  # The publish-artifact skill rereads this mapping on every publication; the
-  # activation entry below writes it with the locally generated gallery token.
-  # HomeLab-iac owns the directory, static server, routing, and retention
-  # behind these values (https://github.com/faviann/homelab-iac/issues/272);
-  # dotfiles owns only the user's mapping file. The public tier serves
-  # publications to anyone holding the URL, with no forward-auth in front of
-  # it, so nothing private belongs in the publishing root. There is no
-  # automatic synchronization between the two repositories, so change both
-  # together.
-  artifactPublisherMapping = {
-    directory = "/ephemeral/workstation/artifacts";
-    baseUrl = "https://artifacts.public.faviann.com";
-  };
-  artifactPublisherConfig = pkgs.writeShellApplication {
-    name = "artifact-publisher-config";
-    runtimeInputs = [ pkgs.coreutils pkgs.jq ];
-    text = builtins.readFile ../scripts/artifact-publisher-config;
-  };
   # The work tailnet routes the JES AI gateway through jes-aigateway-router.
   # Userspace mode leaves the container's routes and resolv.conf untouched, so
   # only this proxy and `tailscale nc` can reach the tailnet.
@@ -154,14 +136,6 @@ in
 
   home.file.${moraineConfigRelative}.text = moraineConfig;
 
-  # A regular file, not a Home Manager link: the gallery token must stay out of
-  # the Nix store. After linkGeneration, so the first switch has already
-  # removed the previous generation's link.
-  home.activation.artifactPublisherConfig =
-    lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-      run ${artifactPublisherConfig}/bin/artifact-publisher-config ${lib.escapeShellArg (builtins.toJSON artifactPublisherMapping)}
-    '';
-
   systemd.user.startServices = "sd-switch";
 
   # Interactive Lobu use follows the self-hosted control plane by default,
@@ -177,7 +151,7 @@ in
   # The profile must exist before npm runs; install before sd-switch can start
   # the daemon. Home Manager's run helper preserves activation dry-run behavior.
   home.activation.bootstrapLobu =
-    lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "installPackages" ] ''
+    lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "installPackages" "linkGeneration" ] ''
       run ${lobuBootstrap}/bin/lobu-bootstrap
     '';
 
@@ -273,7 +247,7 @@ in
   # installPackages creates the profile the updater takes npm from. Before it,
   # ~/.nix-profile is a dangling symlink and the handoff fails.
   home.activation.bootstrapAgentTools =
-    lib.hm.dag.entryAfter [ "installPackages" ] ''
+    lib.hm.dag.entryAfter [ "installPackages" "linkGeneration" ] ''
       export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH"
 
       _agent_tools_missing=false
