@@ -55,8 +55,13 @@ update the nixpkgs input; the failed preflight leaves installed tools unchanged.
 
 ## Agent defaults
 
-Agents on every machine run without approval prompts or a sandbox. Chezmoi pins
-these keys in `~/.codex/config.toml`:
+Agents on every machine run without approval prompts or a sandbox. Chezmoi sets
+`permissions.defaultMode = "bypassPermissions"` and
+`skipDangerousModePermissionPrompt = true` in `~/.claude/settings.json`. The
+rest of `permissions`, such as `permissions.allow`, stays as Claude Code wrote
+it.
+
+Chezmoi pins these keys in `~/.codex/config.toml`:
 
 - `approval_policy = "never"`
 - `sandbox_mode = "danger-full-access"`
