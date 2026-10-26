@@ -205,7 +205,7 @@
           ./dot_local/bin/executable_artifact-server-mcp-headers
           ./dot_local/bin/executable_dev-session
           ./dot_local/bin/executable_github-token
-          ./dot_local/bin/executable_update-agent-tools
+          ./dot_local/bin/executable_update-agent-tools.tmpl
           ./dot_local/bin/executable_workstation-update
           ./flake.lock
           ./flake.nix

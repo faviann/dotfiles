@@ -9,8 +9,8 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
-| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
+| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and the pi configuration | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, `update-agent-tools`, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
 
 The workstation also gets the Ansible controller key and vault password.
 Desktops get agent configuration and the `desktop` Home Manager profile, which
@@ -209,12 +209,14 @@ that file when it connects:
   `~/.config/faviann-skills/artifact-server.json`.
 - Claude Code and Codex run `artifact-server-mcp-headers`, which prints the
   `Authorization` header from the file.
-- OpenCode and pi read the file from their MCP configuration.
+- OpenCode, and pi on the workstation, read the file from their MCP
+  configuration.
 
 Apply sets only the `artifact-server` server in `~/.claude.json` and the
 `artifact_server` server in `~/.codex/config.toml`, plus the Codex
 [agent defaults](docs/workstation/toolchain.md#agent-defaults), and owns
-`~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. Other servers
+`~/.config/opencode/opencode.json` and, on the workstation,
+`~/.pi/agent/mcp.json`. Other servers
 and other keys in those two files stay, as do keys of the artifact-server entry
 such as Codex's `enabled`. The entry's competing auth keys are removed so the
 helper is the only auth: Claude Code's `headers`, and Codex's

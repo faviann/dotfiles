@@ -1,5 +1,34 @@
 #!/usr/bin/env bats
 
+render_updater() {
+  local profile="$1"
+  local runtime_dir="$BATS_TEST_TMPDIR/runtime"
+
+  mkdir -p "$runtime_dir/destination"
+  XDG_CACHE_HOME="$runtime_dir/cache" \
+  XDG_CONFIG_HOME="$runtime_dir/config" \
+  XDG_STATE_HOME="$runtime_dir/state" \
+    chezmoi \
+    --source "$BATS_TEST_DIRNAME/.." \
+    --destination "$runtime_dir/destination" \
+    --config /dev/null \
+    --config-format toml \
+    --persistent-state "$runtime_dir/chezmoistate.boltdb" \
+    --override-data "{\"profile\":\"$profile\"}" \
+    execute-template --file "$BATS_TEST_DIRNAME/../dot_local/bin/executable_update-agent-tools.tmpl" \
+    >"$BATS_TEST_TMPDIR/update-agent-tools-$profile"
+  printf '%s\n' "$BATS_TEST_TMPDIR/update-agent-tools-$profile"
+}
+
+installed_packages() {
+  grep '^npm install ' "$COMMAND_LOG" | grep -v -- ' --dry-run ' \
+    | sed 's/^.* --allow-scripts=[^ ]* //'
+}
+
+verified_harnesses() {
+  grep ' --version$' "$COMMAND_LOG" | grep -v '^bun '
+}
+
 setup() {
   bats_require_minimum_version 1.5.0
   export HOME="$BATS_TEST_TMPDIR/home"
@@ -8,7 +37,8 @@ setup() {
   export PATH="$HOME/.local/bin:$PATH"
   export COMMAND_LOG="$HOME/commands"
   : >"$COMMAND_LOG"
-  export COMMAND="$BATS_TEST_DIRNAME/../dot_local/bin/executable_update-agent-tools"
+  COMMAND="$(render_updater workstation)"
+  export COMMAND
   export MARKETPLACE_LIST="$BATS_TEST_TMPDIR/marketplaces.json"
   printf '[{"name":"openai-codex","source":"github","repo":"openai/codex-plugin-cc"}]\n' >"$MARKETPLACE_LIST"
   export PLUGIN_LIST="$BATS_TEST_TMPDIR/plugins.json"
@@ -174,4 +204,27 @@ LOG
   [ "$status" -ne 0 ]
   [[ "$output" == *'Claude Code plugin update failed: codex@openai-codex'* ]]
   [[ "$output" != *'Agent tools updated'* ]]
+}
+
+@test "test_desktop_installs_its_harnesses_and_verifies_the_bun_run_ones" {
+  run bash "$(render_updater desktop)"
+  [ "$status" -eq 0 ]
+  diff -u - <(installed_packages) <<'ARGS'
+@openai/codex@latest @anthropic-ai/claude-code@latest opencode-ai@latest
+ARGS
+  diff -u - <(verified_harnesses) <<'LOG'
+opencode --version
+LOG
+}
+
+@test "test_workstation_installs_its_harnesses_and_verifies_the_bun_run_ones" {
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  diff -u - <(installed_packages) <<'ARGS'
+@openai/codex@latest @anthropic-ai/claude-code@latest opencode-ai@latest @earendil-works/pi-coding-agent@latest
+ARGS
+  diff -u - <(verified_harnesses) <<'LOG'
+opencode --version
+pi --version
+LOG
 }

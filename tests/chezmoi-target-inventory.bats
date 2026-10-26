@@ -44,11 +44,11 @@ readonly INVENTORY='
 .local/bin/artifact-server-mcp-headers          workstation desktop
 .local/bin/dev-session                          workstation
 .local/bin/github-token                         workstation desktop
-.local/bin/update-agent-tools                   workstation
+.local/bin/update-agent-tools                   workstation desktop
 .local/bin/workstation-update                   workstation
 .npmrc                                          workstation desktop
-.pi/agent/AGENTS.md                             workstation desktop
-.pi/agent/mcp.json                              workstation desktop
+.pi/agent/AGENTS.md                             workstation
+.pi/agent/mcp.json                              workstation
 .ssh/allowed_signers                            workstation desktop
 .ssh/config                                     workstation desktop
 .ssh/id_ed25519                                 workstation desktop

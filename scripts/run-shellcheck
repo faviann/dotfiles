@@ -9,7 +9,6 @@ shell_inputs=(
   "$REPO_ROOT/dot_local/bin/executable_artifact-server-mcp-headers"
   "$REPO_ROOT/dot_local/bin/executable_dev-session"
   "$REPO_ROOT/dot_local/bin/executable_github-token"
-  "$REPO_ROOT/dot_local/bin/executable_update-agent-tools"
   "$REPO_ROOT/dot_local/bin/executable_workstation-update"
   "$REPO_ROOT/dot_bash_profile.tmpl"
   "$REPO_ROOT/dot_bashrc.tmpl"
@@ -23,23 +22,30 @@ shell_inputs=(
   "$REPO_ROOT/scripts/update-dotnet-sdk"
   "$REPO_ROOT/scripts/update-flake-lock"
 )
-template_inputs=("$REPO_ROOT"/.chezmoiscripts/*.sh.tmpl)
+template_inputs=(
+  "$REPO_ROOT"/.chezmoiscripts/*.sh.tmpl
+  "$REPO_ROOT/dot_local/bin/executable_update-agent-tools.tmpl"
+)
 
 render_dir="$(mktemp -d)"
 trap 'rm -rf "$render_dir"' EXIT
 
 rendered_inputs=()
 mkdir -p "$render_dir/destination"
-for template in "${template_inputs[@]}"; do
-  rendered="$render_dir/$(basename "${template%.tmpl}")"
-  chezmoi \
-    --source "$REPO_ROOT" \
-    --destination "$render_dir/destination" \
-    --config /dev/null \
-    --config-format toml \
-    --persistent-state "$render_dir/chezmoistate.boltdb" \
-    execute-template --file "$template" >"$rendered"
-  rendered_inputs+=("$rendered")
+for profile in workstation desktop; do
+  mkdir -p "$render_dir/$profile"
+  for template in "${template_inputs[@]}"; do
+    rendered="$render_dir/$profile/$(basename "${template%.tmpl}")"
+    chezmoi \
+      --source "$REPO_ROOT" \
+      --destination "$render_dir/destination" \
+      --config /dev/null \
+      --config-format toml \
+      --persistent-state "$render_dir/chezmoistate.boltdb" \
+      --override-data "{\"profile\":\"$profile\"}" \
+      execute-template --file "$template" >"$rendered"
+    rendered_inputs+=("$rendered")
+  done
 done
 
 shellcheck \

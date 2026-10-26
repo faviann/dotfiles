@@ -18,9 +18,13 @@ flock 9
 packages=(
   @openai/codex@latest
   @anthropic-ai/claude-code@latest
-  @earendil-works/pi-coding-agent@latest
   opencode-ai@latest
 )
+bun_harnesses=(opencode)
+{{- if eq .profile "workstation" }}
+packages+=(@earendil-works/pi-coding-agent@latest)
+bun_harnesses+=(pi)
+{{- end }}
 
 # npm is moving install scripts behind an explicit allowlist and already warns
 # about every unreviewed one. Approval cannot be recorded for a global install,
@@ -55,12 +59,12 @@ else
     || fail 'Bun installation failed'
 fi
 ln -sfn bun "$prefix/bin/bunx"
-bun --version >/dev/null || fail 'installed Bun does not run on this workstation'
+bun --version >/dev/null || fail 'installed Bun does not run on this machine'
 npm install --global --prefix "$prefix" --force=false --engine-strict \
   --allow-scripts="$allowed_scripts" "${packages[@]}" \
   || fail 'npm installation failed'
 
-for harness in opencode pi; do
+for harness in "${bun_harnesses[@]}"; do
   "$harness" --version >/dev/null || fail "verification failed: $harness"
 done
 

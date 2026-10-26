@@ -48,5 +48,6 @@ packages/**
 # Workstation only
 .local/bin/workstation-update
 .local/bin/dev-session
-.local/bin/update-agent-tools
+.pi/
+.pi/**
 {{- end }}
