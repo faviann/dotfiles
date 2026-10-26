@@ -123,6 +123,8 @@ let
   };
 in
 {
+  imports = [ ./artifact-tools.nix ];
+
   home.username = "faviann";
   home.homeDirectory = "/home/faviann";
   home.stateVersion = "25.11";

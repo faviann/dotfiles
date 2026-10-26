@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# flake.lock: {{ include "flake.lock" | sha256sum }}
+# flake.nix: {{ include "flake.nix" | sha256sum }}
+{{- range $dir := list "home" "packages" }}
+{{-   range glob (joinPath $.chezmoi.sourceDir $dir "**") }}
+{{-     if not (stat .).isDir }}
+# {{ trimPrefix (print $.chezmoi.sourceDir "/") . }}: {{ include . | sha256sum }}
+{{-     end }}
+{{-   end }}
+{{- end }}
+
+readonly source_dir={{ .chezmoi.sourceDir | quote }}
+
+if ! command -v nix >/dev/null 2>&1; then
+  printf 'error: nix is not on PATH. Install Determinate Nix as in step 1 of BOOTSTRAP.md, then open a new shell and rerun chezmoi apply.\n' >&2
+  exit 1
+fi
+
+USER="$(id -un)"
+export USER HOME
+
+nix run "$source_dir#home-manager" -- switch --impure --flake "$source_dir#desktop"

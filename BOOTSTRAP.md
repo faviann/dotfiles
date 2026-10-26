@@ -9,11 +9,15 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
-| `workstation` | `workstation` | Everything below, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All five items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, fish | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
+| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All five items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
 
 The workstation also gets the Ansible controller key and vault password.
-Desktops get agent configuration but no agent binaries or Home Manager yet.
+Desktops get agent configuration and the `desktop` Home Manager profile, which
+installs the artifact-server publishing toolchain: the `artifactserver` CLI,
+Node.js, Chromium, and the DejaVu fonts. Desktops still get no agent binaries.
+Apply installs the profile, as in [step 3](#3-bootstrap-over-https); see the
+[desktop toolchain](docs/desktop-toolchain.md).
 
 ## 1. Install chezmoi and Bitwarden CLI
 
@@ -26,6 +30,14 @@ On a desktop, also install the tools the dotfiles call:
 
 ```bash
 sudo apt install git curl jq gh
+```
+
+A desktop also needs Nix for its Home Manager profile. Install Determinate Nix,
+then open a new shell so `nix` is on `PATH`:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
+  | sh -s -- install
 ```
 
 ## 2. Unlock Bitwarden
@@ -53,6 +65,13 @@ After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
 in `~/.ansible/ssh/`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
 does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
+
+On a desktop, the last apply script switches the `#desktop` Home Manager
+profile from the chezmoi source. The first switch downloads Chromium and takes
+several minutes. A failed switch fails apply after the other scripts have run.
+Without `nix` on `PATH`, the error names step 1. Fix the cause and rerun
+`chezmoi apply` to retry the switch. After a successful switch, apply reruns it
+only when `flake.lock`, `flake.nix`, `home/`, or `packages/` change.
 
 Apply also clones `faviann/skillset` over HTTPS, without credentials, for the
 agent skills, so that repository must stay public.
@@ -239,7 +258,9 @@ After bootstrap, use `workstation-update` for routine maintenance on the
 workstation. See the canonical
 [workstation maintenance guidance](docs/workstation/maintenance.md) for source
 guards, Bitwarden sessions, and failure recovery. Desktops use
-`chezmoi update`.
+`chezmoi update`. A desktop set up before the `desktop` Home Manager profile
+existed needs Nix, as in [step 1](#1-install-chezmoi-and-bitwarden-cli), before
+its next `chezmoi update`.
 
 ## Clone ServerManagementScripts
 

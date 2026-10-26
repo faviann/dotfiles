@@ -41,10 +41,11 @@ packages/**
 .config/fish/
 .config/fish/**
 .chezmoiscripts/install-packages.sh
+.chezmoiscripts/switch-home-manager.sh
 {{- end }}
 
 {{- if ne .profile "workstation" }}
-# Workstation only until Home Manager reaches desktops
+# Workstation only
 .local/bin/workstation-update
 .local/bin/dev-session
 .local/bin/update-agent-tools
