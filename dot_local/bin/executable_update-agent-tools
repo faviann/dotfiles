@@ -20,7 +20,6 @@ packages=(
   @anthropic-ai/claude-code@latest
   @earendil-works/pi-coding-agent@latest
   opencode-ai@latest
-  @oh-my-pi/pi-coding-agent@latest
 )
 
 # npm is moving install scripts behind an explicit allowlist and already warns
@@ -34,7 +33,6 @@ allow_scripts=(
   @anthropic-ai/claude-code
   opencode-ai
   esbuild
-  onnxruntime-node
   protobufjs
   @google/genai
 )
@@ -62,7 +60,7 @@ npm install --global --prefix "$prefix" --force=false --engine-strict \
   --allow-scripts="$allowed_scripts" "${packages[@]}" \
   || fail 'npm installation failed'
 
-for harness in opencode omp pi; do
+for harness in opencode pi; do
   "$harness" --version >/dev/null || fail "verification failed: $harness"
 done
 

@@ -102,7 +102,7 @@ STUB
   bin_dir="$test_dir/.local/bin"
 
   for command in \
-    bun codex claude pi opencode omp; do
+    bun codex claude pi opencode; do
     make_stub "$bin_dir/$command"
   done
   printf '#!%s\n' "$REAL_BASH" >"$bin_dir/update-agent-tools"
@@ -126,11 +126,11 @@ STUB
   local missing_harness
   local test_dir
 
-  for missing_harness in opencode omp bun; do
+  for missing_harness in opencode bun; do
     test_dir="$(mktemp -d)"
     bin_dir="$test_dir/.local/bin"
     for command in \
-      bun codex claude pi opencode omp; do
+      bun codex claude pi opencode; do
       if [[ "$command" != "$missing_harness" ]]; then
         make_stub "$bin_dir/$command"
       fi

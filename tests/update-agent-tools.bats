@@ -12,7 +12,7 @@ setup() {
   export PLUGIN_LIST="$BATS_TEST_TMPDIR/plugins.json"
   printf '[{"id":"codex@openai-codex","scope":"user"},{"id":"pstack@pstack-claude","scope":"user"}]\n' >"$PLUGIN_LIST"
   local tool
-  for tool in npm curl bun opencode omp pi claude; do
+  for tool in npm curl bun opencode pi claude; do
     printf '#!%s\n' "$(command -v bash)" >"$HOME/.local/bin/$tool"
     cat >>"$HOME/.local/bin/$tool" <<'STUB'
 set -euo pipefail
@@ -37,7 +37,7 @@ case "$name" in
       [[ "${FAIL_AT:-}" != bun ]]
     fi
     ;;
-  opencode|omp|pi) [[ "${FAIL_AT:-}" != "$name" ]] ;;
+  opencode|pi) [[ "${FAIL_AT:-}" != "$name" ]] ;;
   claude)
     case "$*" in
       'plugin list --json')
@@ -83,7 +83,7 @@ STUB
 
 @test "test_failed_installation_or_harness_fails_update" {
   local phase
-  for phase in bun bun-upgrade npm opencode omp pi plugin-list plugin-update; do
+  for phase in bun bun-upgrade npm opencode pi plugin-list plugin-update; do
     run env FAIL_AT="$phase" bash "$COMMAND"
     [ "$status" -ne 0 ]
     [[ "$output" != *'Agent tools updated'* ]]

@@ -47,7 +47,7 @@ printf 'herdr %s\n' "$*" >>"$COMMAND_LOG"
 
 case "${2:-}" in
   status)
-    for target in pi omp claude codex opencode; do
+    for target in pi claude codex opencode; do
       state=$(cat "$HERDR_STATE/$target" 2>/dev/null || printf 'not installed')
       [[ "$state" == current ]] && state='current (v1)'
       printf '%s: %s (%s)\n' "$target" "$state" "$HOME/.$target"
@@ -59,7 +59,6 @@ case "${2:-}" in
       claude) dir="$HOME/.claude" ;;
       codex) dir="$HOME/.codex" ;;
       pi) dir="$HOME/.pi/agent" ;;
-      omp) dir="$HOME/.omp/agent" ;;
       opencode) dir="$HOME/.config/opencode" ;;
       *) exit 98 ;;
     esac
@@ -101,10 +100,10 @@ installs() {
   run_hook "$test_dir" || fail 'integration install failed'
 
   diff -u \
-    <(printf 'herdr integration install %s\n' codex pi omp opencode) \
+    <(printf 'herdr integration install %s\n' codex pi opencode) \
     <(installs "$test_dir") \
     || fail 'did not install exactly the integrations Herdr does not report as current'
-  for dir in .codex .pi .omp .config/opencode; do
+  for dir in .codex .pi .config/opencode; do
     [[ "$(stat -c %a "$test_dir/home/$dir")" == 700 ]] \
       || fail "created config directory $dir is not private"
   done

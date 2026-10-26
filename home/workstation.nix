@@ -252,7 +252,7 @@ in
 
       _agent_tools_missing=false
       for _agent_tool in \
-        bun codex claude pi opencode omp; do
+        bun codex claude pi opencode; do
         if ! command -v "$_agent_tool" >/dev/null 2>&1; then
           _agent_tools_missing=true
           break

@@ -38,7 +38,6 @@ The managed unit contains:
 - Claude Code (`@anthropic-ai/claude-code`)
 - Pi (`@earendil-works/pi-coding-agent`)
 - OpenCode (`opencode-ai`)
-- Oh My Pi (`@oh-my-pi/pi-coding-agent`)
 
 [Bun's upstream installer](https://bun.sh/install) supplies its latest runtime,
 selects a CPU-compatible build (including baseline x64), and replaces the binary
@@ -53,10 +52,6 @@ supported engine ranges, including transitive dependencies. npm does not enforce
 Bun engines: the updater installs the latest Bun and runs Bun and the Bun-using
 harnesses to confirm they start. If an upstream package needs a newer Node,
 update the nixpkgs input; the failed preflight leaves installed tools unchanged.
-
-Pi and Oh My Pi intentionally coexist while OMP is evaluated as a separate
-harness. The `pi` command continues to use `~/.pi`; the distinct `omp` command
-uses its own default `~/.omp` state. OMP does not replace Pi.
 
 ## .NET SDK policy
 

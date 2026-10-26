@@ -10,7 +10,7 @@
 - **Configuration**: `~/.config/herdr/config.toml` is optional and app-owned.
 - **Integrations**: every `chezmoi apply` runs
   `.chezmoiscripts/run_after_install-herdr-integrations.sh.tmpl`, which
-  installs the Claude Code, Codex, Pi, OMP, and OpenCode integrations that
+  installs the Claude Code, Codex, Pi, and OpenCode integrations that
   Herdr does not report as current. Herdr resumes agent panes after a server
   restart only through these integrations. A running agent loads a new
   integration only after it restarts. See the runbook for the update
