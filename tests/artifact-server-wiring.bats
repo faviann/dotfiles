@@ -10,7 +10,7 @@ readonly ORIGIN='https://artifact-server.public.faviann.com'
 setup() {
   export TMPDIR="$BATS_TEST_TMPDIR"
   export ITEM="$BATS_TEST_TMPDIR/item.json"
-  HOME_DIR="$BATS_TEST_TMPDIR/home"
+  HOME_DIR="$BATS_TEST_TMPDIR/home dir"
   local bin="$BATS_TEST_TMPDIR/bin"
 
   mkdir -p "$bin" "$HOME_DIR"
@@ -125,8 +125,6 @@ run_helper() {
 @test "test_claude_and_codex_helper_commands_run_through_a_shell_when_home_has_a_space" {
   local command
 
-  HOME_DIR="$BATS_TEST_TMPDIR/sp ace"
-  mkdir -p "$HOME_DIR"
   jq -n --arg notes "$KEY" \
     '{name: "dotfiles/artifact-server-api-key", notes: $notes}' >"$ITEM"
 
