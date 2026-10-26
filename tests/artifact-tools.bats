@@ -68,3 +68,101 @@ rendered_artifact_tools() {
   ' <<<"$tools" >/dev/null \
     || fail "desktop toolchain is incomplete: $tools"
 }
+
+readonly HOME_MANAGER_SCRIPT='.chezmoiscripts/run_onchange_after_apply-home-manager.sh.tmpl'
+
+render_home_manager_script() {
+  local source_dir="$1"
+  local output="$2"
+  local destination="$BATS_TEST_TMPDIR/destination"
+
+  mkdir -p "$destination"
+  chezmoi \
+    --source "$source_dir" \
+    --destination "$destination" \
+    --config /dev/null \
+    --config-format toml \
+    --persistent-state "$BATS_TEST_TMPDIR/chezmoistate.boltdb" \
+    execute-template \
+    --file "$REPO_ROOT/$HOME_MANAGER_SCRIPT" \
+    >"$output"
+  chmod +x "$output"
+}
+
+@test "home manager script is a desktop-only target" {
+  local destination="$BATS_TEST_TMPDIR/home"
+  local profile
+  local managed
+
+  mkdir -p "$destination"
+  for profile in workstation desktop; do
+    managed="$(
+      chezmoi \
+        --source "$REPO_ROOT" \
+        --destination "$destination" \
+        --config /dev/null \
+        --config-format toml \
+        --override-data "{\"profile\":\"$profile\"}" \
+        managed --include scripts --path-style relative
+    )"
+    if [[ "$profile" == desktop ]]; then
+      grep -qx '.chezmoiscripts/apply-home-manager.sh' <<<"$managed" \
+        || fail 'the desktop profile does not run the Home Manager script'
+    elif grep -q 'apply-home-manager' <<<"$managed"; then
+      fail 'the workstation profile runs the desktop Home Manager script'
+    fi
+  done
+}
+
+@test "home manager script switches the desktop profile with the running user" {
+  local script="$BATS_TEST_TMPDIR/apply-home-manager.sh"
+  local bin="$BATS_TEST_TMPDIR/bin"
+  local log="$BATS_TEST_TMPDIR/nix.log"
+
+  render_home_manager_script "$REPO_ROOT" "$script"
+
+  mkdir -p "$bin"
+  printf '#!%s\n' "$(command -v bash)" >"$bin/nix"
+  cat >>"$bin/nix" <<'STUB'
+printf '%s\n' "$USER $HOME $*" >>"$NIX_LOG"
+STUB
+  chmod +x "$bin/nix"
+
+  NIX_LOG="$log" USER=wrong HOME="$BATS_TEST_TMPDIR/tester-home" PATH="$bin:$PATH" bash "$script"
+
+  [[ "$(<"$log")" == "$(id -un) $BATS_TEST_TMPDIR/tester-home run $REPO_ROOT#home-manager -- switch --impure --flake $REPO_ROOT#desktop" ]] \
+    || fail "unexpected switch command: $(<"$log")"
+}
+
+@test "home manager script exits 1 and names the Nix install step when nix is absent" {
+  local script="$BATS_TEST_TMPDIR/apply-home-manager.sh"
+  local empty="$BATS_TEST_TMPDIR/empty-path"
+  local status=0
+  local output
+
+  render_home_manager_script "$REPO_ROOT" "$script"
+  mkdir -p "$empty"
+
+  output="$(PATH="$empty" "$(command -v bash)" "$script" 2>&1)" || status=$?
+
+  [[ "$status" -eq 1 ]] || fail "expected exit status 1, got $status"
+  [[ "$output" == *'Install Determinate Nix as in step 1 of BOOTSTRAP.md'* ]] \
+    || fail "message does not name the Nix install step: $output"
+}
+
+@test "home manager script reruns when the Home Manager source changes" {
+  local source_dir="$BATS_TEST_TMPDIR/source"
+  local before="$BATS_TEST_TMPDIR/before.sh"
+  local after="$BATS_TEST_TMPDIR/after.sh"
+
+  mkdir -p "$source_dir"
+  cp -R "$REPO_ROOT/flake.nix" "$REPO_ROOT/flake.lock" "$REPO_ROOT/home" \
+    "$REPO_ROOT/packages" "$source_dir"
+
+  render_home_manager_script "$source_dir" "$before"
+  printf '# a comment\n' >>"$source_dir/home/artifact-tools.nix"
+  render_home_manager_script "$source_dir" "$after"
+
+  ! cmp -s "$before" "$after" \
+    || fail 'a change under home/ left the script text, and its chezmoi hash, unchanged'
+}

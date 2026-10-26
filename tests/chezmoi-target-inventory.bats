@@ -17,6 +17,7 @@ readonly INVENTORY='
 .ansible/vault-pass                             workstation
 .bash_profile                                   workstation desktop
 .bashrc                                         workstation desktop
+.chezmoiscripts/apply-home-manager.sh           desktop
 .chezmoiscripts/github-known-hosts.sh           workstation desktop
 .chezmoiscripts/install-herdr-integrations.sh   workstation desktop
 .chezmoiscripts/install-herdr.sh                workstation desktop
