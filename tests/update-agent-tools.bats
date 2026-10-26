@@ -9,8 +9,10 @@ setup() {
   export COMMAND_LOG="$HOME/commands"
   : >"$COMMAND_LOG"
   export COMMAND="$BATS_TEST_DIRNAME/../dot_local/bin/executable_update-agent-tools"
+  export MARKETPLACE_LIST="$BATS_TEST_TMPDIR/marketplaces.json"
+  printf '[{"name":"openai-codex","source":"github","repo":"openai/codex-plugin-cc"}]\n' >"$MARKETPLACE_LIST"
   export PLUGIN_LIST="$BATS_TEST_TMPDIR/plugins.json"
-  printf '[{"id":"codex@openai-codex","scope":"user"},{"id":"pstack@pstack-claude","scope":"user"}]\n' >"$PLUGIN_LIST"
+  printf '[{"id":"codex@openai-codex","scope":"user"},{"id":"context7@claude-plugins-official","scope":"user"}]\n' >"$PLUGIN_LIST"
   local tool
   for tool in npm curl bun opencode pi claude; do
     printf '#!%s\n' "$(command -v bash)" >"$HOME/.local/bin/$tool"
@@ -40,10 +42,16 @@ case "$name" in
   opencode|pi) [[ "${FAIL_AT:-}" != "$name" ]] ;;
   claude)
     case "$*" in
+      'plugin marketplace list --json')
+        [[ "${FAIL_AT:-}" != marketplace-list ]]
+        cat "$MARKETPLACE_LIST"
+        ;;
+      'plugin marketplace add '*) [[ "${FAIL_AT:-}" != marketplace-add ]] ;;
       'plugin list --json')
         [[ "${FAIL_AT:-}" != plugin-list ]]
         cat "$PLUGIN_LIST"
         ;;
+      'plugin install '*) [[ "${FAIL_AT:-}" != plugin-install ]] ;;
       'plugin update '*) [[ "${FAIL_AT:-}" != plugin-update ]] ;;
       *) exit 92 ;;
     esac
@@ -83,7 +91,8 @@ STUB
 
 @test "test_failed_installation_or_harness_fails_update" {
   local phase
-  for phase in bun bun-upgrade npm opencode pi plugin-list plugin-update; do
+  for phase in bun bun-upgrade npm opencode pi marketplace-list marketplace-add \
+    plugin-list plugin-install plugin-update; do
     run env FAIL_AT="$phase" bash "$COMMAND"
     [ "$status" -ne 0 ]
     [[ "$output" != *'Agent tools updated'* ]]
@@ -114,26 +123,55 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "test_update_refreshes_installed_claude_plugins_after_npm_install" {
+@test "test_update_adds_missing_marketplaces_and_installs_or_updates_declared_plugins" {
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
   [[ "$output" == *'Agent tools updated'* ]]
-  [ "$(tail -n 1 "$COMMAND_LOG")" = 'claude plugin update pstack@pstack-claude' ]
-  [ "$(grep -c '^claude plugin update ' "$COMMAND_LOG")" -eq 1 ]
+  diff -u - <(grep '^claude ' "$COMMAND_LOG") <<'LOG'
+claude plugin marketplace list --json
+claude plugin marketplace add michael-denyer/pstack-claude
+claude plugin list --json
+claude plugin install pstack@pstack-claude
+claude plugin update codex@openai-codex
+claude plugin install frontend-design@anthropic-plugin-directory
+claude plugin install skill-creator@anthropic-plugin-directory
+LOG
 }
 
-@test "test_update_skips_claude_plugins_that_are_not_installed" {
-  printf '[{"id":"codex@openai-codex","scope":"user"}]\n' >"$PLUGIN_LIST"
+@test "test_update_of_reconciled_claude_plugins_only_updates_the_declared_ones" {
+  printf '[{"name":"openai-codex"},{"name":"pstack-claude"},{"name":"claude-plugins-official"}]\n' \
+    >"$MARKETPLACE_LIST"
+  printf '[%s]\n' '{"id":"skill-creator@anthropic-plugin-directory"},{"id":"pstack@pstack-claude"},{"id":"context7@claude-plugins-official"},{"id":"frontend-design@anthropic-plugin-directory"},{"id":"codex@openai-codex"}' \
+    >"$PLUGIN_LIST"
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'Agent tools updated'* ]]
-  grep -qx 'claude plugin list --json' "$COMMAND_LOG"
-  run ! grep -q '^claude plugin update ' "$COMMAND_LOG"
+  diff -u - <(grep '^claude ' "$COMMAND_LOG") <<'LOG'
+claude plugin marketplace list --json
+claude plugin list --json
+claude plugin update pstack@pstack-claude
+claude plugin update codex@openai-codex
+claude plugin update frontend-design@anthropic-plugin-directory
+claude plugin update skill-creator@anthropic-plugin-directory
+LOG
+}
+
+@test "test_failed_marketplace_add_names_the_marketplace" {
+  run env FAIL_AT=marketplace-add bash "$COMMAND"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'Claude Code plugin marketplace add failed: pstack-claude'* ]]
+  [[ "$output" != *'Agent tools updated'* ]]
+}
+
+@test "test_failed_claude_plugin_install_names_the_plugin" {
+  run env FAIL_AT=plugin-install bash "$COMMAND"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'Claude Code plugin install failed: pstack@pstack-claude'* ]]
+  [[ "$output" != *'Agent tools updated'* ]]
 }
 
 @test "test_failed_claude_plugin_update_names_the_plugin" {
   run env FAIL_AT=plugin-update bash "$COMMAND"
   [ "$status" -ne 0 ]
-  [[ "$output" == *'Claude Code plugin update failed: pstack@pstack-claude'* ]]
+  [[ "$output" == *'Claude Code plugin update failed: codex@openai-codex'* ]]
   [[ "$output" != *'Agent tools updated'* ]]
 }

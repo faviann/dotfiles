@@ -53,6 +53,25 @@ Bun engines: the updater installs the latest Bun and runs Bun and the Bun-using
 harnesses to confirm they start. If an upstream package needs a newer Node,
 update the nixpkgs input; the failed preflight leaves installed tools unchanged.
 
+## Claude Code plugins
+
+`update-agent-tools` declares the Claude Code plugins every machine gets:
+
+- `pstack@pstack-claude`
+- `codex@openai-codex`
+- `frontend-design@anthropic-plugin-directory`
+- `skill-creator@anthropic-plugin-directory`
+
+It also declares the two marketplaces these plugins come from beyond the
+built-in `anthropic-plugin-directory`: `pstack-claude` from GitHub
+`michael-denyer/pstack-claude`, and `openai-codex` from GitHub
+`openai/codex-plugin-cc`. Each run adds a declared marketplace that
+`claude plugin marketplace list` does not show. It then installs each declared
+plugin that `claude plugin list` does not show and updates the others. A
+failure names the marketplace or plugin. Plugins that you install by hand stay
+installed and are not updated. Declaring a plugin in `~/.claude/settings.json`
+does not install it, so chezmoi does not manage plugins there.
+
 ## Agent defaults
 
 Agents on every machine run without approval prompts or a sandbox. Chezmoi sets
