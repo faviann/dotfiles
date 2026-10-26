@@ -71,6 +71,18 @@ rendered_artifact_tools() {
     || fail "desktop toolchain is incomplete: $tools"
 }
 
+@test "every profile ships uv for homelab-iac" {
+  local profile
+  local tools
+
+  for profile in workstation desktop; do
+    tools="$(rendered_artifact_tools "$profile")" \
+      || fail "could not render the $profile toolchain"
+    jq -e '.packages | index("uv")' <<<"$tools" >/dev/null \
+      || fail "$profile profile does not ship uv: $tools"
+  done
+}
+
 readonly HOME_MANAGER_SCRIPT='.chezmoiscripts/run_onchange_after_switch-home-manager.sh.tmpl'
 
 render_home_manager_script() {

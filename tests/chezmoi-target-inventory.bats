@@ -13,11 +13,12 @@ readonly INVENTORY='
 .agents/AGENTS.md                               workstation desktop
 .agents/artifact-server/api-key                 workstation desktop
 .agents/forks.md                                workstation desktop
-.ansible/ssh/proxmox_lxc                        workstation
-.ansible/ssh/proxmox_lxc.pub                    workstation
-.ansible/vault-pass                             workstation
+.ansible/ssh/proxmox_lxc                        workstation desktop
+.ansible/ssh/proxmox_lxc.pub                    workstation desktop
+.ansible/vault-pass                             workstation desktop
 .bash_profile                                   workstation desktop
 .bashrc                                         workstation desktop
+.chezmoiscripts/clone-homelab-iac.sh            workstation desktop
 .chezmoiscripts/github-known-hosts.sh           workstation desktop
 .chezmoiscripts/install-herdr-integrations.sh   workstation desktop
 .chezmoiscripts/install-herdr.sh                workstation desktop

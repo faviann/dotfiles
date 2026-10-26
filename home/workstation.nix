@@ -114,7 +114,6 @@ in
   home.packages = with pkgs; [
     dotnetSdk
     nodejs
-    uv
     gh
     azure-cli
     jq

@@ -30,12 +30,6 @@ packages/**
 
 {{- /* Machine profiles: each block ignores what its profiles do not get. */}}
 
-{{- if ne .profile "workstation" }}
-# Workstation only: Ansible controller; homelab-iac copies it to the bootstrap node
-.ansible/
-.ansible/**
-{{- end }}
-
 {{- if ne .profile "desktop" }}
 # Desktop only
 .config/fish/
