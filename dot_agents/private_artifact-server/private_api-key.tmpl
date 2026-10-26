@@ -1,5 +1,5 @@
 {{- $key := (bitwarden "item" "dotfiles/artifact-server-api-key").notes | default "" | trim -}}
-{{- if not (regexMatch "^\\S+$" $key) -}}
+{{- if not (regexMatch "^[[:graph:]]+$" $key) -}}
 {{-   fail "Bitwarden item dotfiles/artifact-server-api-key must hold one API key, on one line, in its Notes" -}}
 {{- end -}}
 {{ $key }}

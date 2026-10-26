@@ -103,6 +103,25 @@ run_helper() {
   done
 }
 
+@test "test_api_key_apply_fails_when_the_key_holds_a_non_printable_or_non_ascii_character" {
+  local notes
+
+  for notes in "$KEY"$'\v'tail "$KEY"$'\xc2\xa0'tail "$KEY"$'\xe2\x80\x8b'; do
+    rm -rf "$HOME_DIR"
+    mkdir -p "$HOME_DIR"
+    jq -n --arg notes "$notes" \
+      '{name: "dotfiles/artifact-server-api-key", notes: $notes}' >"$ITEM"
+
+    if apply_workstation .agents/artifact-server 2>"$BATS_TEST_TMPDIR/stderr"; then
+      fail "apply succeeded with a key holding $(printf %s "$notes" | od -An -c)"
+    fi
+    grep -qF 'dotfiles/artifact-server-api-key must hold one API key' \
+      "$BATS_TEST_TMPDIR/stderr" || fail 'apply error does not name the item'
+    [[ ! -e "$HOME_DIR/.agents/artifact-server/api-key" ]] \
+      || fail 'apply wrote a key file from an invalid key'
+  done
+}
+
 @test "test_claude_and_codex_helper_commands_run_through_a_shell_when_home_has_a_space" {
   local command
 
