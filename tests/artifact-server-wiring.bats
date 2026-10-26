@@ -241,9 +241,7 @@ TOML
 
 @test "test_every_consumer_reads_the_origin_and_the_one_key_file" {
   local origin='https://artifacts.example.test'
-  # The harnesses expand the tilde themselves.
-  # shellcheck disable=SC2088
-  local key_ref='~/.agents/artifact-server/api-key'
+  local key_ref=\~/.agents/artifact-server/api-key
 
   apply_targets "{\"profile\":\"workstation\",\"artifactServer\":{\"url\":\"$origin\"}}" \
     .claude.json .codex/config.toml .config/opencode/opencode.json \
