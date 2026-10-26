@@ -56,6 +56,7 @@
       morainePackage = pkgs.callPackage ./packages/moraine.nix {
         rustPlatform = moraineRustPlatform;
       };
+      artifactServerPackage = pkgs.callPackage ./packages/artifact-server.nix { };
       behavioralTestInputs = [
         pkgs.bash
         pkgs.bats
@@ -77,13 +78,22 @@
       workstationHomeConfiguration = home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
         extraSpecialArgs = {
-          inherit dotnetSdk morainePackage;
+          inherit artifactServerPackage dotnetSdk morainePackage;
           hermesPackage = hermes-agent.packages.${system}.default;
         };
         modules = [
           nix-openclaw.homeManagerModules.openclaw
           ./home/workstation.nix
         ];
+      };
+      desktopHomeConfiguration = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        extraSpecialArgs = { inherit artifactServerPackage; };
+        modules = [ ./home/desktop.nix ];
+      };
+      artifactToolsOf = configuration: {
+        packages = map (package: package.pname or package.name) configuration.config.home.packages;
+        fontconfigEnabled = configuration.config.fonts.fontconfig.enable;
       };
       bootstrapAgentToolsActivation = pkgs.writeText "bootstrap-agent-tools" (
         workstationHomeConfiguration.config.home.activation.bootstrapAgentTools.data
@@ -105,6 +115,14 @@
               pname = package.pname or package.name;
               inherit (package) version;
             };
+          artifactServerRelease = {
+            inherit (artifactServerPackage) version;
+            inherit (artifactServerPackage.passthru.release) url sha256;
+          };
+          artifactTools = {
+            workstation = artifactToolsOf workstationHomeConfiguration;
+            desktop = artifactToolsOf desktopHomeConfiguration;
+          };
           moraineRelease = {
             inherit (morainePackage) version;
             inherit (morainePackage.passthru.release)
@@ -220,7 +238,9 @@
     in
     {
       packages.${system} = {
+        artifact-server = artifactServerPackage;
         dotnet-sdk = dotnetSdk;
+        home-manager = home-manager.packages.${system}.home-manager;
         moraine = morainePackage;
       };
 
@@ -260,6 +280,8 @@
 
         workstation-activation = workstationHomeConfiguration.activationPackage;
 
+        desktop-activation = desktopHomeConfiguration.activationPackage;
+
         shellcheck = pkgs.runCommand "dotfiles-shellcheck" {
           nativeBuildInputs = [
             pkgs.chezmoi
@@ -296,5 +318,6 @@
       };
 
       homeConfigurations.workstation = workstationHomeConfiguration;
+      homeConfigurations.desktop = desktopHomeConfiguration;
     };
 }
