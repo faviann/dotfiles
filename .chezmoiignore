@@ -45,7 +45,7 @@ packages/**
 {{- end }}
 
 {{- if ne .profile "workstation" }}
-# Workstation only: these manage its agent binaries and Home Manager services
+# Workstation only
 .local/bin/workstation-update
 .local/bin/dev-session
 .local/bin/update-agent-tools

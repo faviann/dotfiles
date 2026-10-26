@@ -213,6 +213,10 @@
           ./dot_local/bin/executable_github-token
           ./dot_local/bin/executable_update-agent-tools
           ./dot_local/bin/executable_workstation-update
+          ./flake.lock
+          ./flake.nix
+          ./home
+          ./packages
           ./scripts/artifact-publisher-config
           ./scripts/collie-bootstrap
           ./scripts/lobu-bootstrap

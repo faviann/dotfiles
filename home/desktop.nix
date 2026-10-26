@@ -1,9 +1,7 @@
 { ... }:
 
 let
-  # Home Manager reads these at switch time with `--impure`. Pure evaluation,
-  # as in `nix flake check`, sees empty values and takes the fallbacks.
-  fromEnvironment =
+  envOrPureEvalFallback =
     name: fallback:
     let
       value = builtins.getEnv name;
@@ -13,8 +11,8 @@ in
 {
   imports = [ ./artifact-tools.nix ];
 
-  home.username = fromEnvironment "USER" "faviann";
-  home.homeDirectory = fromEnvironment "HOME" "/home/faviann";
+  home.username = envOrPureEvalFallback "USER" "faviann";
+  home.homeDirectory = envOrPureEvalFallback "HOME" "/home/faviann";
   home.stateVersion = "25.11";
 
   programs.home-manager.enable = true;

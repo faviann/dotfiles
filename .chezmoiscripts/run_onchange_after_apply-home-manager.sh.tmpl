@@ -17,8 +17,6 @@ if ! command -v nix >/dev/null 2>&1; then
   exit 1
 fi
 
-# The desktop profile names its user and home from the environment so the same
-# flake serves every machine. A bare container shell may leave USER unset.
 USER="$(id -un)"
 export USER HOME
 
