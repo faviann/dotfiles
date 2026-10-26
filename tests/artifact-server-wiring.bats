@@ -103,6 +103,27 @@ run_helper() {
   done
 }
 
+@test "test_claude_and_codex_helper_commands_run_through_a_shell_when_home_has_a_space" {
+  local command
+
+  HOME_DIR="$BATS_TEST_TMPDIR/sp ace"
+  mkdir -p "$HOME_DIR"
+  jq -n --arg notes "$KEY" \
+    '{name: "dotfiles/artifact-server-api-key", notes: $notes}' >"$ITEM"
+
+  apply_workstation .claude.json .codex/config.toml .agents/artifact-server \
+    .local/bin/artifact-server-mcp-headers || fail 'apply failed'
+
+  toml_as_json "$HOME_DIR/.codex/config.toml" >"$BATS_TEST_TMPDIR/codex.json"
+  for command in \
+    "$(jq -er '.mcpServers["artifact-server"].headersHelper' "$HOME_DIR/.claude.json")" \
+    "$(jq -er '.mcp_servers.artifact_server.http_headers_helper' "$BATS_TEST_TMPDIR/codex.json")"; do
+    diff -u <(printf '{"Authorization":"Bearer %s"}\n' "$KEY") \
+      <(HOME="$HOME_DIR" sh -c "$command") \
+      || fail "helper command did not run through a shell: $command"
+  done
+}
+
 @test "test_headers_helper_prints_the_bearer_header_from_the_key_file" {
   mkdir -p "$HOME_DIR/.agents/artifact-server"
   printf '%s\n' "$KEY" >"$HOME_DIR/.agents/artifact-server/api-key"
@@ -182,8 +203,8 @@ JSON
   cmp -s "$BATS_TEST_TMPDIR/first-apply.json" "$config" \
     || fail 'second apply changed .claude.json'
   diff -u \
-    <(jq -S --arg origin "$ORIGIN" --arg home "$HOME_DIR" \
-      '.mcpServers["artifact-server"] = {type: "http", url: ($origin + "/mcp"), headersHelper: ($home + "/.local/bin/artifact-server-mcp-headers"), timeout: 30000}' \
+    <(jq -S --arg origin "$ORIGIN" --arg helper "'$HOME_DIR/.local/bin/artifact-server-mcp-headers'" \
+      '.mcpServers["artifact-server"] = {type: "http", url: ($origin + "/mcp"), headersHelper: $helper, timeout: 30000}' \
       "$existing") \
     <(jq -S . "$config") \
     || fail 'apply did not keep other keys and set exactly the artifact-server entry'
@@ -241,8 +262,8 @@ TOML
   toml_as_json "$config" >"$BATS_TEST_TMPDIR/applied.json" \
     || fail 'could not parse the applied config.toml'
   diff -u \
-    <(jq -S --arg origin "$ORIGIN" --arg home "$HOME_DIR" \
-      '.mcp_servers.artifact_server = {url: ($origin + "/mcp"), http_headers_helper: ($home + "/.local/bin/artifact-server-mcp-headers"), enabled: false, startup_timeout_sec: 30}' \
+    <(jq -S --arg origin "$ORIGIN" --arg helper "'$HOME_DIR/.local/bin/artifact-server-mcp-headers'" \
+      '.mcp_servers.artifact_server = {url: ($origin + "/mcp"), http_headers_helper: $helper, enabled: false, startup_timeout_sec: 30}' \
       "$BATS_TEST_TMPDIR/existing.json") \
     <(jq -S . "$BATS_TEST_TMPDIR/applied.json") \
     || fail 'apply did not keep other keys and set exactly the artifact_server entry'
@@ -250,7 +271,7 @@ TOML
 }
 
 @test "test_harness_configs_with_the_current_server_are_left_byte_identical" {
-  local helper="$HOME_DIR/.local/bin/artifact-server-mcp-headers"
+  local helper="'$HOME_DIR/.local/bin/artifact-server-mcp-headers'"
 
   mkdir -p "$HOME_DIR/.codex"
   printf '{"theme":"dark","mcpServers":{"artifact-server":{"headersHelper":"%s","url":"%s/mcp","type":"http"}}}' \
@@ -278,7 +299,7 @@ TOML
 }
 
 @test "test_missing_harness_configs_get_only_the_server" {
-  local helper="$HOME_DIR/.local/bin/artifact-server-mcp-headers"
+  local helper="'$HOME_DIR/.local/bin/artifact-server-mcp-headers'"
 
   apply_workstation .claude.json .codex/config.toml || fail 'apply failed'
 

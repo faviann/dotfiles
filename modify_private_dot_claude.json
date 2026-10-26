@@ -5,7 +5,7 @@
 {{-   $config = fromJson .chezmoi.stdin -}}
 {{- end -}}
 {{- $current := get (get $config "mcpServers" | default dict) "artifact-server" | default dict -}}
-{{- $server := mergeOverwrite (omit $current "headers") (dict "type" "http" "url" (printf "%s/mcp" .artifactServer.url) "headersHelper" (joinPath .chezmoi.homeDir ".local/bin/artifact-server-mcp-headers")) -}}
+{{- $server := mergeOverwrite (omit $current "headers") (dict "type" "http" "url" (printf "%s/mcp" .artifactServer.url) "headersHelper" (joinPath .chezmoi.homeDir ".local/bin/artifact-server-mcp-headers" | squote)) -}}
 {{- if eq (toJson $server) (toJson $current) -}}
 {{-   .chezmoi.stdin -}}
 {{- else -}}
