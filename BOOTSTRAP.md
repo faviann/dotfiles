@@ -145,20 +145,19 @@ Check the rendered pair the same way as the workstation key, with
 
 ## Bitwarden Claude Code Gateway Items
 
-Claude Code reaches Anthropic through a gateway that depends on the profile.
-The workstation uses the JES AI gateway at `ai-gateway.jungleservices.net`,
-over its userspace Tailscale. Desktops use the sub2api gateway at
-`gateway.ai.faviann.com`. Chezmoi sets `env.ANTHROPIC_BASE_URL` in
-`~/.claude/settings.json` to match. On the workstation and desktops, chezmoi
+Claude Code on every machine uses the JES AI gateway at
+`https://ai-gateway.jungleservices.net`. Chezmoi sets `env.ANTHROPIC_BASE_URL`
+in `~/.claude/settings.json` to match. On the workstation and desktops, chezmoi
 renders two credentials that sub2api issued, each from the Notes of one
-Bitwarden item. The gateway token works against both gateways.
+Bitwarden item.
 
-- `dotfiles/sub2api-gateway-token`: the gateway API key Claude Code
-  authenticates with, rendered to `~/.config/claude/gateway-token`. The
+- `dotfiles/sub2api-gateway-token`: the token Claude Code authenticates to the
+  JES AI gateway with, rendered to `~/.config/claude/gateway-token`. The
   `apiKeyHelper` in `~/.claude/settings.json` reads it.
 - `dotfiles/sub2api-admin-key`: the sub2api admin API key, rendered to
   `~/.config/claude/gateway-admin-key`. The status line uses it to read each
-  Claude account's 5-hour and weekly usage.
+  Claude account's 5-hour and weekly usage from the sub2api admin API at
+  `gateway.ai.faviann.com`, which is separate from the gateway Claude Code uses.
 
 Create both items before the first apply. Chezmoi sets only its own keys in
 `~/.claude/settings.json` and leaves the rest of the file to Claude Code.

@@ -16,8 +16,7 @@ setup() {
 # $HOME is literal: Claude Code expands it when it runs the hook.
 # shellcheck disable=SC2016
 TRACK_PRS='{"matcher":"Bash","hooks":[{"type":"command","command":"bash \"$HOME/.claude/hooks/track-session-prs.sh\"","timeout":5}]}'
-WORKSTATION_GATEWAY="https://ai-gateway.jungleservices.net"
-DESKTOP_GATEWAY="https://gateway.ai.faviann.com"
+GATEWAY="https://ai-gateway.jungleservices.net"
 
 managed_for() {
   local gateway="$1"
@@ -82,7 +81,7 @@ JSON
   cmp -s "$first_apply" "$settings" \
     || fail 'second apply changed settings.json'
   diff -u \
-    <(jq -S --argjson managed "$(managed_for "$WORKSTATION_GATEWAY")" --argjson track "$TRACK_PRS" \
+    <(jq -S --argjson managed "$(managed_for "$GATEWAY")" --argjson track "$TRACK_PRS" \
       '. * ($managed | del(.hooks)) | .hooks.PostToolUse += [$track]' "$existing") \
     <(jq -S . "$settings") \
     || fail 'merge did not keep other keys and set exactly the managed keys'
@@ -93,15 +92,13 @@ JSON
 
   apply_settings "$home" || fail 'apply failed'
 
-  diff -u <(jq -S . <<<"$(managed_for "$WORKSTATION_GATEWAY")") <(jq -S . "$home/.claude/settings.json") \
+  diff -u <(jq -S . <<<"$(managed_for "$GATEWAY")") <(jq -S . "$home/.claude/settings.json") \
     || fail 'missing settings.json did not get exactly the managed keys'
 }
 
-@test "test_gateway_url_follows_the_profile_and_keeps_the_parked_url" {
-  local profile gateway home
+@test "test_every_profile_gets_the_jes_gateway_and_keeps_the_parked_url" {
+  local profile home
   for profile in workstation desktop; do
-    gateway="$WORKSTATION_GATEWAY"
-    [[ "$profile" == desktop ]] && gateway="$DESKTOP_GATEWAY"
     home="$BATS_TEST_TMPDIR/home-$profile"
     mkdir -p "$home/.claude"
     printf '{"env": {"ANTHROPIC_BASE_URL": "https://stale.example", "_ANTHROPIC_BASE_URL": "https://parked.example"}}\n' \
@@ -109,8 +106,8 @@ JSON
 
     apply_settings "$home" "$profile" || fail "$profile apply failed"
 
-    [[ "$(jq -r '.env.ANTHROPIC_BASE_URL' "$home/.claude/settings.json")" == "$gateway" ]] \
-      || fail "$profile did not get $gateway"
+    [[ "$(jq -r '.env.ANTHROPIC_BASE_URL' "$home/.claude/settings.json")" == "$GATEWAY" ]] \
+      || fail "$profile did not get $GATEWAY"
     [[ "$(jq -r '.env._ANTHROPIC_BASE_URL' "$home/.claude/settings.json")" == "https://parked.example" ]] \
       || fail "$profile lost the parked URL"
   done
