@@ -205,7 +205,7 @@ that file when it connects:
   `Authorization` header from the file.
 - OpenCode and pi read the file from their MCP configuration.
 
-Chezmoi sets only the `artifact-server` server in `~/.claude.json` and the
+Apply sets only the `artifact-server` server in `~/.claude.json` and the
 `artifact_server` server in `~/.codex/config.toml`, and owns
 `~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. Other servers
 and other keys in those two files stay, as do keys of the artifact-server entry
@@ -213,10 +213,23 @@ such as Codex's `enabled`. The entry's competing auth keys are removed so the
 helper is the only auth: Claude Code's `headers`, and Codex's
 `bearer_token_env_var`, `http_headers`, and `env_http_headers`. When the
 managed keys change, as on the first apply, apply rewrites
-`~/.codex/config.toml` as sorted TOML and drops its comments. A corrupt
-`~/.claude.json` or `~/.codex/config.toml` stops the whole apply with a
-`fromJson` or `fromToml` error that names the file. Fix or delete the file,
-then apply again. OpenCode refuses to start while the key file is missing.
+`~/.codex/config.toml` as sorted TOML and drops its comments.
+
+`~/.claude.json` is not a chezmoi target, because the workstation bind-mounts
+that one file and chezmoi cannot replace a mount point. The
+`register-claude-mcp-server` apply script edits it in place with `jq` and keeps
+its key order. When the entry is current, the script does not write the file.
+Without `jq`, as on a new workstation's first apply before Home Manager, the
+script skips the entry with a notice, and the next apply adds it.
+
+A corrupt `~/.codex/config.toml` stops the whole apply with a `fromToml` error
+that names the file. A corrupt `~/.claude.json` fails the apply script with an
+error that names the file. The failure stops the scripts that sort after it,
+`switch-chezmoi-origin-to-ssh` and, on desktops, `switch-home-manager`. Fix the
+file, then run `chezmoi apply` again to finish them. If the script's write fails
+midway, for example on a full disk, it keeps the complete new content in a
+temporary file and the error names it. Copy that file over `~/.claude.json`.
+OpenCode refuses to start while the key file is missing.
 
 To rotate the key, put the new key in the item's Notes. Then, on each machine
 with Bitwarden unlocked, run `bw sync` so the CLI sees the edit, and run

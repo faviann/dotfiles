@@ -6,6 +6,7 @@ source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 readonly KEY='fixture-key-0123456789abcdef0123456789abcdef'
 readonly ORIGIN='https://artifact-server.public.faviann.com'
+readonly CLAUDE_MCP_TARGET=.chezmoiscripts/register-claude-mcp-server.sh
 
 setup() {
   export TMPDIR="$BATS_TEST_TMPDIR"
@@ -37,6 +38,8 @@ apply_targets() {
     targets+=("$HOME_DIR/$target")
   done
   mkdir -p "$runtime_dir"
+  # The Nix sandbox has no /usr/bin/env for the scripts' shebang.
+  printf '[interpreters.sh]\ncommand = "%s"\n' "$(command -v bash)" >"$runtime_dir/chezmoi.toml"
   HOME="$HOME_DIR" \
   XDG_CACHE_HOME="$runtime_dir/cache" \
   XDG_CONFIG_HOME="$runtime_dir/config" \
@@ -44,7 +47,7 @@ apply_targets() {
     chezmoi \
     --source "$REPO_ROOT" \
     --destination "$HOME_DIR" \
-    --config /dev/null \
+    --config "$runtime_dir/chezmoi.toml" \
     --config-format toml \
     --persistent-state "$runtime_dir/chezmoistate.boltdb" \
     --override-data "$data" \
@@ -128,7 +131,7 @@ run_helper() {
   jq -n --arg notes "$KEY" \
     '{name: "dotfiles/artifact-server-api-key", notes: $notes}' >"$ITEM"
 
-  apply_workstation .claude.json .codex/config.toml .agents/artifact-server \
+  apply_workstation "$CLAUDE_MCP_TARGET" .codex/config.toml .agents/artifact-server \
     .local/bin/artifact-server-mcp-headers || fail 'apply failed'
 
   toml_as_json "$HOME_DIR/.codex/config.toml" >"$BATS_TEST_TMPDIR/codex.json"
@@ -213,12 +216,18 @@ run_helper() {
 JSON
   cp "$existing" "$config"
 
-  apply_workstation .claude.json || fail 'first apply failed'
+  apply_workstation "$CLAUDE_MCP_TARGET" || fail 'first apply failed'
   cp "$config" "$BATS_TEST_TMPDIR/first-apply.json"
-  apply_workstation .claude.json || fail 'second apply failed'
+  touch -d '2001-02-03 04:05:06' "$config"
+  apply_workstation "$CLAUDE_MCP_TARGET" || fail 'second apply failed'
 
   cmp -s "$BATS_TEST_TMPDIR/first-apply.json" "$config" \
     || fail 'second apply changed .claude.json'
+  [[ "$(stat -c %y "$config")" == '2001-02-03 04:05:06.'* ]] \
+    || fail 'second apply wrote .claude.json'
+  diff -u <(jq -c '[keys_unsorted, (.mcpServers | keys_unsorted)]' "$existing") \
+    <(jq -c '[keys_unsorted, (.mcpServers | keys_unsorted)]' "$config") \
+    || fail 'apply reordered the keys of .claude.json'
   diff -u \
     <(jq -S --arg origin "$ORIGIN" --arg helper "'$HOME_DIR/.local/bin/artifact-server-mcp-headers'" \
       '.mcpServers["artifact-server"] = {type: "http", url: ($origin + "/mcp"), headersHelper: $helper, timeout: 30000}' \
@@ -226,6 +235,70 @@ JSON
     <(jq -S . "$config") \
     || fail 'apply did not keep other keys and set exactly the artifact-server entry'
   [[ "$(stat -c %a "$config")" == 600 ]] || fail '.claude.json is not owner-only'
+}
+
+@test "test_claude_json_update_writes_the_file_in_place" {
+  local config="$HOME_DIR/.claude.json"
+  local inode
+
+  jq -n --arg url "$ORIGIN/mcp" --arg helper "'$HOME_DIR/.local/bin/artifact-server-mcp-headers'" \
+    '{theme: "dark", mcpServers: {"artifact-server": {type: "http", url: $url, headersHelper: $helper, headers: {Authorization: "Bearer stale"}}}}' \
+    >"$config"
+  inode="$(stat -c %i "$config")"
+
+  apply_workstation "$CLAUDE_MCP_TARGET" || fail 'apply failed'
+
+  jq -e '.mcpServers["artifact-server"] | has("headers") | not' "$config" >/dev/null \
+    || fail 'apply kept the competing headers'
+  [[ "$(stat -c %i "$config")" == "$inode" ]] \
+    || fail 'apply replaced .claude.json instead of writing it in place'
+}
+
+@test "test_claude_json_that_is_not_json_fails_the_apply_and_stays_untouched" {
+  local config="$HOME_DIR/.claude.json"
+
+  printf '{"theme":"dark",\n' >"$config"
+  cp "$config" "$BATS_TEST_TMPDIR/corrupt.json"
+
+  if apply_workstation "$CLAUDE_MCP_TARGET" 2>"$BATS_TEST_TMPDIR/stderr"; then
+    fail 'apply succeeded with a corrupt .claude.json'
+  fi
+  grep -qF "$config" "$BATS_TEST_TMPDIR/stderr" \
+    || fail "apply error does not name the file: $(cat "$BATS_TEST_TMPDIR/stderr")"
+  cmp -s "$BATS_TEST_TMPDIR/corrupt.json" "$config" || fail 'apply changed a corrupt .claude.json'
+}
+
+@test "test_claude_json_failed_write_keeps_the_complete_new_copy" {
+  local config="$HOME_DIR/.claude.json"
+  local real_cat
+  local kept
+
+  real_cat="$(command -v cat)"
+  printf '{"theme":"dark"}\n' >"$config"
+  cat >"$BATS_TEST_TMPDIR/bin/cat" <<STUB
+#!$(command -v bash)
+if [[ "\${1:-}" == "$BATS_TEST_TMPDIR"/tmp.* ]]; then
+  printf 'cat: write error: No space left on device\n' >&2
+  exit 1
+fi
+exec "$real_cat" "\$@"
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/bin/cat"
+
+  if apply_workstation "$CLAUDE_MCP_TARGET" 2>"$BATS_TEST_TMPDIR/stderr"; then
+    fail 'apply succeeded although writing .claude.json failed'
+  fi
+
+  kept="$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -type f -name 'tmp.*')"
+  [[ -n "$kept" && "$kept" != *$'\n'* ]] \
+    || fail "expected one kept copy, found: ${kept:-none}"
+  grep -qF "$config" "$BATS_TEST_TMPDIR/stderr" \
+    || fail "apply error does not name the file: $(cat "$BATS_TEST_TMPDIR/stderr")"
+  grep -qF "$kept" "$BATS_TEST_TMPDIR/stderr" \
+    || fail "apply error does not name the kept copy: $(cat "$BATS_TEST_TMPDIR/stderr")"
+  jq -e --arg url "$ORIGIN/mcp" \
+    '.theme == "dark" and .mcpServers["artifact-server"].url == $url' "$kept" >/dev/null \
+    || fail 'kept copy is not the complete new .claude.json'
 }
 
 @test "test_codex_config_keeps_nested_tables_and_arrays_and_sets_the_server_once" {
@@ -298,7 +371,7 @@ TOML
   cp "$HOME_DIR/.claude.json" "$BATS_TEST_TMPDIR/claude.json"
   cp "$HOME_DIR/.codex/config.toml" "$BATS_TEST_TMPDIR/config.toml"
 
-  apply_workstation .claude.json .codex/config.toml || fail 'apply failed'
+  apply_workstation "$CLAUDE_MCP_TARGET" .codex/config.toml || fail 'apply failed'
 
   cmp -s "$BATS_TEST_TMPDIR/claude.json" "$HOME_DIR/.claude.json" \
     || fail 'apply rewrote a .claude.json that already had the server'
@@ -309,7 +382,7 @@ TOML
 @test "test_claude_json_with_null_servers_gets_the_server" {
   printf '{"theme":"dark","mcpServers":null}\n' >"$HOME_DIR/.claude.json"
 
-  apply_workstation .claude.json || fail 'apply failed on null mcpServers'
+  apply_workstation "$CLAUDE_MCP_TARGET" || fail 'apply failed on null mcpServers'
 
   jq -e '.theme == "dark" and (.mcpServers | keys) == ["artifact-server"]' \
     "$HOME_DIR/.claude.json" >/dev/null || fail 'null mcpServers did not get only the server'
@@ -318,7 +391,7 @@ TOML
 @test "test_missing_harness_configs_get_only_the_server" {
   local helper="'$HOME_DIR/.local/bin/artifact-server-mcp-headers'"
 
-  apply_workstation .claude.json .codex/config.toml || fail 'apply failed'
+  apply_workstation "$CLAUDE_MCP_TARGET" .codex/config.toml || fail 'apply failed'
 
   diff -u \
     <(jq -nS --arg url "$ORIGIN/mcp" --arg helper "$helper" \
@@ -334,12 +407,56 @@ TOML
     || fail 'missing config.toml did not get only the server'
 }
 
+@test "test_missing_or_blank_claude_json_gets_only_the_server_and_owner_only_mode" {
+  local config="$HOME_DIR/.claude.json"
+  local state
+
+  for state in missing empty whitespace; do
+    rm -f "$config"
+    case "$state" in
+      empty) : >"$config" ;;
+      whitespace) printf ' \n\t\n' >"$config" ;;
+    esac
+
+    apply_workstation "$CLAUDE_MCP_TARGET" || fail "apply failed with a $state .claude.json"
+
+    diff -u \
+      <(jq -nS --arg url "$ORIGIN/mcp" --arg helper "'$HOME_DIR/.local/bin/artifact-server-mcp-headers'" \
+        '{mcpServers: {"artifact-server": {type: "http", url: $url, headersHelper: $helper}}}') \
+      <(jq -S . "$config") \
+      || fail "$state .claude.json did not get only the server"
+    [[ "$(stat -c %a "$config")" == 600 ]] || fail "$state .claude.json is not owner-only"
+  done
+}
+
+@test "test_claude_registration_waits_for_jq_without_failing_the_apply" {
+  local no_jq="$BATS_TEST_TMPDIR/no-jq"
+  local dir
+  local tool
+  local path_dirs
+
+  mkdir -p "$no_jq"
+  IFS=: read -ra path_dirs <<<"$PATH"
+  for dir in "${path_dirs[@]}"; do
+    for tool in "$dir"/*; do
+      [[ -x "$tool" && "${tool##*/}" != jq && ! -e "$no_jq/${tool##*/}" ]] \
+        && ln -s "$tool" "$no_jq/${tool##*/}"
+    done
+  done
+
+  PATH="$no_jq" apply_workstation "$CLAUDE_MCP_TARGET" 2>"$BATS_TEST_TMPDIR/stderr" \
+    || fail "apply failed without jq: $(cat "$BATS_TEST_TMPDIR/stderr")"
+
+  grep -qF 'jq is not installed' "$BATS_TEST_TMPDIR/stderr" || fail 'apply did not say why it skipped'
+  [[ ! -e "$HOME_DIR/.claude.json" ]] || fail 'apply created .claude.json without jq'
+}
+
 @test "test_every_consumer_reads_the_origin_and_the_one_key_file" {
   local origin='https://artifacts.example.test'
   local key_ref=\~/.agents/artifact-server/api-key
 
   apply_targets "{\"profile\":\"workstation\",\"artifactServer\":{\"url\":\"$origin\"}}" \
-    .claude.json .codex/config.toml .config/opencode/opencode.json \
+    "$CLAUDE_MCP_TARGET" .codex/config.toml .config/opencode/opencode.json \
     .pi/agent/mcp.json .config/faviann-skills/artifact-server.json \
     || fail 'apply failed'
 

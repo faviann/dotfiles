@@ -23,9 +23,9 @@ readonly INVENTORY='
 .chezmoiscripts/install-herdr.sh                workstation desktop
 .chezmoiscripts/install-packages.sh             desktop
 .chezmoiscripts/reconcile-agent-skills.sh       workstation desktop
+.chezmoiscripts/register-claude-mcp-server.sh   workstation desktop
 .chezmoiscripts/switch-chezmoi-origin-to-ssh.sh workstation desktop
 .chezmoiscripts/switch-home-manager.sh          desktop
-.claude.json                                    workstation desktop
 .claude/CLAUDE.md                               workstation desktop
 .claude/hooks/track-session-prs.sh              workstation desktop
 .claude/settings.json                           workstation desktop
