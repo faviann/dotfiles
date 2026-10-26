@@ -196,6 +196,7 @@
       shellcheckSource = nixpkgs.lib.fileset.toSource {
         root = ./.;
         fileset = nixpkgs.lib.fileset.unions [
+          ./.chezmoidata
           ./.chezmoiscripts
           ./dot_claude/executable_statusline.sh
           ./dot_claude/hooks/executable_track-session-prs.sh

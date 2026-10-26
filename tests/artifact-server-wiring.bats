@@ -6,7 +6,7 @@ source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 readonly KEY='fixture-key-0123456789abcdef0123456789abcdef'
 readonly ORIGIN='https://artifact-server.public.faviann.com'
-readonly CLAUDE_MCP_TARGET=.claude.json
+readonly CLAUDE_MCP_TARGET=.chezmoiscripts/register-claude-mcp-server.sh
 
 setup() {
   export TMPDIR="$BATS_TEST_TMPDIR"
@@ -38,6 +38,8 @@ apply_targets() {
     targets+=("$HOME_DIR/$target")
   done
   mkdir -p "$runtime_dir"
+  # The Nix sandbox has no /usr/bin/env for the scripts' shebang.
+  printf '[interpreters.sh]\ncommand = "%s"\n' "$(command -v bash)" >"$runtime_dir/chezmoi.toml"
   HOME="$HOME_DIR" \
   XDG_CACHE_HOME="$runtime_dir/cache" \
   XDG_CONFIG_HOME="$runtime_dir/config" \
@@ -45,7 +47,7 @@ apply_targets() {
     chezmoi \
     --source "$REPO_ROOT" \
     --destination "$HOME_DIR" \
-    --config /dev/null \
+    --config "$runtime_dir/chezmoi.toml" \
     --config-format toml \
     --persistent-state "$runtime_dir/chezmoistate.boltdb" \
     --override-data "$data" \
@@ -239,14 +241,15 @@ JSON
   local config="$HOME_DIR/.claude.json"
   local inode
 
-  printf '{"theme":"dark","mcpServers":{"artifact-server":{"type":"http","url":"https://stale.example/mcp"}}}\n' \
+  jq -n --arg url "$ORIGIN/mcp" --arg helper "'$HOME_DIR/.local/bin/artifact-server-mcp-headers'" \
+    '{theme: "dark", mcpServers: {"artifact-server": {type: "http", url: $url, headersHelper: $helper, headers: {Authorization: "Bearer stale"}}}}' \
     >"$config"
   inode="$(stat -c %i "$config")"
 
   apply_workstation "$CLAUDE_MCP_TARGET" || fail 'apply failed'
 
-  jq -e --arg url "$ORIGIN/mcp" '.mcpServers["artifact-server"].url == $url' "$config" >/dev/null \
-    || fail 'apply did not update the server'
+  jq -e '.mcpServers["artifact-server"] | has("headers") | not' "$config" >/dev/null \
+    || fail 'apply kept the competing headers'
   [[ "$(stat -c %i "$config")" == "$inode" ]] \
     || fail 'apply replaced .claude.json instead of writing it in place'
 }
@@ -391,6 +394,28 @@ TOML
       || fail "$state .claude.json did not get only the server"
     [[ "$(stat -c %a "$config")" == 600 ]] || fail "$state .claude.json is not owner-only"
   done
+}
+
+@test "test_claude_registration_waits_for_jq_without_failing_the_apply" {
+  local no_jq="$BATS_TEST_TMPDIR/no-jq"
+  local dir
+  local tool
+  local path_dirs
+
+  mkdir -p "$no_jq"
+  IFS=: read -ra path_dirs <<<"$PATH"
+  for dir in "${path_dirs[@]}"; do
+    for tool in "$dir"/*; do
+      [[ -x "$tool" && "${tool##*/}" != jq && ! -e "$no_jq/${tool##*/}" ]] \
+        && ln -s "$tool" "$no_jq/${tool##*/}"
+    done
+  done
+
+  PATH="$no_jq" apply_workstation "$CLAUDE_MCP_TARGET" 2>"$BATS_TEST_TMPDIR/stderr" \
+    || fail "apply failed without jq: $(cat "$BATS_TEST_TMPDIR/stderr")"
+
+  grep -qF 'jq is not installed' "$BATS_TEST_TMPDIR/stderr" || fail 'apply did not say why it skipped'
+  [[ ! -e "$HOME_DIR/.claude.json" ]] || fail 'apply created .claude.json without jq'
 }
 
 @test "test_every_consumer_reads_the_origin_and_the_one_key_file" {
