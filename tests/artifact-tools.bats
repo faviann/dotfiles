@@ -175,6 +175,23 @@ copy_home_manager_source() {
     || fail 'a change under home/ left the script text, and its chezmoi hash, unchanged'
 }
 
+@test "home manager script reruns when a nested Home Manager source file changes" {
+  local source_dir="$BATS_TEST_TMPDIR/source"
+  local before="$BATS_TEST_TMPDIR/before.sh"
+  local after="$BATS_TEST_TMPDIR/after.sh"
+
+  copy_home_manager_source "$source_dir"
+  mkdir -p "$source_dir/packages/nested"
+  printf '{ }\n' >"$source_dir/packages/nested/default.nix"
+
+  render_home_manager_script "$source_dir" "$before"
+  printf '# a comment\n' >>"$source_dir/packages/nested/default.nix"
+  render_home_manager_script "$source_dir" "$after"
+
+  ! cmp -s "$before" "$after" \
+    || fail 'a change in packages/nested/ left the script text, and its chezmoi hash, unchanged'
+}
+
 @test "home manager switch is the last desktop script" {
   local source_dir="$BATS_TEST_TMPDIR/order-source"
   local destination="$BATS_TEST_TMPDIR/order-home"

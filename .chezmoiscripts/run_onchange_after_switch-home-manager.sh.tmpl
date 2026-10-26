@@ -3,11 +3,12 @@ set -euo pipefail
 
 # flake.lock: {{ include "flake.lock" | sha256sum }}
 # flake.nix: {{ include "flake.nix" | sha256sum }}
-{{- range glob (joinPath .chezmoi.sourceDir "home" "*") }}
-# {{ base . }}: {{ include . | sha256sum }}
-{{- end }}
-{{- range glob (joinPath .chezmoi.sourceDir "packages" "*") }}
-# {{ base . }}: {{ include . | sha256sum }}
+{{- range $dir := list "home" "packages" }}
+{{-   range glob (joinPath $.chezmoi.sourceDir $dir "**") }}
+{{-     if not (stat .).isDir }}
+# {{ trimPrefix (print $.chezmoi.sourceDir "/") . }}: {{ include . | sha256sum }}
+{{-     end }}
+{{-   end }}
 {{- end }}
 
 readonly source_dir={{ .chezmoi.sourceDir | quote }}
