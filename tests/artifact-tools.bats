@@ -49,6 +49,7 @@ rendered_artifact_tools() {
     (.packages | index("artifact-server")) and
     (.packages | index("chromium")) and
     (.packages | index("dejavu-fonts")) and
+    (.packages | index("fontconfig")) and
     .fontconfigEnabled
   ' <<<"$tools" >/dev/null \
     || fail "workstation toolchain is incomplete: $tools"
@@ -64,6 +65,7 @@ rendered_artifact_tools() {
     (.packages | index("artifact-server")) and
     (.packages | index("chromium")) and
     (.packages | index("dejavu-fonts")) and
+    (.packages | index("fontconfig")) and
     .fontconfigEnabled
   ' <<<"$tools" >/dev/null \
     || fail "desktop toolchain is incomplete: $tools"
