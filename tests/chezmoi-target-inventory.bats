@@ -48,6 +48,7 @@ readonly INVENTORY='
 .local/bin/github-token                         workstation desktop
 .local/bin/update-agent-tools                   workstation desktop
 .local/bin/workstation-update                   workstation
+.local/share/opencode/auth.json                 workstation desktop
 .npmrc                                          workstation desktop
 .pi/agent/AGENTS.md                             workstation
 .pi/agent/mcp.json                              workstation
