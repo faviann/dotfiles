@@ -68,8 +68,9 @@ for harness in "${bun_harnesses[@]}"; do
   "$harness" --version >/dev/null || fail "verification failed: $harness"
 done
 
-# Claude Code's background plugin updates are off, and each update refreshes
-# its marketplace. anthropic-plugin-directory is built in and absent from
+# Claude Code's background plugin updates are off. An update that cannot reach
+# its marketplace reports the plugin as current and exits 0.
+# anthropic-plugin-directory is built in and absent from
 # `claude plugin marketplace list`.
 claude_marketplaces=(
   pstack-claude=michael-denyer/pstack-claude
