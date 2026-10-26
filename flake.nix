@@ -191,14 +191,6 @@
           collieServiceDropIn =
             workstationHomeConfiguration.config.xdg.configFile
             ."systemd/user/collie.service.d/10-origin-forwarder.conf".text;
-          artifactPublisher = {
-            activation = workstationHomeConfiguration.config.home.activation.artifactPublisherConfig;
-            managedPaths = builtins.filter
-              (path: builtins.match ".*faviann-skills/artifacts\\.json" path != null)
-              (builtins.attrNames workstationHomeConfiguration.config.home.file);
-            sessionVariables = builtins.attrNames
-              workstationHomeConfiguration.config.home.sessionVariables;
-          };
         }
       );
       shellcheckSource = nixpkgs.lib.fileset.toSource {
@@ -218,7 +210,6 @@
           ./flake.nix
           ./home
           ./packages
-          ./scripts/artifact-publisher-config
           ./scripts/collie-bootstrap
           ./scripts/lobu-bootstrap
           ./scripts/moraine-service
