@@ -38,6 +38,7 @@ make_reconciler() {
   printf '#!%s\n' "$REAL_BASH" >"$repo/scripts/reconcile-skills.sh"
   cat >>"$repo/scripts/reconcile-skills.sh" <<'STUB'
 printf 'reconcile\n' >>"$COMMAND_LOG"
+printf 'args=%s\n' "$*" >>"$RECONCILE_ARGS"
 printf 'bw=%s\n' "${BW_SESSION:-<unset>}" >>"${BW_PROBE:-/dev/null}"
 exit "${RECONCILE_STATUS:-0}"
 STUB
@@ -63,6 +64,7 @@ if [[ "${1:-}" == clone ]]; then
   printf '#!%s\n' "$REAL_BASH" >"$target/scripts/reconcile-skills.sh"
   cat >>"$target/scripts/reconcile-skills.sh" <<'RECONCILER'
 printf 'reconcile\n' >>"$COMMAND_LOG"
+printf 'args=%s\n' "$*" >>"$RECONCILE_ARGS"
 printf 'bw=%s\n' "${BW_SESSION:-<unset>}" >>"${BW_PROBE:-/dev/null}"
 exit "${RECONCILE_STATUS:-0}"
 RECONCILER
@@ -101,6 +103,7 @@ run_hook() {
     HOME="$home" \
     PATH="$bin_dir:$PATH" \
     COMMAND_LOG="$test_dir/commands" \
+    RECONCILE_ARGS="$test_dir/reconcile-args" \
     BW_PROBE="$test_dir/bw-probe" \
     SKILLSET_REPO="$home/repos/skillset" \
     GIT_CLONE_FAIL="${GIT_CLONE_FAIL:-false}" \
@@ -202,4 +205,28 @@ run_hook() {
     <(printf 'bw=<unset>\n') \
     "$test_dir/bw-probe" \
     || fail 'reconciler inherited the unlocked vault session'
+}
+
+@test "test_home_without_a_profile_record_is_reconciled_as_workstation" {
+  local test_dir
+  test_dir="$(mktemp -d)"
+
+  make_reconciler "$test_dir/home/repos/skillset"
+  run_hook "$test_dir" || fail 'reconciliation without a profile record failed'
+
+  diff -u <(printf 'args=--profile workstation\n') "$test_dir/reconcile-args" \
+    || fail 'reconciler was not asked to record the workstation profile'
+}
+
+@test "test_recorded_profile_is_left_to_the_reconciler" {
+  local test_dir
+  test_dir="$(mktemp -d)"
+
+  make_reconciler "$test_dir/home/repos/skillset"
+  mkdir -p "$test_dir/home/.agents/.skillset"
+  printf 'workstation\n' >"$test_dir/home/.agents/.skillset/profile"
+  run_hook "$test_dir" || fail 'reconciliation with a profile record failed'
+
+  diff -u <(printf 'args=\n') "$test_dir/reconcile-args" \
+    || fail 'reconciler got arguments although the home records a profile'
 }
