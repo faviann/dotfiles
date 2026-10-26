@@ -3,7 +3,7 @@
     "artifact-server": {
       "url": "{{ .artifactServer.url }}/mcp",
       "headers": {
-        "Authorization": "!printf 'Bearer %s' \"$(cat ~/.agents/artifact-server/api-key)\""
+        "Authorization": "!key=$(cat ~/.agents/artifact-server/api-key) && [ -n \"$key\" ] && printf 'Bearer %s' \"$key\""
       }
     }
   }

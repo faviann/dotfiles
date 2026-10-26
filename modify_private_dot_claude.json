@@ -1,11 +1,12 @@
 {{- /* chezmoi:modify-template */ -}}
 {{- /* Claude Code rewrites this file constantly, so set only this server and leave the file untouched when it is already current. */ -}}
-{{- $server := dict "type" "http" "url" (printf "%s/mcp" .artifactServer.url) "headersHelper" (joinPath .chezmoi.homeDir ".local/bin/artifact-server-mcp-headers") -}}
 {{- $config := dict -}}
 {{- if trim .chezmoi.stdin -}}
 {{-   $config = fromJson .chezmoi.stdin -}}
 {{- end -}}
-{{- if eq (toJson (dig "mcpServers" "artifact-server" "" $config)) (toJson $server) -}}
+{{- $current := get (get $config "mcpServers" | default dict) "artifact-server" | default dict -}}
+{{- $server := mergeOverwrite (omit $current "headers") (dict "type" "http" "url" (printf "%s/mcp" .artifactServer.url) "headersHelper" (joinPath .chezmoi.homeDir ".local/bin/artifact-server-mcp-headers")) -}}
+{{- if eq (toJson $server) (toJson $current) -}}
 {{-   .chezmoi.stdin -}}
 {{- else -}}
 {{-   toPrettyJson "  " (setValueAtPath "mcpServers.artifact-server" $server $config) -}}

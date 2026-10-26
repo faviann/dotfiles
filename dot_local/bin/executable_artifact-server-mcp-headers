@@ -3,9 +3,12 @@ set -eu
 
 key_file="$HOME/.agents/artifact-server/api-key"
 
-if [ ! -s "$key_file" ] || [ ! -r "$key_file" ]; then
-  printf 'artifact-server-mcp-headers: missing or unreadable API key file: %s\n' "$key_file" >&2
-  exit 1
-fi
+key=$(cat -- "$key_file" 2>/dev/null) || key=
+case $key in
+  '' | *[![:graph:]]*)
+    printf 'artifact-server-mcp-headers: missing or invalid API key file: %s\n' "$key_file" >&2
+    exit 1
+    ;;
+esac
 
-jq -cRn '{Authorization: ("Bearer " + input)}' <"$key_file"
+printf '%s\n' "$key" | jq -cRn '{Authorization: ("Bearer " + input)}'

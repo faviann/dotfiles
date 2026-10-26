@@ -201,12 +201,18 @@ that file when it connects:
 
 Chezmoi sets only the `artifact-server` server in `~/.claude.json` and the
 `artifact_server` server in `~/.codex/config.toml`, and owns
-`~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. The first apply
-rewrites `~/.codex/config.toml` and drops its comments.
+`~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. Keys it does
+not manage in the Claude Code and Codex entries, such as Codex's `enabled`,
+stay. When the managed keys
+change, as on the first apply, apply rewrites `~/.codex/config.toml` as sorted
+TOML and drops its comments. OpenCode refuses to start while the key file is
+missing.
 
-To rotate the key, put the new key in the item's Notes. Then run
+To rotate the key, put the new key in the item's Notes. Then, on each machine
+with Bitwarden unlocked, run `bw sync` so the CLI sees the edit, and run
 `workstation-update --refresh-secrets` on the workstation or `chezmoi apply` on
-a desktop. The harnesses need no other change.
+a desktop. The harnesses need no other change. Apply fails unless the Notes
+hold one key on one line.
 
 ## GitHub Registration
 

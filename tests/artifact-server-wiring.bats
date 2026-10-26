@@ -84,6 +84,25 @@ run_helper() {
   done
 }
 
+@test "test_api_key_apply_fails_unless_the_notes_hold_one_key" {
+  local notes
+
+  for notes in '' $' \n\n' "$KEY"$'\nrotated on 2026-10-25'; do
+    rm -rf "$HOME_DIR"
+    mkdir -p "$HOME_DIR"
+    jq -n --arg notes "$notes" \
+      '{name: "dotfiles/artifact-server-api-key", notes: $notes}' >"$ITEM"
+
+    if apply_workstation .agents/artifact-server 2>"$BATS_TEST_TMPDIR/stderr"; then
+      fail "apply succeeded with Notes: $notes"
+    fi
+    grep -qF 'dotfiles/artifact-server-api-key must hold one API key' \
+      "$BATS_TEST_TMPDIR/stderr" || fail 'apply error does not name the item'
+    [[ ! -e "$HOME_DIR/.agents/artifact-server/api-key" ]] \
+      || fail 'apply wrote a key file from invalid Notes'
+  done
+}
+
 @test "test_headers_helper_prints_the_bearer_header_from_the_key_file" {
   mkdir -p "$HOME_DIR/.agents/artifact-server"
   printf '%s\n' "$KEY" >"$HOME_DIR/.agents/artifact-server/api-key"
@@ -96,10 +115,14 @@ run_helper() {
   local key_file="$HOME_DIR/.agents/artifact-server/api-key"
   local state
 
-  for state in missing empty; do
+  for state in missing empty newline-only whitespace; do
     mkdir -p "$(dirname "$key_file")"
     rm -f "$key_file"
-    [[ "$state" == missing ]] || : >"$key_file"
+    case "$state" in
+      empty) : >"$key_file" ;;
+      newline-only) printf '\n' >"$key_file" ;;
+      whitespace) printf '  \t\n' >"$key_file" ;;
+    esac
 
     if run_helper >"$BATS_TEST_TMPDIR/stdout" 2>"$BATS_TEST_TMPDIR/stderr"; then
       fail "helper succeeded with a $state key file"
@@ -109,6 +132,29 @@ run_helper() {
     grep -qF "$key_file" "$BATS_TEST_TMPDIR/stderr" \
       || fail "helper error does not name the key file when it is $state"
   done
+}
+
+@test "test_pi_header_command_sends_the_key_or_fails_without_a_partial_header" {
+  local command
+
+  apply_workstation .pi/agent/mcp.json || fail 'apply failed'
+  command="$(jq -er '.mcpServers["artifact-server"].headers.Authorization | ltrimstr("!")' \
+    "$HOME_DIR/.pi/agent/mcp.json")" || fail 'pi header is not a command'
+
+  mkdir -p "$HOME_DIR/.agents/artifact-server"
+  printf '%s\n' "$KEY" >"$HOME_DIR/.agents/artifact-server/api-key"
+  [[ "$(HOME="$HOME_DIR" sh -c "$command")" == "Bearer $KEY" ]] \
+    || fail 'pi header command did not print the bearer value'
+
+  : >"$HOME_DIR/.agents/artifact-server/api-key"
+  if HOME="$HOME_DIR" sh -c "$command" >"$BATS_TEST_TMPDIR/stdout" 2>/dev/null; then
+    fail 'pi header command succeeded with an empty key file'
+  fi
+  rm "$HOME_DIR/.agents/artifact-server/api-key"
+  if HOME="$HOME_DIR" sh -c "$command" >>"$BATS_TEST_TMPDIR/stdout" 2>/dev/null; then
+    fail 'pi header command succeeded with a missing key file'
+  fi
+  [[ ! -s "$BATS_TEST_TMPDIR/stdout" ]] || fail 'pi header command printed a partial header'
 }
 
 @test "test_claude_json_keeps_other_keys_and_sets_the_server_once" {
@@ -123,7 +169,7 @@ run_helper() {
   "projects": {"/home/faviann/repos/x": {"allowedTools": ["Bash(make && make test)"], "history": []}},
   "mcpServers": {
     "annotator": {"type": "stdio", "command": "annotator", "args": ["--mcp"]},
-    "artifact-server": {"type": "http", "url": "https://stale.example/mcp"}
+    "artifact-server": {"type": "http", "url": "https://stale.example/mcp", "headers": {"Authorization": "Bearer ${ARTIFACT_SERVER_API_KEY}"}, "timeout": 30000}
   }
 }
 JSON
@@ -137,7 +183,7 @@ JSON
     || fail 'second apply changed .claude.json'
   diff -u \
     <(jq -S --arg origin "$ORIGIN" --arg home "$HOME_DIR" \
-      '.mcpServers["artifact-server"] = {type: "http", url: ($origin + "/mcp"), headersHelper: ($home + "/.local/bin/artifact-server-mcp-headers")}' \
+      '.mcpServers["artifact-server"] = {type: "http", url: ($origin + "/mcp"), headersHelper: ($home + "/.local/bin/artifact-server-mcp-headers"), timeout: 30000}' \
       "$existing") \
     <(jq -S . "$config") \
     || fail 'apply did not keep other keys and set exactly the artifact-server entry'
@@ -166,6 +212,8 @@ env = { MORAINE_LOG = "warn" }
 [mcp_servers.artifact_server]
 url = "https://stale.example/mcp"
 bearer_token_env_var = "ARTIFACT_SERVER_API_KEY"
+enabled = false
+startup_timeout_sec = 30
 
 [tui]
 notifications = ["agent-turn-complete", "approval-requested"]
@@ -194,7 +242,7 @@ TOML
     || fail 'could not parse the applied config.toml'
   diff -u \
     <(jq -S --arg origin "$ORIGIN" --arg home "$HOME_DIR" \
-      '.mcp_servers.artifact_server = {url: ($origin + "/mcp"), http_headers_helper: ($home + "/.local/bin/artifact-server-mcp-headers")}' \
+      '.mcp_servers.artifact_server = {url: ($origin + "/mcp"), http_headers_helper: ($home + "/.local/bin/artifact-server-mcp-headers"), enabled: false, startup_timeout_sec: 30}' \
       "$BATS_TEST_TMPDIR/existing.json") \
     <(jq -S . "$BATS_TEST_TMPDIR/applied.json") \
     || fail 'apply did not keep other keys and set exactly the artifact_server entry'
@@ -218,6 +266,15 @@ TOML
     || fail 'apply rewrote a .claude.json that already had the server'
   cmp -s "$BATS_TEST_TMPDIR/config.toml" "$HOME_DIR/.codex/config.toml" \
     || fail 'apply rewrote a config.toml that already had the server'
+}
+
+@test "test_claude_json_with_null_servers_gets_the_server" {
+  printf '{"theme":"dark","mcpServers":null}\n' >"$HOME_DIR/.claude.json"
+
+  apply_workstation .claude.json || fail 'apply failed on null mcpServers'
+
+  jq -e '.theme == "dark" and (.mcpServers | keys) == ["artifact-server"]' \
+    "$HOME_DIR/.claude.json" >/dev/null || fail 'null mcpServers did not get only the server'
 }
 
 @test "test_missing_harness_configs_get_only_the_server" {
@@ -262,7 +319,8 @@ TOML
   jq -e --arg url "$origin/mcp" --arg auth "Bearer {file:$key_ref}" '
     .mcp["artifact-server"] == {type: "remote", url: $url, oauth: false, headers: {Authorization: $auth}}
   ' "$HOME_DIR/.config/opencode/opencode.json" >/dev/null || fail 'OpenCode server entry'
-  jq -e --arg url "$origin/mcp" --arg auth "!printf 'Bearer %s' \"\$(cat $key_ref)\"" '
-    .mcpServers["artifact-server"] == {url: $url, headers: {Authorization: $auth}}
+  jq -e --arg url "$origin/mcp" --arg key_ref "$key_ref" '
+    .mcpServers["artifact-server"].url == $url
+    and (.mcpServers["artifact-server"].headers.Authorization | contains("cat " + $key_ref))
   ' "$HOME_DIR/.pi/agent/mcp.json" >/dev/null || fail 'pi server entry'
 }
