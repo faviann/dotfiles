@@ -49,14 +49,19 @@ fi
 
 hash="$(sha256sum <"$conf")"
 hash="${hash%% *}"
-existing="$(nmcli -g UUID,NAME connection show | awk -F: -v name="$connection" '$2 == name { print $1 }')"
-if [[ -n "$existing" && -f "$state_file" && "$(<"$state_file")" == "$hash" ]]; then
+# NetworkManager 1.46 on Ubuntu 24.04 aborts an import while any connection,
+# renamed or foreign, holds the interface name, so those go first.
+existing=()
+for uuid in $(nmcli -g UUID connection show); do
+  if [[ "$(nmcli -g connection.interface-name connection show uuid "$uuid")" == "$connection" ]]; then
+    existing+=("$uuid")
+  fi
+done
+if ((${#existing[@]})) && [[ -f "$state_file" && "$(<"$state_file")" == "$hash" ]]; then
   exit 0
 fi
 
-# NetworkManager 1.46 on Ubuntu 24.04 aborts when an import reuses the name of an
-# existing connection, so the old one goes first.
-for uuid in $existing; do
+for uuid in "${existing[@]}"; do
   sudo nmcli connection delete uuid "$uuid" >/dev/null
 done
 sudo nmcli connection import type wireguard file "$conf" >/dev/null
