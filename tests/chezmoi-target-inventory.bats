@@ -30,6 +30,7 @@ readonly INVENTORY='
 .chezmoiscripts/register-claude-mcp-server.sh   workstation desktop
 .chezmoiscripts/switch-chezmoi-origin-to-ssh.sh workstation desktop
 .chezmoiscripts/switch-home-manager.sh          desktop
+.chezmoiscripts/zz-connect-homelab-wireguard.sh desktop
 .claude/CLAUDE.md                               workstation desktop
 .claude/hooks/track-session-prs.sh              workstation desktop
 .claude/settings.json                           workstation desktop

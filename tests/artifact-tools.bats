@@ -204,7 +204,7 @@ copy_home_manager_source() {
     || fail 'a change in packages/nested/ left the script text, and its chezmoi hash, unchanged'
 }
 
-@test "home manager switch is the last desktop script" {
+@test "home manager switch is the last desktop script before the homelab tunnel" {
   local source_dir="$BATS_TEST_TMPDIR/order-source"
   local destination="$BATS_TEST_TMPDIR/order-home"
   local log="$BATS_TEST_TMPDIR/order.log"
@@ -226,6 +226,6 @@ copy_home_manager_source() {
     --persistent-state "$BATS_TEST_TMPDIR/order-state.boltdb" \
     apply
 
-  [[ "$(tail -n 1 "$log")" == "${HOME_MANAGER_SCRIPT##*/}" ]] \
-    || fail "a desktop script runs after the Home Manager switch: $(tr '\n' ' ' <"$log")"
+  [[ "$(tail -n 2 "$log" | tr '\n' ' ')" == "${HOME_MANAGER_SCRIPT##*/} run_after_zz-connect-homelab-wireguard.sh.tmpl " ]] \
+    || fail "the desktop scripts do not end with the switch and then the tunnel: $(tr '\n' ' ' <"$log")"
 }
