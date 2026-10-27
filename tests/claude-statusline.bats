@@ -164,7 +164,7 @@ assert_wall_near() {
 @test "capacity is compared with the same pool at zero, red from the wall on" {
   # k = $8 a weekly point / $1 a five-hour point = 8. Weekly headroom 10 at
   # 1 point an hour: wall in about 10h. The reset in 2 days restores a full week.
-  pool_line 1 alpha five_hour 50 $((NOW + 3600)) 50
+  pool_line 1 alpha five_hour 50 $((NOW + 4200)) 50
   week 1 alpha 90 $((NOW + 172800)) 1 26
   [[ $(line3) == "cap 1h 50% 2h 80% 4h 80% 8h 40% 1d 16% 2d 10% 4d 110% 7d 110%" ]]
   local raw
