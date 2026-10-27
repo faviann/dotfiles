@@ -110,7 +110,7 @@ pool_key="$HOME/.config/claude/gateway-admin-key"
 pool_cache="$cache_dir/pool"
 pool_cost="$cache_dir/pool.cost"
 pool_wall_cache="$cache_dir/pool.wall"
-admin=https://gateway.ai.faviann.com/api/v1/admin
+admin=https://ai-gateway.jungleservices.net/api/v1/admin
 hdr() { printf 'x-api-key: %s\n' "$(tr -d '[:space:]' <"$pool_key")"; }
 epoch() { if [[ $1 == - ]]; then echo 0; else date -d "$1" +%s; fi; }
 pool_usage() {
