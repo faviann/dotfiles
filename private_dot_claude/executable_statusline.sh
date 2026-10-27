@@ -153,9 +153,9 @@ if [[ -r $pool_key ]]; then
   fi
 fi
 # When will the pool run dry? Prints "<label> <epoch>" for the earliest wall,
-# "clear" if none within the horizon, nothing without enough history. Burn is
-# the recent consumption of all accounts together, in pp/s; supply is each
-# account's remaining headroom as chunks that expire at their window's reset.
+# "clear" once every window has enough history and none hits a wall, else
+# nothing. Burn is the recent consumption of all accounts together, in pp/s;
+# supply is each account's headroom as chunks that expire at their reset.
 pool_wall() {
   awk -v now="$now" '
     BEGIN {
@@ -190,7 +190,7 @@ pool_wall() {
         if (!(w in first)) continue
         lo = now - look[w]; span = now - (first[w] > lo ? first[w] : lo)
         if (span < look[w] / 4) continue
-        estimated = 1
+        estimated++
         need0 = sum[w] / span * 300
         n = 0
         for (i = 1; i <= m; i++) {
@@ -220,7 +220,7 @@ pool_wall() {
         }
       }
       if (best) print bl, best
-      else if (estimated) print "clear"
+      else if (estimated == nw) print "clear"
     }' "$pool_hist" "$pool_cache"
 }
 pool_seg=""

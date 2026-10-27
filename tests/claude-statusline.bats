@@ -52,9 +52,19 @@ assert_wall_near() {
 }
 
 @test "a pool that is not burning shows clear" {
+  climb 1 alpha five_hour 20 $((NOW + 10800)) 0 1
   climb 1 alpha seven_day 45 $((NOW + 259200)) 0 24
+  pool_line 1 alpha five_hour 20 $((NOW + 10800))
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
   [[ $(line2) == "pool clear"* ]]
+}
+
+@test "clear waits for enough weekly history" {
+  climb 1 alpha five_hour 20 $((NOW + 10800)) 0 1
+  climb 1 alpha seven_day 45 $((NOW + 259200)) 0 1
+  pool_line 1 alpha five_hour 20 $((NOW + 10800))
+  pool_line 1 alpha seven_day 45 $((NOW + 259200))
+  [[ $(line2) != *pool* ]]
 }
 
 @test "usage after a reset inside the lookback counts and a drop is not negative" {
@@ -99,7 +109,9 @@ assert_wall_near() {
 }
 
 @test "the wall follows history that changes after it was shown" {
+  climb 1 alpha five_hour 20 $((NOW + 10800)) 0 1
   climb 1 alpha seven_day 45 $((NOW + 259200)) 0 24
+  pool_line 1 alpha five_hour 20 $((NOW + 10800))
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
   [[ $(line2) == "pool clear"* ]]
   : >"$CACHE/pool.hist"
