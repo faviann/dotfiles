@@ -35,7 +35,7 @@ assert_wall_near() {
   local label="$1" offset="$2" line d
   line=$(line2)
   for d in $(seq -900 60 900); do
-    if [[ $line == "pool wall $(TZ=America/Toronto date -d "@$((NOW + offset + d))" '+%a %H:%M') ($label)"* ]]; then
+    if [[ $line == *"$label wall $(TZ=America/Toronto date -d "@$((NOW + offset + d))" '+%a %H:%M')"* ]]; then
       return
     fi
   done
@@ -56,15 +56,15 @@ assert_wall_near() {
   climb 1 alpha seven_day 45 $((NOW + 259200)) 0 24
   pool_line 1 alpha five_hour 20 $((NOW + 10800))
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
-  [[ $(line2) == "pool clear"* ]]
+  [[ $(line2) == "5h clear │ wk clear" ]]
 }
 
-@test "clear waits for enough weekly history" {
+@test "a limit without enough history shows measuring" {
   climb 1 alpha five_hour 20 $((NOW + 10800)) 0 1
   climb 1 alpha seven_day 45 $((NOW + 259200)) 0 1
   pool_line 1 alpha five_hour 20 $((NOW + 10800))
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
-  [[ $(line2) != *pool* ]]
+  [[ $(line2) == "5h clear │ wk measuring" ]]
 }
 
 @test "usage after a reset inside the lookback counts and a drop is not negative" {
@@ -86,15 +86,12 @@ assert_wall_near() {
   assert_wall_near 5h 5180
 }
 
-@test "history shorter than a quarter of the lookback shows no pool segment" {
+@test "history shorter than a quarter of the lookback shows measuring" {
   climb 1 alpha seven_day 45 $((NOW + 259200)) 10 0.1
   climb 1 alpha five_hour 45 $((NOW + 10800)) 10 0.1
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
   pool_line 1 alpha five_hour 45 $((NOW + 10800))
-  local line
-  line=$(line2)
-  [[ $line == alpha* ]]
-  [[ $line != *pool* ]]
+  [[ $(line2) == "5h measuring │ wk measuring" ]]
 }
 
 @test "headroom that expires before it can be used does not delay the wall" {
@@ -113,9 +110,18 @@ assert_wall_near() {
   climb 1 alpha seven_day 45 $((NOW + 259200)) 0 24
   pool_line 1 alpha five_hour 20 $((NOW + 10800))
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
-  [[ $(line2) == "pool clear"* ]]
+  [[ $(line2) == "5h clear │ wk clear" ]]
   : >"$CACHE/pool.hist"
   climb 1 alpha seven_day 45 $((NOW + 259200)) 1 24
   touch -d "@$((NOW + 60))" "$CACHE/pool.hist"
+  assert_wall_near wk 198000
+}
+
+@test "each limit gets its own answer" {
+  climb 1 alpha five_hour 20 $((NOW + 10800)) 0 1
+  climb 1 alpha seven_day 45 $((NOW + 259200)) 1 24
+  pool_line 1 alpha five_hour 20 $((NOW + 10800))
+  pool_line 1 alpha seven_day 45 $((NOW + 259200))
+  [[ $(line2) == "5h clear │ wk wall "* ]]
   assert_wall_near wk 198000
 }

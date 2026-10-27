@@ -10,9 +10,8 @@ SEP="${DIM} │ ${R}"
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline"
 mkdir -p "$cache_dir"
 
-# Color by "how bad": used% for context, left% for rate limits.
+# Color context use by "how bad".
 color_used() { if (( $1 >= 85 )); then echo "$RED"; elif (( $1 >= 60 )); then echo "$YEL"; else echo "$GRN"; fi; }
-color_left() { if (( $1 <= 15 )); then echo "$RED"; elif (( $1 <= 40 )); then echo "$YEL"; else echo "$GRN"; fi; }
 
 model=$(j .model.display_name)
 dir=$(j .workspace.current_dir)
@@ -98,21 +97,17 @@ fi
 [[ -n $cost ]] && line1+="${SEP}$(printf '$%.2f' "$cost")"
 line2=""
 
-# Rate limits per Claude account in sub2api. Claude Code's own rate_limits
-# field only reflects whichever account served the last request. The admin
-# API's passive usage reads what sub2api already recorded, so no upstream
-# call; refreshed in the background every 60s like the PR lookup.
+# Rate limits across the Claude accounts in sub2api. Claude Code's own
+# rate_limits field only reflects whichever account served the last request.
+# The admin API's passive usage reads what sub2api already recorded, so no
+# upstream call; refreshed in the background every 60s like the PR lookup.
 # Cache lines: <account id> <account> <window> <used%> <reset epoch>
 # pool.hist keeps the same lines, each prefixed by its observation epoch, for
 # 25h; pool_wall turns it into the pool-level burn rate.
-# The session cache maps a Claude Code session_id to the account that served
-# its newest request, read from sub2api's usage log. That tracks failover on
-# the next request, but it is not sub2api's sticky binding itself.
 pool_key="$HOME/.config/claude/gateway-admin-key"
 pool_cache="$cache_dir/pool"
 pool_hist="$cache_dir/pool.hist"
 pool_wall_cache="$cache_dir/pool.wall"
-sess_cache="$cache_dir/sessions"
 admin=https://gateway.ai.faviann.com/api/v1/admin
 hdr() { printf 'x-api-key: %s\n' "$(tr -d '[:space:]' <"$pool_key")"; }
 pool_refresh() {
@@ -136,26 +131,17 @@ pool_record() {
     awk -v cut=$(( obs - 90000 )) '$1 >= cut' >"$pool_hist.$$"
   mv -f "$pool_hist.$$" "$pool_hist"
 }
-# Newest entries win; sessions absent from this page keep their last account.
-sess_refresh() {
-  local new
-  new=$(curl -sf -m 10 -H @<(hdr) "$admin/usage?page_size=200" |
-    jq -r '.data.items | map(select(.session_id // "" != "")) | group_by(.session_id)[] | max_by(.id) | "\(.session_id) \(.account_id)"')
-  [[ -n $new ]] || return
-  { printf '%s\n' "$new"; cat "$sess_cache" 2>/dev/null; } | awk '!seen[$1]++' | head -n 2000 >"$sess_cache.tmp"
-  mv -f "$sess_cache.tmp" "$sess_cache"
-}
 if [[ -r $pool_key ]]; then
   if [[ ! -f $pool_cache ]] || (( $(date +%s) - $(stat -c %Y "$pool_cache") > 60 )); then
     touch "$pool_cache"
-    ( out=$(pool_refresh); [[ -n $out ]] && pool_record "$out"; sess_refresh ) </dev/null >/dev/null 2>&1 &
+    ( out=$(pool_refresh); [[ -n $out ]] && pool_record "$out" ) </dev/null >/dev/null 2>&1 &
     disown
   fi
 fi
-# When will the pool run dry? Prints "<label> <epoch>" for the earliest wall,
-# "clear" once every window has enough history and none hits a wall, else
-# nothing. Burn is the recent consumption of all accounts together, in pp/s;
-# supply is each account's headroom as chunks that expire at their reset.
+# When will the pool run dry? Prints one "<label> <wall epoch|clear|->" line
+# per window, "-" without enough history. Burn is the recent consumption of all
+# accounts together, in pp/s; supply is each account's headroom as chunks that
+# expire at their reset.
 pool_wall() {
   awk -v now="$now" '
     BEGIN {
@@ -184,13 +170,10 @@ pool_wall() {
       if ($3 == "seven_day" && $5 > now && $4 >= 99) capped[$1] = 1
     }
     END {
-      best = 0; estimated = 0
       for (wi = 1; wi <= nw; wi++) {
         w = order[wi]
-        if (!(w in first)) continue
         lo = now - look[w]; span = now - (first[w] > lo ? first[w] : lo)
-        if (span < look[w] / 4) continue
-        estimated++
+        if (!(w in first) || span < look[w] / 4) { print label[w], "-"; continue }
         need0 = sum[w] / span * 300
         n = 0
         for (i = 1; i <= m; i++) {
@@ -207,6 +190,7 @@ pool_wall() {
           idx[j + 1] = v
         }
         for (i = 1; i <= n; i++) rem[i] = amt[i]
+        wall = "clear"
         for (t = now; t < now + hor[w]; t += 300) {
           need = need0
           for (q = 1; q <= n && need > 1e-9; q++) {
@@ -216,54 +200,31 @@ pool_wall() {
               rem[c] -= take; need -= take
             }
           }
-          if (need > 1e-9) { if (!best || t < best) { best = t; bl = label[w] } break }
+          if (need > 1e-9) { wall = t; break }
         }
+        print label[w], wall
       }
-      if (best) print bl, best
-      else if (estimated == nw) print "clear"
     }' "$pool_hist" "$pool_cache"
 }
-pool_seg=""
 if [[ -s $pool_hist && -s $pool_cache ]]; then
   # Recomputed only when history changes; parsing it costs more than a render.
   if [[ ! $pool_wall_cache -nt $pool_hist ]]; then
     pool_wall >"$pool_wall_cache.$$"
     mv -f "$pool_wall_cache.$$" "$pool_wall_cache"
   fi
-  read -r wall_label wall_at <"$pool_wall_cache"
-  if [[ $wall_label == clear ]]; then
-    pool_seg="${GRN}pool clear${R}"
-  elif [[ -n $wall_at ]]; then
-    wall_color=$GRN
-    (( wall_at - now <= 259200 )) && wall_color=$YEL
-    (( wall_at - now <= 86400 )) && wall_color=$RED
-    pool_seg="${wall_color}pool wall $(TZ=America/Toronto date -d "@$wall_at" '+%a %H:%M') (${wall_label})${R}"
-  fi
+  while read -r label at; do
+    case $at in
+      clear) seg="${GRN}clear${R}" ;;
+      -) seg="${DIM}measuring${R}" ;;
+      *)
+        wall_color=$GRN
+        (( at - now <= 259200 )) && wall_color=$YEL
+        (( at - now <= 86400 )) && wall_color=$RED
+        seg="${wall_color}wall $(TZ=America/Toronto date -d "@$at" '+%a %H:%M')${R}" ;;
+    esac
+    line2+="${SEP}${label} ${seg}"
+  done <"$pool_wall_cache"
 fi
-mine=$([[ -n $sid && -f $sess_cache ]] && awk -v s="$sid" '$1 == s { print $2; exit }' "$sess_cache")
-
-window() { # label, used%, reset epoch, date format
-  local left=100
-  # A window past its reset is fully available again until fresh data lands.
-  (( $3 > now )) && left=$(( 100 - ${2%%.*} ))
-  printf '%s %s%d%%%s' "$1" "$(color_left "$left")" "$left" "$R"
-  (( $3 > now )) && printf ' %s↻ %s%s' "$DIM" "$(TZ=America/Toronto date -d "@$3" +"$4")" "$R"
-}
-prev=""
-line2=$pool_seg
-while read -r id a w u r; do
-  if [[ $a != "$prev" ]]; then
-    line2+="${SEP}${BOLD}${a}${R}"
-    [[ $id == "$mine" ]] && line2+="${YEL}*${R}"
-    line2+=" "; prev=$a
-  else
-    line2+=" ${DIM}·${R} "
-  fi
-  case $w in
-    five_hour) line2+=$(window 5h "$u" "$r" '%H:%M') ;;
-    seven_day) line2+=$(window wk "$u" "$r" '%a %H:%M') ;;
-  esac
-done < <([[ -f $pool_cache ]] && cat "$pool_cache")
 
 printf '%s\n' "$line1"
 [[ -n $line2 ]] && printf '%s\n' "${line2#"$SEP"}"
