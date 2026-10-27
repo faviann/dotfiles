@@ -404,6 +404,27 @@ EXPECTED
     || fail "no retry notice: $output"
 }
 
+@test "test_bootstrap_stops_when_apt_get_update_keeps_failing" {
+  given chezmoi bw bw-logged-in bw-unlocked nix nix-daemon
+  given_initialized_chezmoi
+  stub apt-get <<'STUB'
+[[ "$1" != update ]] || exit 100
+: >"$STATE/apt"
+STUB
+  stub sleep <<'STUB'
+printf 'sleep %s\n' "$*" >>"$CALLS"
+STUB
+  ln -sf .sleep "$STUBS/sleep"
+
+  run_bootstrap
+
+  [ "$status" -eq 1 ]
+  [ "$(grep -c '^sudo apt-get update$' "$CALLS")" -eq 60 ]
+  [ "$(grep -c '^sleep 10$' "$CALLS")" -eq 59 ]
+  ! grep -q ' install ' "$CALLS" || fail "installed after update gave up: $(cat "$CALLS")"
+  [[ "$stderr" == *"bootstrap: error: apt-get update failed"* ]] || fail "no error: $stderr"
+}
+
 @test "test_bootstrap_stops_on_a_download_that_fails_its_checksum" {
   given apt
 
