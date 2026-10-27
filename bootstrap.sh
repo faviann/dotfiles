@@ -49,7 +49,7 @@ apt_done() {
 }
 apt_run() {
   sudo apt-get update || die 'apt-get update failed'
-  sudo apt-get install -y "${APT_PACKAGES[@]}" \
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${APT_PACKAGES[@]}" \
     || die "cannot install ${APT_PACKAGES[*]} with apt-get"
 }
 

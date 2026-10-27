@@ -24,7 +24,7 @@ setup() {
   unset BW_SESSION DOTFILES_REF XDG_CONFIG_HOME XDG_DATA_HOME
 
   local tool
-  for tool in cat chmod git ln mkdir mktemp rm seq sha256sum sleep; do
+  for tool in cat chmod env git ln mkdir mktemp rm seq sha256sum sleep; do
     ln -s "$(command -v "$tool")" "$TOOLS/$tool"
   done
 
@@ -368,7 +368,7 @@ EXPECTED
   [ "$status" -eq 0 ]
   diff -u - <(actions) <<'EXPECTED'
 sudo apt-get update
-sudo apt-get install -y git curl jq gh unzip
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl jq gh unzip
 chezmoi apply
 chezmoi apply sees BW_SESSION=
 EXPECTED

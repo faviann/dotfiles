@@ -3,5 +3,5 @@ set -e
 
 if ! command -v fish &>/dev/null; then
     sudo apt update
-    sudo apt install -y fish
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y fish
 fi
