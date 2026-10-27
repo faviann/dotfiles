@@ -180,9 +180,10 @@ Dotfiles pins GitHub's published Ed25519 SSH host key; it
 does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
 
-On a desktop, the last apply script switches the `#desktop` Home Manager
-profile from the chezmoi source. The first switch downloads Chromium and takes
-several minutes. A failed switch fails apply after the other scripts have run.
+On a desktop, the last apply script before the homelab tunnel switches the
+`#desktop` Home Manager profile from the chezmoi source. The first switch
+downloads Chromium and takes several minutes. A failed switch fails apply after
+the other scripts have run, and the tunnel import waits for the next apply.
 Without `nix` on `PATH`, the error names the bootstrap command. Fix the cause
 and rerun the bootstrap command, or `chezmoi apply`, to retry the switch. After
 a successful switch, apply reruns it only when `flake.lock`, `flake.nix`,
@@ -195,8 +196,8 @@ credentials, so both repositories must stay public. Once
 If the homelab-iac clone fails, apply prints a warning and the next apply
 retries it.
 
-On a desktop with a [WireGuard item](#bitwarden-wireguard-item), apply also
-imports the homelab tunnel into NetworkManager.
+On a desktop with a [WireGuard item](#bitwarden-wireguard-item), the last
+apply script imports the homelab tunnel into NetworkManager.
 
 Apply also logs `gh` in with the [GitHub token](#github-token). On a new
 workstation, `gh` is not installed during the first apply, so
@@ -420,9 +421,9 @@ not remove a connection that apply already imported. To remove it, run
 `sudo nmcli connection delete wg-homelab`.
 
 Apply imports the profile into NetworkManager as the `wg-homelab` connection.
-NetworkManager starts the connection at boot and on every network. Before the
-import, apply changes the profile in two ways, so the homelab is reachable
-whatever the profile routes:
+NetworkManager starts the connection at once, at boot, and on every network.
+Before the import, apply changes the profile in two ways, so the homelab is
+reachable whatever the profile routes:
 
 - It adds `10.1.0.0/18` and `10.0.0.2` to the peer's `AllowedIPs`.
   NetworkManager routes each range through the tunnel. Other traffic follows
@@ -430,15 +431,32 @@ whatever the profile routes:
   traffic through the tunnel.
 - It replaces the profile's `DNS` with `10.1.0.1`, for `faviann.vms` and
   `proxmox.lan` names only. With systemd-resolved, as on stock Ubuntu, other
-  names use the DNS server of the network that the machine is on.
+  names use the DNS server of the network that the machine is on, even on a
+  full tunnel. On untrusted Wi-Fi, that network's resolver sees every other
+  name the machine looks up, which the Firewalla profile's own `DNS` would have
+  kept inside the tunnel.
+
+On a full tunnel, a profile that cannot connect cuts the machine's internet as
+soon as NetworkManager starts it. Apply imports the tunnel last, so the other
+apply steps finish first. To get internet back, run
+`sudo nmcli connection down wg-homelab`. NetworkManager starts the connection
+again at the next boot, so fix the item and run `chezmoi apply`, or delete the
+connection.
+
+At home on the homelab LAN, the `10.1.0.0/18` route still sends homelab traffic
+through the tunnel. Whether that works depends on the Firewalla accepting a
+tunnel from inside its own LAN on its public endpoint, which is unproven. Run
+the first apply with a new item at home. If the homelab is then unreachable,
+`sudo nmcli connection down wg-homelab` restores it.
 
 The import needs root, so apply runs `sudo nmcli`, and `sudo` can ask for your
 password. Apply gives the profile to NetworkManager in a file that only you can
 read, and deletes the file after the import. NetworkManager keeps the private
 key in a root-only file.
 
-Apply imports the profile again only when the item changes or the connection
-is missing. It replaces the old connection with the new one. If the Notes do
+Apply imports the profile again only when the item changes or no connection
+uses the `wg-homelab` interface. It first deletes every connection on that
+interface, including one renamed in the GUI or created by hand. If the Notes do
 not hold one `[Interface]` and one `[Peer]` section, apply fails and keeps the
 old connection. If NetworkManager rejects the new profile, apply fails after
 it removes the old connection. Fix the item and run `chezmoi apply` again.
