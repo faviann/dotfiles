@@ -103,11 +103,14 @@ line2=""
 # API's passive usage reads what sub2api already recorded, so no upstream
 # call; refreshed in the background every 60s like the PR lookup.
 # Cache lines: <account id> <account> <window> <used%> <reset epoch>
+# pool.hist keeps the same lines, each prefixed by its observation epoch, for
+# 25h; pool_wall turns it into the pool-level burn rate.
 # The session cache maps a Claude Code session_id to the account that served
 # its newest request, read from sub2api's usage log. That tracks failover on
 # the next request, but it is not sub2api's sticky binding itself.
 pool_key="$HOME/.config/claude/gateway-admin-key"
 pool_cache="$cache_dir/pool"
+pool_hist="$cache_dir/pool.hist"
 sess_cache="$cache_dir/sessions"
 admin=https://gateway.ai.faviann.com/api/v1/admin
 hdr() { printf 'x-api-key: %s\n' "$(tr -d '[:space:]' <"$pool_key")"; }
@@ -121,6 +124,14 @@ pool_refresh() {
       jq -r --arg id "$id" --arg n "$name" '.data as $d | ("five_hour", "seven_day") | "\($id) \($n) \(.) \($d[.].utilization // 0) \($d[.].resets_at // "")"'
   done | while read -r id name w u r; do echo "$id $name $w $u $([[ -n $r ]] && date -d "$r" +%s || echo 0)"; done
 }
+pool_record() {
+  local obs
+  obs=$(date +%s)
+  printf '%s\n' "$1" >"$pool_cache"
+  { cat "$pool_hist" 2>/dev/null; printf '%s\n' "$1" | sed "s/^/$obs /"; } |
+    awk -v cut=$(( obs - 90000 )) '$1 >= cut' >"$pool_hist.tmp"
+  mv -f "$pool_hist.tmp" "$pool_hist"
+}
 # Newest entries win; sessions absent from this page keep their last account.
 sess_refresh() {
   local new
@@ -133,8 +144,91 @@ sess_refresh() {
 if [[ -r $pool_key ]]; then
   if [[ ! -f $pool_cache ]] || (( $(date +%s) - $(stat -c %Y "$pool_cache") > 60 )); then
     touch "$pool_cache"
-    ( out=$(pool_refresh); [[ -n $out ]] && printf '%s\n' "$out" >"$pool_cache"; sess_refresh ) </dev/null >/dev/null 2>&1 &
+    ( out=$(pool_refresh); [[ -n $out ]] && pool_record "$out"; sess_refresh ) </dev/null >/dev/null 2>&1 &
     disown
+  fi
+fi
+# When will the pool run dry? Prints "<label> <epoch>" for the earliest wall,
+# "clear" if none within the horizon, nothing without enough history. Burn is
+# the recent consumption of all accounts together, in pp/s; supply is each
+# account's remaining headroom as chunks that expire at their window's reset.
+pool_wall() {
+  awk -v now="$now" '
+    BEGIN {
+      nw = split("five_hour 18000 3600 28800 5h|seven_day 604800 86400 604800 wk", rows, "|")
+      for (i = 1; i <= nw; i++) {
+        split(rows[i], f, " ")
+        order[i] = f[1]; period[f[1]] = f[2]; look[f[1]] = f[3]; hor[f[1]] = f[4]; label[f[1]] = f[5]
+      }
+    }
+    function add(a, s, e) { n++; amt[n] = a; st[n] = s; ex[n] = e }
+    FILENAME == ARGV[1] {
+      t = $1; w = $4; u = $5; r = $6; k = $2 SUBSEP w
+      if (!(w in first) || t < first[w]) first[w] = t
+      if (k in pu) {
+        # Reset epochs wobble by seconds inside one window; a drop is a new
+        # window opening, never negative consumption.
+        d = r - pr[k]; if (d < 0) d = -d
+        inc = (d <= 3600) ? (u > pu[k] ? u - pu[k] : 0) : u
+        if (t >= now - look[w]) sum[w] += inc
+      }
+      pu[k] = u; pr[k] = r
+      next
+    }
+    {
+      m++; pid[m] = $1; pw[m] = $3; pused[m] = $4; preset[m] = $5
+      if ($3 == "seven_day" && $5 > now && $4 >= 99) capped[$1] = 1
+    }
+    END {
+      best = 0; estimated = 0
+      for (wi = 1; wi <= nw; wi++) {
+        w = order[wi]
+        if (!(w in first)) continue
+        lo = now - look[w]; span = now - (first[w] > lo ? first[w] : lo)
+        if (span < look[w] / 4) continue
+        estimated = 1
+        need0 = sum[w] / span * 300
+        n = 0
+        for (i = 1; i <= m; i++) {
+          if (pw[i] != w || (w == "five_hour" && capped[pid[i]])) continue
+          s = now
+          if (preset[i] > now) { left = 100 - pused[i]; add(left > 0 ? left : 0, now, preset[i]); s = preset[i] }
+          for (; s < now + hor[w]; s += period[w]) add(100, s, s + period[w])
+        }
+        # Earliest expiry first: headroom about to lapse is spent before it.
+        for (i = 1; i <= n; i++) idx[i] = i
+        for (i = 2; i <= n; i++) {
+          v = idx[i]
+          for (j = i - 1; j >= 1 && ex[idx[j]] > ex[v]; j--) idx[j + 1] = idx[j]
+          idx[j + 1] = v
+        }
+        for (i = 1; i <= n; i++) rem[i] = amt[i]
+        for (t = now; t < now + hor[w]; t += 300) {
+          need = need0
+          for (q = 1; q <= n && need > 1e-9; q++) {
+            c = idx[q]
+            if (st[c] <= t && t < ex[c] && rem[c] > 0) {
+              take = rem[c] < need ? rem[c] : need
+              rem[c] -= take; need -= take
+            }
+          }
+          if (need > 1e-9) { if (!best || t < best) { best = t; bl = label[w] } break }
+        }
+      }
+      if (best) print bl, best
+      else if (estimated) print "clear"
+    }' "$pool_hist" "$pool_cache"
+}
+pool_seg=""
+if [[ -s $pool_hist && -s $pool_cache ]]; then
+  read -r wall_label wall_at <<<"$(pool_wall)"
+  if [[ $wall_label == clear ]]; then
+    pool_seg="${GRN}pool clear${R}"
+  elif [[ -n $wall_at ]]; then
+    wall_color=$GRN
+    (( wall_at - now <= 259200 )) && wall_color=$YEL
+    (( wall_at - now <= 86400 )) && wall_color=$RED
+    pool_seg="${wall_color}pool wall $(TZ=America/Toronto date -d "@$wall_at" '+%a %H:%M') (${wall_label})${R}"
   fi
 fi
 mine=$([[ -n $sid && -f $sess_cache ]] && awk -v s="$sid" '$1 == s { print $2; exit }' "$sess_cache")
@@ -147,6 +241,7 @@ window() { # label, used%, reset epoch, date format
   (( $3 > now )) && printf ' %s↻ %s%s' "$DIM" "$(TZ=America/Toronto date -d "@$3" +"$4")" "$R"
 }
 prev=""
+line2=$pool_seg
 while read -r id a w u r; do
   if [[ $a != "$prev" ]]; then
     line2+="${SEP}${BOLD}${a}${R}"
