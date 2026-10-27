@@ -367,11 +367,41 @@ EXPECTED
 
   [ "$status" -eq 0 ]
   diff -u - <(actions) <<'EXPECTED'
-sudo apt-get -o DPkg::Lock::Timeout=600 update
+sudo apt-get update
 sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y git curl jq gh unzip
 chezmoi apply
 chezmoi apply sees BW_SESSION=
 EXPECTED
+}
+
+@test "test_bootstrap_retries_apt_get_update_while_it_fails" {
+  given chezmoi bw bw-logged-in bw-unlocked nix nix-daemon
+  given_initialized_chezmoi
+  stub apt-get <<'STUB'
+if [[ "$1" == update && ! -e "$STATE/update-failed" ]]; then
+  : >"$STATE/update-failed"
+  exit 100
+fi
+[[ " $* " != *" install "* ]] || : >"$STATE/apt"
+STUB
+  stub sleep <<'STUB'
+printf 'sleep %s\n' "$*" >>"$CALLS"
+STUB
+  ln -sf .sleep "$STUBS/sleep"
+
+  run_bootstrap
+
+  [ "$status" -eq 0 ]
+  diff -u - <(actions) <<'EXPECTED'
+sudo apt-get update
+sleep 10
+sudo apt-get update
+sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y git curl jq gh unzip
+chezmoi apply
+chezmoi apply sees BW_SESSION=
+EXPECTED
+  [[ "$output" == *"bootstrap: apt-get update failed; retrying in 10 seconds (1 of 60)"* ]] \
+    || fail "no retry notice: $output"
 }
 
 @test "test_bootstrap_stops_on_a_download_that_fails_its_checksum" {
