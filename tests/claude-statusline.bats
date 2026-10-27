@@ -27,7 +27,7 @@ pool_line() { printf '%s %s %s %s %s\n' "$@" >>"$CACHE/pool"; }
 line2() {
   local out
   out=$(bash "$REPO_ROOT/private_dot_claude/executable_statusline.sh" <<<'{}')
-  sed 's/\x1b\[[0-9;]*m//g' <<<"$out" | sed -n 2p
+  printf '%s\n' "$out" | sed -n 2p | sed 's/\x1b\[[0-9;]*m//g'
 }
 
 # The wall lands on a 5-minute step of the script's own clock; accept 15 minutes either side.
