@@ -103,54 +103,81 @@ line2=""
 # The admin API's passive usage reads what sub2api already recorded, so no
 # upstream call; refreshed in the background every 60s like the PR lookup.
 # Cache lines: <account id> <account> <window> <used%> <reset epoch>
-# pool.hist keeps the same lines, each prefixed by its observation epoch, for
-# a week; pool_wall turns it into the pool-level burn rate.
+# <recorded epoch> <window cost $>, the cost known for the five-hour window only.
+# pool.cost is the gateway's own hourly cost per account for the last 8 days,
+# refreshed every 5 minutes: <account id> <hour start epoch> <cost $>
 pool_key="$HOME/.config/claude/gateway-admin-key"
 pool_cache="$cache_dir/pool"
-pool_hist="$cache_dir/pool.hist"
+pool_cost="$cache_dir/pool.cost"
 pool_wall_cache="$cache_dir/pool.wall"
 admin=https://gateway.ai.faviann.com/api/v1/admin
 hdr() { printf 'x-api-key: %s\n' "$(tr -d '[:space:]' <"$pool_key")"; }
-pool_refresh() {
-  local id name w u r
-  curl -sf -m 10 -H @<(hdr) "$admin/accounts?page_size=100" |
+epoch() { if [[ $1 == - ]]; then echo 0; else date -d "$1" +%s; fi; }
+pool_usage() {
+  local json rows w u r t c
+  json=$(curl -sf -m 10 -H @<(hdr) "$admin/accounts/$1/usage?source=passive") || return
+  rows=$(jq -r '.data as $d | ("five_hour", "seven_day")
+    | "\(.) \($d[.].utilization // 0) \($d[.].resets_at // "-") \($d.updated_at // "-") \($d[.].window_stats.cost // 0)"' <<<"$json") || return
+  while read -r w u r t c; do echo "$1 $2 $w $u $(epoch "$r") $(epoch "$t") $c"; done <<<"$rows"
+}
+# The gateway buckets by Toronto wall-clock hour whatever timezone is asked
+# for, so each bucket is converted in that zone to stay right across DST.
+pool_costs() {
+  local json rows hours
+  json=$(curl -sf -m 10 -H @<(hdr) "$admin/dashboard/trend?start_date=$(TZ=America/Toronto date -d '8 days ago' +%F)&end_date=$(TZ=America/Toronto date +%F)&granularity=hour&timezone=America/Toronto&account_id=$1") || return
+  rows=$(jq -r '.data.trend[] | "\(.date)\t\(.actual_cost)"' <<<"$json") || return
+  [[ -n $rows ]] || return 0
+  hours=$(cut -f1 <<<"$rows" | TZ=America/Toronto date -f - +%s) || return
+  paste -d' ' <(printf '%s\n' "$hours") <(cut -f2 <<<"$rows") | sed "s/^/$1 /"
+}
+# Runs $1 for every active Claude account, 8 at a time, each into its own file;
+# replaces $2 only when every account answered.
+pool_fetch() {
+  local dir="$2.$$.d" lines line id name files=() n=0
+  mapfile -t lines < <(curl -sf -m 10 -H @<(hdr) "$admin/accounts?page_size=100" |
     jq -r '.data.items | sort_by(.id)[] | select(.platform == "anthropic" and .status == "active")
-           | "\(.id) \(.name | sub("^Claude - "; "") | gsub(" "; "_"))"' |
-  while read -r id name; do
-    curl -sf -m 10 -H @<(hdr) "$admin/accounts/$id/usage?source=passive" |
-      jq -r --arg id "$id" --arg n "$name" '.data as $d | ("five_hour", "seven_day") | "\($id) \($n) \(.) \($d[.].utilization // 0) \($d[.].resets_at // "")"'
-  done | while read -r id name w u r; do echo "$id $name $w $u $([[ -n $r ]] && date -d "$r" +%s || echo 0)"; done
+           | "\(.id) \(.name | sub("^Claude - "; "") | gsub(" "; "_"))"')
+  (( ${#lines[@]} )) || return
+  mkdir -p "$dir"
+  for line in "${lines[@]}"; do
+    read -r id name <<<"$line"
+    files+=("$dir/$id")
+    (( n++ < 8 )) || wait -n
+    { "$1" "$id" "$name" >"$dir/$id.part" && mv "$dir/$id.part" "$dir/$id"; } &
+  done
+  wait
+  if cat "${files[@]}" >"$2.$$" && [[ -s $2.$$ ]]; then mv -f "$2.$$" "$2"; fi
+  rm -rf "$dir" "$2.$$"
 }
-# History is sampled every 5 minutes: every status line render reads all of it.
-pool_record() {
-  local obs last
-  obs=$(date +%s)
-  printf '%s\n' "$1" >"$pool_cache"
-  last=$(tail -n 1 "$pool_hist" 2>/dev/null | cut -d' ' -f1)
-  (( obs - ${last:-0} >= 300 )) || return 0
-  { cat "$pool_hist" 2>/dev/null; printf '%s\n' "$1" | sed "s/^/$obs /"; } |
-    awk -v cut=$(( obs - 608400 )) '$1 >= cut' >"$pool_hist.$$"
-  mv -f "$pool_hist.$$" "$pool_hist"
-}
+stale() { [[ ! -f $1 ]] || (( now - $(stat -c %Y "$1") > $2 )); }
 if [[ -r $pool_key ]]; then
-  if [[ ! -f $pool_cache ]] || (( $(date +%s) - $(stat -c %Y "$pool_cache") > 60 )); then
+  if stale "$pool_cache" 60; then
     touch "$pool_cache"
-    ( out=$(pool_refresh); [[ -n $out ]] && pool_record "$out" ) </dev/null >/dev/null 2>&1 &
+    ( pool_fetch pool_usage "$pool_cache" ) </dev/null >/dev/null 2>&1 &
+    disown
+  fi
+  if stale "$pool_cost" 300; then
+    touch "$pool_cost"
+    ( pool_fetch pool_costs "$pool_cost" ) </dev/null >/dev/null 2>&1 &
     disown
   fi
 fi
 # When will the pool run dry? Prints one "<label> <wall epoch|clear|->" line
-# per window, "-" without enough history. Burn is the recent consumption of all
-# accounts together, in pp/s; supply is each account's headroom as chunks that
-# expire at their reset.
+# per window, "-" until there is enough history and use to price it. Burn is
+# the recent cost of all accounts together, turned into points of the limit
+# by its price; supply is each account's headroom as chunks that expire at
+# their reset.
+# A limit's price is dollars per point of use across the pool, as the accounts
+# share one plan: the weekly one from what each account spent since its
+# window opened, the five-hour one from sub2api's own window cost.
 # Then "used <weekly span> <weekly %> <last 5h %> <peak 5h %>": the pace of the
 # last week (or as much as is recorded) as a share of the pool's weekly
 # capacity, and the last and busiest five hours as a share of its five-hour
 # capacity, "-" for any not yet measurable.
 # Then "cap <label> <seconds> <pct>" per horizon: what the pool could deliver
 # within it, spending flat out, against the same accounts with every counter
-# at zero; or "cap -" until weekly usage gives k, the five-hour budgets in a
-# weekly one, which both limits must be measured in to be combined.
+# at zero; or "cap -" until both limits are priced, which gives k, the
+# five-hour budgets in a weekly one.
 pool_wall() {
   awk -v now="$now" '
     BEGIN {
@@ -162,6 +189,7 @@ pool_wall() {
     }
     function add(a, s, e) { n++; amt[n] = a; st[n] = s; ex[n] = e }
     function min(a, b) { return a < b ? a : b }
+    function max(a, b) { return a > b ? a : b }
     # Weekly pp one account delivers by end: its five-hour windows back to
     # back, those opening before the weekly reset capped by weekly headroom.
     function deliver(u5, r5, uw, rw, end, k,    s, pre, post, tot) {
@@ -173,20 +201,15 @@ pool_wall() {
       if (rw < end) tot += min(post / k, 100)
       return tot
     }
+    # The cost of bucket i between a and e, prorated; the current hour runs to now.
+    function part(i, a, e,    len) {
+      len = min(bt[i] + 3600, now) - bt[i]
+      return len > 0 ? bc[i] * max(min(bt[i] + 3600, min(now, e)) - max(bt[i], a), 0) / len : 0
+    }
+    function spent(a, e,    i, s) { for (i = 1; i <= nb; i++) s += part(i, a, e); return s }
     FILENAME == ARGV[1] {
-      t = $1; w = $4; u = $5; r = $6; k = $2 SUBSEP w
-      if (!(w in first) || t < first[w]) first[w] = t
-      if (k in pu) {
-        # Reset epochs wobble by seconds inside one window; a drop is a new
-        # window opening, never negative consumption.
-        d = r - pr[k]; if (d < 0) d = -d
-        inc = (d <= 3600) ? (u > pu[k] ? u - pu[k] : 0) : u
-        if (t >= now - look[w]) sum[w] += inc
-        if (t >= now - 86400) ksum[w] += inc
-        if (w == "seven_day" && t > now - 604800) week += inc
-        if (w == "five_hour") fbin[int((now - t) / 300)] += inc
-      }
-      pu[k] = u; pr[k] = r
+      nb++; bid[nb] = $1; bt[nb] = $2; bc[nb] = $3
+      if (!first || $2 < first) first = $2
       next
     }
     {
@@ -195,8 +218,16 @@ pool_wall() {
       if (!($1 in acct)) na++
       nrow[$3]++
       acct[$1] = 1; cu[$1, $3] = $4; cr[$1, $3] = $5
+      # Only windows still open when sub2api recorded them, and weekly ones
+      # with enough use to price.
+      if ($6 > 0 && $5 > $6)
+        if ($3 == "five_hour") { cost5 += $7; used5 += $4 }
+        else if ($4 >= 5) { wopen[$1] = $5 - period["seven_day"]; seen[$1] = $6; usedw += $4 }
     }
     END {
+      if (used5 >= 5 && cost5 > 0) price["five_hour"] = cost5 / used5
+      for (i = 1; i <= nb; i++) if (bid[i] in wopen) costw += part(i, wopen[bid[i]], seen[bid[i]])
+      if (usedw > 0 && costw > 0) price["seven_day"] = costw / usedw
       for (wi = 1; wi <= nw; wi++) {
         w = order[wi]
         n = 0
@@ -212,11 +243,13 @@ pool_wall() {
           if (st[i] <= now) avail += amt[i]
           else if (amt[i] > 0 && (!back || st[i] < back)) back = st[i]
         if (nrow[w] && avail < 1) { print label[w], "dry", (back ? back : "-"); continue }
-        # Test membership first: reading first[w] would create it.
-        if (!(w in first)) { print label[w], "-"; continue }
-        lo = now - look[w]; span = now - (first[w] > lo ? first[w] : lo)
+        # Test membership first: reading price[w] would create it.
+        if (!(w in price)) { print label[w], "-"; continue }
+        # Whole hours back to the lookback, so the current partial one is
+        # weighed by the time it has run.
+        lo = max(int((now - look[w]) / 3600) * 3600, first); span = now - lo
         if (span < look[w] / 4) { print label[w], "-"; continue }
-        need0 = sum[w] / span * 300
+        need0 = spent(lo, now) / price[w] / span * 300
         # Earliest expiry first: headroom about to lapse is spent before it.
         for (i = 1; i <= n; i++) idx[i] = i
         for (i = 2; i <= n; i++) {
@@ -240,26 +273,27 @@ pool_wall() {
         print label[w], wall
       }
       wspan = wpct = f5 = peak = "-"
-      if ("seven_day" in first && now - first["seven_day"] >= 21600) {
-        wspan = min(now - first["seven_day"], 604800)
-        wpct = int(week * 604800 / wspan / na + 0.5)
+      cover = now - first
+      if ("seven_day" in price && cover >= 21600) {
+        wspan = min(cover, 604800)
+        wpct = int(spent(now - wspan, now) / price["seven_day"] * 604800 / wspan / na + 0.5)
       }
-      fspan = ("five_hour" in first) ? now - first["five_hour"] : 0
-      if (fspan >= 900) {
-        for (b = last5 = 0; b < 60; b++) last5 += fbin[b]
-        f5 = int(last5 * (fspan < 18000 ? 18000 / fspan : 1) / na + 0.5)
+      if ("five_hour" in price && cover >= 900) {
+        last5 = spent(now - 18000, now)
+        f5 = int(last5 / price["five_hour"] * (cover < 18000 ? 18000 / cover : 1) / na + 0.5)
       }
-      if (fspan >= 18000) {
-        best = run = last5
-        for (b = 60; b <= int(fspan / 300); b++) {
-          run += fbin[b] - fbin[b - 60]
+      if ("five_hour" in price && cover >= 18000) {
+        for (i = 1; i <= nb; i++) hr[bt[i]] += bc[i]
+        best = last5
+        for (s = int(now / 3600) * 3600 - 14400; s >= max(first, now - 604800); s -= 3600) {
+          run = hr[s] + hr[s + 3600] + hr[s + 7200] + hr[s + 10800] + hr[s + 14400]
           if (run > best) best = run
         }
-        peak = int(best / na + 0.5)
+        peak = int(best / price["five_hour"] / na + 0.5)
       }
       print "used", wspan, wpct, f5, peak
-      if (ksum["seven_day"] < 2 || ksum["five_hour"] <= 0) { print "cap -"; exit }
-      k = ksum["five_hour"] / ksum["seven_day"]
+      if (!("seven_day" in price && "five_hour" in price)) { print "cap -"; exit }
+      k = price["seven_day"] / price["five_hour"]
       nh = split("1h 3600 2h 7200 4h 14400 8h 28800 1d 86400 2d 172800 4d 345600 7d 604800", hz, " ")
       for (h = 1; h < nh; h += 2) {
         got = zero = 0
@@ -269,11 +303,11 @@ pool_wall() {
         }
         print "cap", hz[h], hz[h + 1], int(100 * got / zero + 0.5)
       }
-    }' "$pool_hist" "$pool_cache"
+    }' "$pool_cost" "$pool_cache"
 }
-if [[ -s $pool_hist && -s $pool_cache ]]; then
-  # Recomputed only when history changes; parsing it costs more than a render.
-  if [[ ! $pool_wall_cache -nt $pool_hist ]]; then
+if [[ -s $pool_cost && -s $pool_cache ]]; then
+  # Recomputed only when its inputs change; that costs more than a render.
+  if [[ ! $pool_wall_cache -nt $pool_cost || ! $pool_wall_cache -nt $pool_cache ]]; then
     pool_wall >"$pool_wall_cache.$$"
     mv -f "$pool_wall_cache.$$" "$pool_wall_cache"
   fi
