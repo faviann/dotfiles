@@ -6,7 +6,7 @@ source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 REAL_BASH="$(command -v bash)"
 readonly REAL_BASH
-readonly TEMPLATE="$REPO_ROOT/.chezmoiscripts/run_after_connect-homelab-wireguard.sh.tmpl"
+readonly TEMPLATE="$REPO_ROOT/.chezmoiscripts/run_after_zz-connect-homelab-wireguard.sh.tmpl"
 readonly ITEM=dotfiles/wireguard/laptop
 readonly PRIVATE_KEY='FIXTURE-PRIVATE-KEY-DO-NOT-PRINT='
 readonly PROFILE="[Interface]
@@ -44,7 +44,7 @@ setup() {
   mkdir -p "$HOME" "$XDG_STATE_HOME" "$XDG_RUNTIME_DIR" "$STATE" "$STUBS" "$REAL_TOOLS"
   : >"$CALLS"
   : >"$REAL_TOOL_ARGV"
-  printf 'uuid-wifi:Home Wi-Fi\n' >"$STATE/connections"
+  printf 'uuid-wifi:Home Wi-Fi:wlp2s0\n' >"$STATE/connections"
   write_items "$ITEM" "$PROFILE" dotfiles/wireguard/laptop2 'decoy profile'
 
   chezmoi --config /dev/null --config-format toml \
@@ -52,7 +52,7 @@ setup() {
     execute-template --override-data '{"chezmoi":{"hostname":"laptop"}}' \
     --file "$TEMPLATE" >"$SCRIPT"
 
-  record_argv_of_real_tools awk basename cat cp grep jq mkdir mktemp mv rm sha256sum stat
+  record_argv_of_real_tools awk basename cat cp cut grep jq mkdir mktemp mv rm sha256sum stat
 
   cat >"$STUBS/bw" <<'STUB'
 set -euo pipefail
@@ -78,7 +78,11 @@ require_root() {
   [[ -n "${AS_ROOT:-}" ]] || { printf 'Error: insufficient privileges.\n' >&2; exit 1; }
 }
 case "$*" in
-  '-g UUID,NAME connection show') cat "$connections" ;;
+  '-g UUID connection show') cut -d : -f 1 "$connections" ;;
+  '-g connection.interface-name connection show uuid '*)
+    awk -F : -v uuid="$6" '$1 == uuid { print $3; found = 1 } END { exit !found }' "$connections" \
+      || { printf 'Error: %s - no such connection profile.\n' "$6" >&2; exit 10; }
+    ;;
   'connection delete uuid '*)
     require_root
     grep -q "^$4:" "$connections" || { printf 'Error: unknown connection %s.\n' "$4" >&2; exit 10; }
@@ -91,11 +95,15 @@ case "$*" in
       printf 'Error: failed to import the connection.\n' >&2
       exit 1
     fi
+    if cut -d : -f 3 "$connections" | grep -qx -- "$(basename "$6" .conf)"; then
+      printf "Error: Failed to add 'wg-homelab' connection: Message recipient disconnected from message bus without replying\n" >&2
+      exit 4
+    fi
     printf '%s %s\n' "$(stat -c %a "$6")" "$(stat -c %a "${6%/*}")" >"$STATE/import-modes"
     cp "$6" "$STATE/imported.conf"
     imports=$(($(cat "$STATE/imports" 2>/dev/null || printf 0) + 1))
     printf '%s\n' "$imports" >"$STATE/imports"
-    printf 'uuid-%s:%s\n' "$imports" "$(basename "$6" .conf)" >>"$connections"
+    printf 'uuid-%s:%s:%s\n' "$imports" "$(basename "$6" .conf)" "$(basename "$6" .conf)" >>"$connections"
     ;;
   *) exit 64 ;;
 esac
@@ -152,7 +160,8 @@ calls() {
   [ "$stderr" = '' ]
   diff -u - <(calls) <<CALLS
 bw list items --search dotfiles/wireguard/laptop
-nmcli -g UUID,NAME connection show
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
 sudo nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
 nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
 CALLS
@@ -160,8 +169,8 @@ CALLS
   [ "$(<"$STATE/import-modes")" = '600 700' ]
   [ "$(ls -A "$XDG_RUNTIME_DIR")" = '' ]
   diff -u - "$STATE/connections" <<'CONNECTIONS'
-uuid-wifi:Home Wi-Fi
-uuid-1:wg-homelab
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-1:wg-homelab:wg-homelab
 CONNECTIONS
   local state_file="$XDG_STATE_HOME/connect-homelab-wireguard/profile.sha256"
   [ "$(<"$state_file")" = "$(sha256sum <<<"$IMPORTED" | cut -d ' ' -f 1)" ]
@@ -180,7 +189,9 @@ CONNECTIONS
   [ "$stderr" = '' ]
   diff -u - <(calls) <<'CALLS'
 bw list items --search dotfiles/wireguard/laptop
-nmcli -g UUID,NAME connection show
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
+nmcli -g connection.interface-name connection show uuid uuid-1
 CALLS
 }
 
@@ -204,7 +215,9 @@ Endpoint = vpn.example.test:51820"
   [ "$stderr" = '' ]
   diff -u - <(calls) <<CALLS
 bw list items --search dotfiles/wireguard/laptop
-nmcli -g UUID,NAME connection show
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
+nmcli -g connection.interface-name connection show uuid uuid-1
 sudo nmcli connection delete uuid uuid-1
 nmcli connection delete uuid uuid-1
 sudo nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
@@ -222,15 +235,15 @@ PublicKey = FIXTURE-PEER-PUBLIC-KEY=
 Endpoint = vpn.example.test:51820
 IMPORTED
   diff -u - "$STATE/connections" <<'CONNECTIONS'
-uuid-wifi:Home Wi-Fi
-uuid-2:wg-homelab
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-2:wg-homelab:wg-homelab
 CONNECTIONS
 }
 
 @test "test_connection_deleted_out_of_band_is_imported_again" {
   run_connect
   [ "$output" = "$IMPORTED_LINE" ]
-  printf 'uuid-wifi:Home Wi-Fi\n' >"$STATE/connections"
+  printf 'uuid-wifi:Home Wi-Fi:wlp2s0\n' >"$STATE/connections"
   : >"$CALLS"
 
   run_connect
@@ -240,13 +253,96 @@ CONNECTIONS
   [ "$stderr" = '' ]
   diff -u - <(calls) <<CALLS
 bw list items --search dotfiles/wireguard/laptop
-nmcli -g UUID,NAME connection show
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
 sudo nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
 nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
 CALLS
   diff -u - "$STATE/connections" <<'CONNECTIONS'
-uuid-wifi:Home Wi-Fi
-uuid-2:wg-homelab
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-2:wg-homelab:wg-homelab
+CONNECTIONS
+}
+
+@test "test_renamed_connection_is_replaced_when_the_profile_changes" {
+  run_connect
+  [ "$output" = "$IMPORTED_LINE" ]
+  sed -i 's/^uuid-1:wg-homelab:/uuid-1:Homelab VPN:/' "$STATE/connections"
+  write_items "$ITEM" "${PROFILE/10.20.151.2/10.20.151.3}"
+  : >"$CALLS"
+
+  run_connect
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$IMPORTED_LINE" ]
+  [ "$stderr" = '' ]
+  diff -u - "$STATE/connections" <<'CONNECTIONS'
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-2:wg-homelab:wg-homelab
+CONNECTIONS
+}
+
+@test "test_unchanged_profile_leaves_a_renamed_connection_alone" {
+  run_connect
+  [ "$output" = "$IMPORTED_LINE" ]
+  sed -i 's/^uuid-1:wg-homelab:/uuid-1:Homelab VPN:/' "$STATE/connections"
+  : >"$CALLS"
+
+  run_connect
+
+  [ "$status" -eq 0 ]
+  [ "$output" = '' ]
+  [ "$stderr" = '' ]
+  diff -u - <(calls) <<'CALLS'
+bw list items --search dotfiles/wireguard/laptop
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
+nmcli -g connection.interface-name connection show uuid uuid-1
+CALLS
+  diff -u - "$STATE/connections" <<'CONNECTIONS'
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-1:Homelab VPN:wg-homelab
+CONNECTIONS
+}
+
+@test "test_every_connection_on_the_interface_is_replaced" {
+  printf 'uuid-wifi:Home Wi-Fi:wlp2s0\nuuid-foo:foo:wg-homelab\nuuid-old:Homelab VPN:wg-homelab\n' >"$STATE/connections"
+
+  run_connect
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$IMPORTED_LINE" ]
+  [ "$stderr" = '' ]
+  diff -u - <(calls) <<CALLS
+bw list items --search dotfiles/wireguard/laptop
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
+nmcli -g connection.interface-name connection show uuid uuid-foo
+nmcli -g connection.interface-name connection show uuid uuid-old
+sudo nmcli connection delete uuid uuid-foo
+nmcli connection delete uuid uuid-foo
+sudo nmcli connection delete uuid uuid-old
+nmcli connection delete uuid uuid-old
+sudo nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
+nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
+CALLS
+  diff -u - "$STATE/connections" <<'CONNECTIONS'
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-1:wg-homelab:wg-homelab
+CONNECTIONS
+}
+
+@test "test_connection_named_wg_homelab_on_another_interface_is_kept" {
+  printf 'uuid-wifi:Home Wi-Fi:wlp2s0\nuuid-wg0:wg-homelab:wg0\n' >"$STATE/connections"
+
+  run_connect
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$IMPORTED_LINE" ]
+  diff -u - "$STATE/connections" <<'CONNECTIONS'
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-wg0:wg-homelab:wg0
+uuid-1:wg-homelab:wg-homelab
 CONNECTIONS
 }
 
@@ -319,8 +415,8 @@ PrivateKey = $PRIVATE_KEY"; do
 
   run ! grep -q '^sudo' "$CALLS"
   diff -u - "$STATE/connections" <<'CONNECTIONS'
-uuid-wifi:Home Wi-Fi
-uuid-1:wg-homelab
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-1:wg-homelab:wg-homelab
 CONNECTIONS
 }
 
