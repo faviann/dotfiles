@@ -12,6 +12,7 @@ mkdir -p "$cache_dir"
 
 # Color context use by "how bad".
 color_used() { if (( $1 >= 85 )); then echo "$RED"; elif (( $1 >= 60 )); then echo "$YEL"; else echo "$GRN"; fi; }
+color_load() { if (( $1 >= 100 )); then echo "$RED"; elif (( $1 >= 80 )); then echo "$YEL"; else echo "$GRN"; fi; }
 
 model=$(j .model.display_name)
 dir=$(j .workspace.current_dir)
@@ -103,7 +104,7 @@ line2=""
 # upstream call; refreshed in the background every 60s like the PR lookup.
 # Cache lines: <account id> <account> <window> <used%> <reset epoch>
 # pool.hist keeps the same lines, each prefixed by its observation epoch, for
-# 25h; pool_wall turns it into the pool-level burn rate.
+# a week; pool_wall turns it into the pool-level burn rate.
 pool_key="$HOME/.config/claude/gateway-admin-key"
 pool_cache="$cache_dir/pool"
 pool_hist="$cache_dir/pool.hist"
@@ -128,7 +129,7 @@ pool_record() {
   last=$(tail -n 1 "$pool_hist" 2>/dev/null | cut -d' ' -f1)
   (( obs - ${last:-0} >= 300 )) || return 0
   { cat "$pool_hist" 2>/dev/null; printf '%s\n' "$1" | sed "s/^/$obs /"; } |
-    awk -v cut=$(( obs - 90000 )) '$1 >= cut' >"$pool_hist.$$"
+    awk -v cut=$(( obs - 608400 )) '$1 >= cut' >"$pool_hist.$$"
   mv -f "$pool_hist.$$" "$pool_hist"
 }
 if [[ -r $pool_key ]]; then
@@ -142,6 +143,10 @@ fi
 # per window, "-" without enough history. Burn is the recent consumption of all
 # accounts together, in pp/s; supply is each account's headroom as chunks that
 # expire at their reset.
+# Then "used <weekly span> <weekly %> <last 5h %> <peak 5h %>": the pace of the
+# last week (or as much as is recorded) as a share of the pool's weekly
+# capacity, and the last and busiest five hours as a share of its five-hour
+# capacity, "-" for any not yet measurable.
 # Then "cap <label> <seconds> <pct>" per horizon: what the pool could deliver
 # within it, spending flat out, against the same accounts with every counter
 # at zero; or "cap -" until weekly usage gives k, the five-hour budgets in a
@@ -178,6 +183,8 @@ pool_wall() {
         inc = (d <= 3600) ? (u > pu[k] ? u - pu[k] : 0) : u
         if (t >= now - look[w]) sum[w] += inc
         if (t >= now - 86400) ksum[w] += inc
+        if (w == "seven_day" && t > now - 604800) week += inc
+        if (w == "five_hour") fbin[int((now - t) / 300)] += inc
       }
       pu[k] = u; pr[k] = r
       next
@@ -185,14 +192,13 @@ pool_wall() {
     {
       m++; pid[m] = $1; pw[m] = $3; pused[m] = $4; preset[m] = $5
       if ($3 == "seven_day" && $5 > now && $4 >= 99) capped[$1] = 1
+      if (!($1 in acct)) na++
+      nrow[$3]++
       acct[$1] = 1; cu[$1, $3] = $4; cr[$1, $3] = $5
     }
     END {
       for (wi = 1; wi <= nw; wi++) {
         w = order[wi]
-        lo = now - look[w]; span = now - (first[w] > lo ? first[w] : lo)
-        if (!(w in first) || span < look[w] / 4) { print label[w], "-"; continue }
-        need0 = sum[w] / span * 300
         n = 0
         for (i = 1; i <= m; i++) {
           if (pw[i] != w || (w == "five_hour" && capped[pid[i]])) continue
@@ -200,6 +206,17 @@ pool_wall() {
           if (preset[i] > now) { left = 100 - pused[i]; add(left > 0 ? left : 0, now, preset[i]); s = preset[i] }
           for (; s < now + hor[w]; s += period[w]) add(100, s, s + period[w])
         }
+        # An empty pool burns nothing, so its burn would read as clear.
+        avail = back = 0
+        for (i = 1; i <= n; i++)
+          if (st[i] <= now) avail += amt[i]
+          else if (amt[i] > 0 && (!back || st[i] < back)) back = st[i]
+        if (nrow[w] && avail < 1) { print label[w], "dry", (back ? back : "-"); continue }
+        # Test membership first: reading first[w] would create it.
+        if (!(w in first)) { print label[w], "-"; continue }
+        lo = now - look[w]; span = now - (first[w] > lo ? first[w] : lo)
+        if (span < look[w] / 4) { print label[w], "-"; continue }
+        need0 = sum[w] / span * 300
         # Earliest expiry first: headroom about to lapse is spent before it.
         for (i = 1; i <= n; i++) idx[i] = i
         for (i = 2; i <= n; i++) {
@@ -222,6 +239,25 @@ pool_wall() {
         }
         print label[w], wall
       }
+      wspan = wpct = f5 = peak = "-"
+      if ("seven_day" in first && now - first["seven_day"] >= 21600) {
+        wspan = min(now - first["seven_day"], 604800)
+        wpct = int(week * 604800 / wspan / na + 0.5)
+      }
+      fspan = ("five_hour" in first) ? now - first["five_hour"] : 0
+      if (fspan >= 900) {
+        for (b = last5 = 0; b < 60; b++) last5 += fbin[b]
+        f5 = int(last5 * (fspan < 18000 ? 18000 / fspan : 1) / na + 0.5)
+      }
+      if (fspan >= 18000) {
+        best = run = last5
+        for (b = 60; b <= int(fspan / 300); b++) {
+          run += fbin[b] - fbin[b - 60]
+          if (run > best) best = run
+        }
+        peak = int(best / na + 0.5)
+      }
+      print "used", wspan, wpct, f5, peak
       if (ksum["seven_day"] < 2 || ksum["five_hour"] <= 0) { print "cap -"; exit }
       k = ksum["five_hour"] / ksum["seven_day"]
       nh = split("1h 3600 2h 7200 4h 14400 8h 28800 1d 86400 2d 172800 4d 345600 7d 604800", hz, " ")
@@ -242,7 +278,20 @@ if [[ -s $pool_hist && -s $pool_cache ]]; then
     mv -f "$pool_wall_cache.$$" "$pool_wall_cache"
   fi
   first_wall=""
-  while read -r label at span pct; do
+  while read -r label at span pct peak; do
+    if [[ $label == used ]]; then
+      used=""
+      if [[ $span != - ]]; then
+        if (( at >= 604800 )); then wspan=7d
+        elif (( at >= 86400 )); then wspan="$(( at / 86400 ))d"
+        else wspan="$(( at / 3600 ))h"; fi
+        used+=" · ${wspan} $(color_load "$span")${span}%${R}"
+      fi
+      [[ $pct != - ]] && used+=" · 5h $(color_load "$pct")${pct}%${R}"
+      [[ $peak != - ]] && used+=" · peak $(color_load "$peak")${peak}%${R}"
+      [[ -n $used ]] && line2+="${SEP}used${used# ·}"
+      continue
+    fi
     if [[ $label == cap ]]; then
       if [[ $at == - ]]; then line3="cap ${DIM}measuring${R}"; continue; fi
       cell=$GRN
@@ -251,6 +300,10 @@ if [[ -s $pool_hist && -s $pool_cache ]]; then
       continue
     fi
     case $at in
+      dry)
+        seg="${RED}dry${R}"
+        [[ $span != - ]] && seg="${RED}dry until $(TZ=America/Toronto date -d "@$span" '+%a %H:%M')${R}"
+        first_wall=$now ;;
       clear) seg="${GRN}clear${R}" ;;
       -) seg="${DIM}measuring${R}" ;;
       *)
@@ -265,5 +318,5 @@ if [[ -s $pool_hist && -s $pool_cache ]]; then
 fi
 
 printf '%s\n' "$line1"
-[[ -n $line2 ]] && printf '%s\n' "${line2#"$SEP"}"
-[[ -n $line3 ]] && printf '%s\n' "$line3"
+if [[ -n $line2 ]]; then printf '%s\n' "${line2#"$SEP"}"; fi
+if [[ -n $line3 ]]; then printf '%s\n' "$line3"; fi

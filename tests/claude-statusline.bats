@@ -54,7 +54,7 @@ assert_wall_near() {
   climb 1 alpha seven_day 45 $((NOW + 259200)) 0 24
   pool_line 1 alpha five_hour 20 $((NOW + 10800))
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
-  [[ $(line2) == "5h clear │ wk clear" ]]
+  [[ $(line2) == "5h clear │ wk clear │ used 1d 0% · 5h 0%" ]]
 }
 
 @test "a limit without enough history shows measuring" {
@@ -62,7 +62,7 @@ assert_wall_near() {
   climb 1 alpha seven_day 45 $((NOW + 259200)) 0 1
   pool_line 1 alpha five_hour 20 $((NOW + 10800))
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
-  [[ $(line2) == "5h clear │ wk measuring" ]]
+  [[ $(line2) == "5h clear │ wk measuring │ used 5h 0%" ]]
 }
 
 @test "usage after a reset inside the lookback counts and a drop is not negative" {
@@ -108,7 +108,7 @@ assert_wall_near() {
   climb 1 alpha seven_day 45 $((NOW + 259200)) 0 24
   pool_line 1 alpha five_hour 20 $((NOW + 10800))
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
-  [[ $(line2) == "5h clear │ wk clear" ]]
+  [[ $(line2) == "5h clear │ wk clear │ used 1d 0% · 5h 0%" ]]
   : >"$CACHE/pool.hist"
   climb 1 alpha seven_day 45 $((NOW + 259200)) 1 24
   touch -d "@$((NOW + 60))" "$CACHE/pool.hist"
@@ -144,4 +144,71 @@ assert_wall_near() {
   pool_line 1 alpha five_hour 20 $((NOW + 10800))
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
   [[ $(line3) == "cap measuring" ]]
+}
+
+@test "last week's use is shown against the pool's weekly capacity" {
+  # 84 + 42 pp over 7 days on 2 accounts' 200 pp of weekly capacity.
+  climb 1 alpha seven_day 50 $((NOW + 259200)) 0.5 168
+  climb 2 beta seven_day 50 $((NOW + 259200)) 0.25 168
+  pool_line 1 alpha seven_day 50 $((NOW + 259200))
+  pool_line 2 beta seven_day 50 $((NOW + 259200))
+  [[ $(line2) == "5h measuring │ wk "*"│ used 7d 63%" ]]
+}
+
+@test "until a week is recorded, use is projected from the days measured" {
+  # 24 pp in 2 days is 84 pp a week on 1 account.
+  climb 1 alpha seven_day 50 $((NOW + 259200)) 0.5 48
+  pool_line 1 alpha seven_day 50 $((NOW + 259200))
+  [[ $(line2) == *"│ used 2d 84%" ]]
+  [[ $(render | sed -n 2p) == *$'\e[33m84%'* ]]
+}
+
+@test "the busiest five hours is shown beside the last five" {
+  # alpha burns 80 pp in 5 hours a day ago, then 30 pp in the last 5 hours;
+  # beta is idle. The pool's five-hour capacity is 200 pp.
+  awk -v now="$NOW" 'BEGIN {
+    for (t = now - 172800; t <= now; t += 300) {
+      if (t <= now - 108000) { u = 10; r = 1 }
+      else if (t <= now - 90000) { u = 10 + 80 * (t - (now - 108000)) / 18000; r = 1 }
+      else if (t <= now - 18000) { u = 0; r = 2 }
+      else { u = 30 * (t - (now - 18000)) / 18000; r = 3 }
+      printf "%d 1 alpha five_hour %.4f %d\n%d 2 beta five_hour 0 0\n", t, u, now + r * 3600, t
+    }
+  }' >"$CACHE/pool.hist"
+  pool_line 1 alpha five_hour 30 $((NOW + 10800))
+  pool_line 2 beta five_hour 0 0
+  [[ $(line2) == *"│ used 5h 15% · peak 40%" ]]
+}
+
+@test "a refresh keeps a week of history" {
+  mkdir -p "$HOME/.config/claude" "$BATS_TEST_TMPDIR/bin"
+  echo key >"$HOME/.config/claude/gateway-admin-key"
+  { printf '#!%s\n' "$BASH"; cat <<'CURL'; } >"$BATS_TEST_TMPDIR/bin/curl"
+for url; do :; done
+case $url in
+  */accounts\?*) echo '{"data":{"items":[{"id":1,"name":"Claude - alpha","platform":"anthropic","status":"active"}]}}' ;;
+  */usage\?*) echo '{"data":{"five_hour":{"utilization":10},"seven_day":{"utilization":20}}}' ;;
+esac
+CURL
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  printf '%d 1 alpha seven_day 5 0\n%d 1 alpha seven_day 15 0\n' $((NOW - 8 * 86400)) $((NOW - 6 * 86400)) >"$CACHE/pool.hist"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" render >/dev/null
+  for _ in {1..50}; do
+    grep -q ' 1 alpha seven_day 20 0$' "$CACHE/pool.hist" && break
+    sleep 0.1
+  done
+  grep -q "^$((NOW - 6 * 86400)) " "$CACHE/pool.hist"
+  if grep -q "^$((NOW - 8 * 86400)) " "$CACHE/pool.hist"; then fail "kept history older than a week"; fi
+  grep -q ' 1 alpha seven_day 20 0$' "$CACHE/pool.hist"
+}
+
+@test "an empty pool shows dry until capacity returns, not clear" {
+  # Nothing left to spend means nothing is measured as burned.
+  climb 1 alpha seven_day 100 $((NOW + 72000)) 0 24
+  climb 2 beta seven_day 100 $((NOW + 108000)) 0 24
+  pool_line 1 alpha five_hour 0 0
+  pool_line 1 alpha seven_day 100 $((NOW + 72000))
+  pool_line 2 beta five_hour 0 0
+  pool_line 2 beta seven_day 100 $((NOW + 108000))
+  [[ $(line2) == "5h dry │ wk dry until $(TZ=America/Toronto date -d "@$((NOW + 72000))" '+%a %H:%M') │ "* ]]
 }
