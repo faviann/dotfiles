@@ -24,11 +24,9 @@ climb() {
 # Current state. Args: id name window u reset
 pool_line() { printf '%s %s %s %s %s\n' "$@" >>"$CACHE/pool"; }
 
-line2() {
-  local out
-  out=$(bash "$REPO_ROOT/private_dot_claude/executable_statusline.sh" <<<'{}')
-  printf '%s\n' "$out" | sed -n 2p | sed 's/\x1b\[[0-9;]*m//g'
-}
+render() { bash "$REPO_ROOT/private_dot_claude/executable_statusline.sh" <<<'{}'; }
+line2() { render | sed -n 2p | sed 's/\x1b\[[0-9;]*m//g'; }
+line3() { render | sed -n 3p | sed 's/\x1b\[[0-9;]*m//g'; }
 
 # The wall lands on a 5-minute step of the script's own clock; accept 15 minutes either side.
 assert_wall_near() {
@@ -124,4 +122,26 @@ assert_wall_near() {
   pool_line 1 alpha seven_day 45 $((NOW + 259200))
   [[ $(line2) == "5h clear │ wk wall "* ]]
   assert_wall_near wk 198000
+}
+
+@test "capacity is compared with the same pool at zero, red from the wall on" {
+  # k = 48 five-hour pp / 6 weekly pp = 8. Weekly headroom 10 at 1 pp/h: wall
+  # in about 10h. The reset in 2 days restores a full week.
+  climb 1 alpha five_hour 48 $((NOW + 10800)) 8 6
+  climb 1 alpha seven_day 90 $((NOW + 172800)) 1 6
+  pool_line 1 alpha five_hour 50 $((NOW + 3600))
+  pool_line 1 alpha seven_day 90 $((NOW + 172800))
+  [[ $(line3) == "cap 1h 50% 2h 80% 4h 80% 8h 40% 1d 16% 2d 10% 4d 110% 7d 110%" ]]
+  local raw
+  raw=$(render | sed -n 3p)
+  [[ $raw == *$'8h\e[0m \e[32m40%'* ]]
+  [[ $raw == *$'1d\e[0m \e[31m16%'* ]]
+}
+
+@test "capacity waits until weekly usage relates the two limits" {
+  climb 1 alpha five_hour 20 $((NOW + 10800)) 0 1
+  climb 1 alpha seven_day 45 $((NOW + 259200)) 0 24
+  pool_line 1 alpha five_hour 20 $((NOW + 10800))
+  pool_line 1 alpha seven_day 45 $((NOW + 259200))
+  [[ $(line3) == "cap measuring" ]]
 }

@@ -142,6 +142,10 @@ fi
 # per window, "-" without enough history. Burn is the recent consumption of all
 # accounts together, in pp/s; supply is each account's headroom as chunks that
 # expire at their reset.
+# Then "cap <label> <seconds> <pct>" per horizon: what the pool could deliver
+# within it, spending flat out, against the same accounts with every counter
+# at zero; or "cap -" until weekly usage gives k, the five-hour budgets in a
+# weekly one, which both limits must be measured in to be combined.
 pool_wall() {
   awk -v now="$now" '
     BEGIN {
@@ -152,6 +156,18 @@ pool_wall() {
       }
     }
     function add(a, s, e) { n++; amt[n] = a; st[n] = s; ex[n] = e }
+    function min(a, b) { return a < b ? a : b }
+    # Weekly pp one account delivers by end: its five-hour windows back to
+    # back, those opening before the weekly reset capped by weekly headroom.
+    function deliver(u5, r5, uw, rw, end, k,    s, pre, post, tot) {
+      if (rw <= now) { uw = 0; rw = now + period["seven_day"] }
+      pre = post = 0; s = now
+      if (r5 > now) { pre = 100 - u5; s = r5 }
+      for (; s < end; s += period["five_hour"]) if (s < rw) pre += 100; else post += 100
+      tot = min(pre / k, 100 - uw); if (tot < 0) tot = 0
+      if (rw < end) tot += min(post / k, 100)
+      return tot
+    }
     FILENAME == ARGV[1] {
       t = $1; w = $4; u = $5; r = $6; k = $2 SUBSEP w
       if (!(w in first) || t < first[w]) first[w] = t
@@ -161,6 +177,7 @@ pool_wall() {
         d = r - pr[k]; if (d < 0) d = -d
         inc = (d <= 3600) ? (u > pu[k] ? u - pu[k] : 0) : u
         if (t >= now - look[w]) sum[w] += inc
+        if (t >= now - 86400) ksum[w] += inc
       }
       pu[k] = u; pr[k] = r
       next
@@ -168,6 +185,7 @@ pool_wall() {
     {
       m++; pid[m] = $1; pw[m] = $3; pused[m] = $4; preset[m] = $5
       if ($3 == "seven_day" && $5 > now && $4 >= 99) capped[$1] = 1
+      acct[$1] = 1; cu[$1, $3] = $4; cr[$1, $3] = $5
     }
     END {
       for (wi = 1; wi <= nw; wi++) {
@@ -204,6 +222,17 @@ pool_wall() {
         }
         print label[w], wall
       }
+      if (ksum["seven_day"] < 2 || ksum["five_hour"] <= 0) { print "cap -"; exit }
+      k = ksum["five_hour"] / ksum["seven_day"]
+      nh = split("1h 3600 2h 7200 4h 14400 8h 28800 1d 86400 2d 172800 4d 345600 7d 604800", hz, " ")
+      for (h = 1; h < nh; h += 2) {
+        got = zero = 0
+        for (a in acct) {
+          got += deliver(cu[a, "five_hour"], cr[a, "five_hour"], cu[a, "seven_day"], cr[a, "seven_day"], now + hz[h + 1], k)
+          zero += deliver(0, 0, 0, 0, now + hz[h + 1], k)
+        }
+        print "cap", hz[h], hz[h + 1], int(100 * got / zero + 0.5)
+      }
     }' "$pool_hist" "$pool_cache"
 }
 if [[ -s $pool_hist && -s $pool_cache ]]; then
@@ -212,7 +241,15 @@ if [[ -s $pool_hist && -s $pool_cache ]]; then
     pool_wall >"$pool_wall_cache.$$"
     mv -f "$pool_wall_cache.$$" "$pool_wall_cache"
   fi
-  while read -r label at; do
+  first_wall=""
+  while read -r label at span pct; do
+    if [[ $label == cap ]]; then
+      if [[ $at == - ]]; then line3="cap ${DIM}measuring${R}"; continue; fi
+      cell=$GRN
+      [[ -n $first_wall ]] && (( first_wall <= now + span )) && cell=$RED
+      line3="${line3:-cap} ${DIM}${at}${R} ${cell}${pct}%${R}"
+      continue
+    fi
     case $at in
       clear) seg="${GRN}clear${R}" ;;
       -) seg="${DIM}measuring${R}" ;;
@@ -220,7 +257,8 @@ if [[ -s $pool_hist && -s $pool_cache ]]; then
         wall_color=$GRN
         (( at - now <= 259200 )) && wall_color=$YEL
         (( at - now <= 86400 )) && wall_color=$RED
-        seg="${wall_color}wall $(TZ=America/Toronto date -d "@$at" '+%a %H:%M')${R}" ;;
+        seg="${wall_color}wall $(TZ=America/Toronto date -d "@$at" '+%a %H:%M')${R}"
+        if [[ -z $first_wall ]] || (( at < first_wall )); then first_wall=$at; fi ;;
     esac
     line2+="${SEP}${label} ${seg}"
   done <"$pool_wall_cache"
@@ -228,3 +266,4 @@ fi
 
 printf '%s\n' "$line1"
 [[ -n $line2 ]] && printf '%s\n' "${line2#"$SEP"}"
+[[ -n $line3 ]] && printf '%s\n' "$line3"
