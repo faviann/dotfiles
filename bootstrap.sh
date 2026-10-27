@@ -48,8 +48,8 @@ apt_done() {
   done
 }
 apt_run() {
-  sudo apt-get update || die 'apt-get update failed'
-  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${APT_PACKAGES[@]}" \
+  sudo apt-get -o DPkg::Lock::Timeout=600 update || die 'apt-get update failed'
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y "${APT_PACKAGES[@]}" \
     || die "cannot install ${APT_PACKAGES[*]} with apt-get"
 }
 

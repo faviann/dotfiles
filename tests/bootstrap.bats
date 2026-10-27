@@ -46,7 +46,7 @@ printf 'sudo %s\n' "$*" >>"$CALLS"
 "$@"
 STUB
   stub apt-get <<'STUB'
-[[ "$1" != install ]] || : >"$STATE/apt"
+[[ " $* " != *" install "* ]] || : >"$STATE/apt"
 STUB
   stub curl <<'STUB'
 url="${*: -1}"
@@ -367,8 +367,8 @@ EXPECTED
 
   [ "$status" -eq 0 ]
   diff -u - <(actions) <<'EXPECTED'
-sudo apt-get update
-sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl jq gh unzip
+sudo apt-get -o DPkg::Lock::Timeout=600 update
+sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y git curl jq gh unzip
 chezmoi apply
 chezmoi apply sees BW_SESSION=
 EXPECTED

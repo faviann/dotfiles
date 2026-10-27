@@ -2,6 +2,6 @@
 set -e
 
 if ! command -v fish &>/dev/null; then
-    sudo apt update
-    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y fish
+    sudo apt-get -o DPkg::Lock::Timeout=600 update
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y fish
 fi
