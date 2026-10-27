@@ -35,8 +35,13 @@ managed_for() {
 }
 
 apply_settings() {
+  settings_chezmoi "$1" "${2:-workstation}" apply --force
+}
+
+settings_chezmoi() {
   local home="$1"
-  local profile="${2:-workstation}"
+  local profile="$2"
+  shift 2
   local runtime_dir="$BATS_TEST_TMPDIR/runtime"
 
   mkdir -p "$home/.claude" "$runtime_dir"
@@ -52,7 +57,7 @@ apply_settings() {
     --config-format toml \
     --persistent-state "$runtime_dir/chezmoistate.boltdb" \
     --override-data "{\"profile\":\"$profile\"}" \
-    apply --force "$home/.claude/settings.json"
+    "$@" "$home/.claude/settings.json"
 }
 
 @test "test_settings_merge_keeps_other_keys_and_is_idempotent" {
@@ -106,6 +111,23 @@ JSON
 JSON
   ) <(jq -S . "$settings") \
     || fail 'merge did not keep other keys and set exactly the managed keys'
+}
+
+@test "test_settings_another_writer_reordered_verify_and_stay_as_written" {
+  local home="$BATS_TEST_TMPDIR/home"
+  local settings="$home/.claude/settings.json"
+  local written="$BATS_TEST_TMPDIR/written.json"
+
+  apply_settings "$home" || fail 'first apply failed'
+  jq '{enabledPlugins: {"pstack@pstack-claude": true}} + (to_entries | reverse | from_entries)' \
+    "$settings" >"$written"
+  cp "$written" "$settings"
+
+  settings_chezmoi "$home" workstation verify \
+    || fail 'chezmoi verify failed after another writer reordered settings.json'
+  apply_settings "$home" || fail 'second apply failed'
+  cmp -s "$written" "$settings" \
+    || fail 'apply rewrote settings.json that already held every managed value'
 }
 
 @test "test_missing_settings_gets_only_the_managed_keys" {

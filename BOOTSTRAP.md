@@ -222,7 +222,10 @@ Bitwarden item.
   `gateway.ai.faviann.com`, which is separate from the gateway Claude Code uses.
 
 Create both items before the first apply. Chezmoi sets only its own keys in
-`~/.claude/settings.json` and leaves the rest of the file to Claude Code.
+`~/.claude/settings.json` and leaves the rest of the file to Claude Code. When
+the file already holds those values, apply leaves it as written. Claude Code
+and Herdr write the file in their own key order, so their edits do not make
+`chezmoi verify` fail.
 
 ## Bitwarden artifact-server API Key Item
 
