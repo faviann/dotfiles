@@ -12,10 +12,11 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
 | `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, the pi configuration, and the Collie client CA | All nine items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, and `dotfiles/github-cli-token` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, `update-agent-tools`, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, `update-agent-tools`, fish, the `desktop` Home Manager profile, and the homelab WireGuard tunnel | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` |
 
 Apply fails until every Bitwarden item in the profile's row exists, except
-`dotfiles/github-cli-token`, whose `gh` login only warns. Create them before the
+`dotfiles/github-cli-token`, whose `gh` login only warns, and the optional
+[WireGuard item](#bitwarden-wireguard-item). Create them before the
 first apply. On an existing machine, create a new item before
 the `chezmoi update` or `workstation-update` that starts to read it.
 
@@ -193,6 +194,9 @@ credentials, so both repositories must stay public. Once
 `~/repos/homelab-iac` exists, apply never touches it, so update it yourself.
 If the homelab-iac clone fails, apply prints a warning and the next apply
 retries it.
+
+On a desktop with a [WireGuard item](#bitwarden-wireguard-item), apply also
+imports the homelab tunnel into NetworkManager.
 
 Apply also logs `gh` in with the [GitHub token](#github-token). On a new
 workstation, `gh` is not installed during the first apply, so
@@ -393,6 +397,61 @@ To rotate the CA, follow "Rotate the CA" in homelab-iac's
 its `certificate` field, and run `bw sync` before the next
 `workstation-update`. Otherwise that apply restores the old CA without asking,
 and the new key is lost.
+
+## Bitwarden WireGuard Item
+
+A desktop reaches the homelab through the Firewalla's WireGuard server. Each
+machine has its own Firewalla WireGuard profile, in one Bitwarden secure note
+named after the machine's hostname:
+
+```text
+dotfiles/wireguard/<hostname>
+```
+
+The item must contain:
+
+- Notes: the whole profile as the Firewalla app exports it, with one
+  `[Interface]` section and one `[Peer]` section
+
+The item is optional. Create it only for a desktop that needs the tunnel, such
+as a laptop. Without it, apply prints a notice and continues, and the machine
+gets no tunnel. The workstation never reads the item. Deleting the item does
+not remove a connection that apply already imported. To remove it, run
+`sudo nmcli connection delete wg-homelab`.
+
+Apply imports the profile into NetworkManager as the `wg-homelab` connection.
+NetworkManager starts the connection at boot and on every network. Before the
+import, apply changes the profile in two ways, so the homelab is reachable
+whatever the profile routes:
+
+- It adds `10.1.0.0/18` and `10.0.0.2` to the peer's `AllowedIPs`.
+  NetworkManager routes each range through the tunnel. Other traffic follows
+  the profile: the Firewalla's default `AllowedIPs = 0.0.0.0/0` sends all
+  traffic through the tunnel.
+- It replaces the profile's `DNS` with `10.1.0.1`, for `faviann.vms` and
+  `proxmox.lan` names only. With systemd-resolved, as on stock Ubuntu, other
+  names use the DNS server of the network that the machine is on.
+
+The import needs root, so apply runs `sudo nmcli`, and `sudo` can ask for your
+password. Apply gives the profile to NetworkManager in a file that only you can
+read, and deletes the file after the import. NetworkManager keeps the private
+key in a root-only file.
+
+Apply imports the profile again only when the item changes or the connection
+is missing. It replaces the old connection with the new one. If the Notes do
+not hold one `[Interface]` and one `[Peer]` section, apply fails and keeps the
+old connection. If NetworkManager rejects the new profile, apply fails after
+it removes the old connection. Fix the item and run `chezmoi apply` again.
+
+To rotate the key, create a new profile for the machine on the Firewalla, put
+it in the item's Notes, and run `bw sync` and `chezmoi apply`.
+
+To check the connection and the DNS routing, run:
+
+```bash
+nmcli -f connection.autoconnect,ipv4.dns,ipv4.dns-search connection show wg-homelab
+resolvectl status wg-homelab
+```
 
 ## GitHub Registration
 
