@@ -1,6 +1,8 @@
 # Bootstrap - New Machine Setup
 
-Run these steps in order on a new workstation or desktop.
+A desktop needs one command and your Bitwarden sign-in. The `workstation` LXC
+has its own path: homelab-iac provisions it, and you finish it with
+`workstation-setup`.
 
 ## Machine Profiles
 
@@ -26,8 +28,8 @@ installs the artifact-server publishing toolchain: the `artifactserver` CLI,
 Node.js, Chromium, and the DejaVu fonts. The profile also runs the Herdr user
 service, and its switch hands off to `update-agent-tools` to install the
 [agent toolchain](docs/workstation/toolchain.md#agent-toolchain) without pi.
-Apply installs the profile, as in [step 3](#3-bootstrap-over-https); see the
-[desktop toolchain](docs/desktop-toolchain.md).
+Apply installs the profile, as in [what apply sets up](#what-apply-sets-up);
+see the [desktop toolchain](docs/desktop-toolchain.md).
 
 Each secret has one Bitwarden item, and apply renders every copy from it. To
 rotate a secret, change its item and run `bw sync`. Then run
@@ -35,50 +37,132 @@ rotate a secret, change its item and run `bw sync`. Then run
 a desktop. The SSH key and the GitHub token have their own procedures, linked
 from their sections.
 
-## 1. Install chezmoi and Bitwarden CLI
+## Desktop
+
+On a stock Ubuntu 24.04 desktop or laptop, run this as your own user:
 
 ```bash
-sh -c "$(curl -fsLS get.chezmoi.io)" -- -b ~/.local/bin
-sudo snap install bw
+bash <(wget -qO- https://raw.githubusercontent.com/faviann/dotfiles/main/bootstrap.sh)
 ```
 
-On a desktop, also install the tools the dotfiles call:
+The command uses `wget` because a stock Ubuntu desktop has no `curl`. Do not
+pipe the script into `bash`. `sudo` and Bitwarden prompt on the terminal, so
+standard input must stay the terminal.
+
+[`bootstrap.sh`](bootstrap.sh) runs these steps in order:
+
+1. Install `git`, `curl`, `jq`, `gh`, and `unzip` with `apt-get`.
+2. Install chezmoi in `~/.local/bin`, unless `chezmoi` is already on `PATH`.
+3. Install the Bitwarden CLI in `~/.local/bin`, unless `bw` is already on
+   `PATH`. The script uses Bitwarden's release binary, not the snap, so it also
+   works in a container or in WSL.
+4. Sign in to Bitwarden and unlock the vault. Apart from the `sudo` password,
+   this is the one step that needs you: `bw` asks for your email, master
+   password, and two-step login code.
+   The session stays in the script's environment and ends with it.
+5. Install Determinate Nix and load it into the script's environment, so apply
+   finds `nix` without a new shell. On a machine without systemd, the script
+   installs Nix without an init system and starts the Nix daemon itself.
+6. Run `chezmoi init` for this repository, then `chezmoi apply`.
+
+The script pins chezmoi, the Bitwarden CLI, and the Determinate Nix installer,
+and checks each download against its SHA-256 sum. It stops with an error on the
+`workstation` host, on a CPU other than x86_64, and when you run it as root.
+
+Create the profile's [Bitwarden items](#machine-profiles) before you run the
+command. If a step fails, fix the cause and run the same command again. It
+skips each step that is already done. Apply runs on every run, and it changes
+only what differs. After a container restart, run the command again to restart
+the Nix daemon.
+
+When the script finishes, it prints the remaining manual steps:
+
+- Open a new terminal, so that your shell finds Nix and `~/.local/bin`.
+- Run `codex login` to sign in to Codex on this machine.
+
+To bootstrap from a branch, set `DOTFILES_REF` to the branch name and fetch the
+script from the same branch:
 
 ```bash
-sudo apt install git curl jq gh unzip
+DOTFILES_REF=<branch> bash <(wget -qO- https://raw.githubusercontent.com/faviann/dotfiles/<branch>/bootstrap.sh)
 ```
 
-A desktop also needs Nix for its Home Manager profile. Install Determinate Nix,
-then open a new shell so `nix` is on `PATH`:
+If the branch does not exist, the command prints nothing and exits without an
+error, because `wget -qO-` hides the 404. Check the branch name.
+
+`DOTFILES_REF` applies only to the first `chezmoi init`. When the chezmoi
+source already exists, the script applies that checkout as it is. The script
+stops when the existing source is not a complete clone of this repository, for
+example another repository or a clone that was interrupted. Move the directory
+aside, then run the command again.
+
+## Workstation
+
+The Ansible-managed `workstation` LXC comes with Determinate Nix and a
+`workstation-setup` helper. `bootstrap.sh` refuses to run there. Run these
+steps in order:
+
+1. Install chezmoi and the Bitwarden CLI:
+
+   ```bash
+   sh -c "$(curl -fsLS get.chezmoi.io)" -- -b ~/.local/bin
+   sudo snap install bw
+   ```
+
+2. Unlock Bitwarden. Keep the session token in your shell only, and do not
+   paste or commit secrets:
+
+   ```bash
+   bw login                                  # first time only
+   export BW_SESSION=$(bw unlock --raw)
+   ```
+
+3. Initialize and apply the dotfiles. The first checkout uses HTTPS, so the
+   machine does not need an SSH key before chezmoi renders one from Bitwarden.
+   Run apply as a separate command. Chezmoi reads its write mode at startup,
+   before `init` generates the configuration, and the workstation needs the
+   [in-place writes](docs/workstation/maintenance.md#in-place-writes) that the
+   configuration sets:
+
+   ```bash
+   chezmoi init https://github.com/faviann/dotfiles.git
+   chezmoi apply
+   ```
+
+4. Run the `workstation-setup` helper with Bitwarden still unlocked:
+
+   ```bash
+   workstation-setup
+   ```
+
+   It runs `chezmoi init/update`, applies the `#workstation` Home Manager
+   flake, authenticates GitHub CLI from the `dotfiles/github-cli-token`
+   Bitwarden item, and validates the expected tools. Home Manager installs the
+   base tools, loads the user units, and hands off to `update-agent-tools` if
+   any managed agent command is missing. This installs the
+   [complete agent toolchain](docs/workstation/toolchain.md) without another
+   package-discovery or Ansible step.
+
+The bootstrap handoff is part of `workstation-setup`, not SSH login or a
+background schedule.
+
+Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
+has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
+before enabling the bind mount. For Collie's service-regeneration prerequisites
+and retry command, see [recovery after an LXC rebuild](docs/runbooks/collie.md#recovery-after-an-lxc-rebuild).
+
+Setup does not log in Azure CLI. There is no service principal, so agents act as
+your own account. Log in once; the session in `~/.azure` persists until it goes
+unused for about 90 days:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
-  | sh -s -- install
+az login --use-device-code --tenant <tenant-id-or-domain>
 ```
 
-## 2. Unlock Bitwarden
+Pass `--tenant`: the device-login page's "Sign in to an organization" option
+404s on `/common/oauth2/undefined`.
 
-```bash
-bw login                                  # first time only
-export BW_SESSION=$(bw unlock --raw)
-```
-
-Do not paste or commit secrets. Keep the session token in your shell only.
-
-## 3. Bootstrap over HTTPS
-
-The first checkout uses HTTPS so a new machine does not need an SSH key before
-chezmoi can render one from Bitwarden.
-
-```bash
-chezmoi init https://github.com/faviann/dotfiles.git
-chezmoi apply
-```
-
-Run apply as a separate command. Chezmoi reads its write mode at startup,
-before `init` generates the configuration, and the workstation needs the
-[in-place writes](docs/workstation/maintenance.md#in-place-writes) that the
-configuration sets.
+## What apply sets up
 
 After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
 `~/.ssh/known_hosts`, the
@@ -98,9 +182,10 @@ chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
 On a desktop, the last apply script switches the `#desktop` Home Manager
 profile from the chezmoi source. The first switch downloads Chromium and takes
 several minutes. A failed switch fails apply after the other scripts have run.
-Without `nix` on `PATH`, the error names step 1. Fix the cause and rerun
-`chezmoi apply` to retry the switch. After a successful switch, apply reruns it
-only when `flake.lock`, `flake.nix`, `home/`, or `packages/` change.
+Without `nix` on `PATH`, the error names the bootstrap command. Fix the cause
+and rerun the bootstrap command, or `chezmoi apply`, to retry the switch. After
+a successful switch, apply reruns it only when `flake.lock`, `flake.nix`,
+`home/`, or `packages/` change.
 
 Apply also clones `faviann/skillset` for the agent skills and
 `faviann/homelab-iac` into `~/repos/homelab-iac`. Both clones use HTTPS without
@@ -112,27 +197,7 @@ retries it.
 Apply also logs `gh` in with the [GitHub token](#github-token). On a new
 workstation, `gh` is not installed during the first apply, so
 `workstation-setup` logs it in during
-[step 4](#4-apply-home-manager-on-the-workstation-lxc).
-
-## 4. Apply Home Manager on the Workstation LXC
-
-The Ansible-managed `workstation` LXC installs Determinate Nix and a
-`workstation-setup` helper. Run that helper after Bitwarden is unlocked:
-
-```bash
-workstation-setup
-```
-
-It runs `chezmoi init/update`, applies the `#workstation` Home Manager flake,
-authenticates GitHub CLI from the `dotfiles/github-cli-token` Bitwarden item,
-and validates the expected tools. Home Manager installs the base tools, loads
-the user units, and hands off to `update-agent-tools` if any managed agent
-command is missing. This installs the
-[complete agent toolchain](docs/workstation/toolchain.md) without another
-package-discovery or Ansible step.
-
-The bootstrap handoff is part of `workstation-setup`, not SSH login or a
-background schedule.
+[step 4](#workstation).
 
 Chezmoi also recovers agent skills on every profile. If `~/repos/skillset`
 is absent, it clones `faviann/skillset` and initializes its pinned submodule
@@ -143,22 +208,6 @@ the hook passes `--profile workstation`, which makes the reconciler record
 `workstation` there; skillset defines only that profile, so desktops use it
 too. Skill reconciliation runs during `chezmoi apply`, never during shell
 login.
-
-Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
-has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
-before enabling the bind mount. For Collie's service-regeneration prerequisites
-and retry command, see [recovery after an LXC rebuild](docs/runbooks/collie.md#recovery-after-an-lxc-rebuild).
-
-Setup does not log in Azure CLI. There is no service principal, so agents act as
-your own account. Log in once; the session in `~/.azure` persists until it goes
-unused for about 90 days:
-
-```bash
-az login --use-device-code --tenant <tenant-id-or-domain>
-```
-
-Pass `--tenant`: the device-login page's "Sign in to an organization" option
-404s on `/common/oauth2/undefined`.
 
 ## Bitwarden SSH Key Item
 
@@ -222,7 +271,10 @@ Bitwarden item.
   `gateway.ai.faviann.com`, which is separate from the gateway Claude Code uses.
 
 Create both items before the first apply. Chezmoi sets only its own keys in
-`~/.claude/settings.json` and leaves the rest of the file to Claude Code.
+`~/.claude/settings.json` and leaves the rest of the file to Claude Code. When
+the file already holds those values, apply leaves it as written. Claude Code
+and Herdr write the file in their own key order, so their edits do not make
+`chezmoi verify` fail.
 
 ## Bitwarden artifact-server API Key Item
 
@@ -431,9 +483,8 @@ workstation. See the canonical
 [workstation maintenance guidance](docs/workstation/maintenance.md) for source
 guards, Bitwarden sessions, and failure recovery. Desktops use
 `chezmoi update`, and `update-agent-tools` for the agent toolchain. A desktop
-set up before the `desktop` Home Manager profile existed needs Nix, as in
-[step 1](#1-install-chezmoi-and-bitwarden-cli), before its next
-`chezmoi update`.
+set up before the `desktop` Home Manager profile existed needs Nix before its
+next `chezmoi update`. Run the [bootstrap command](#desktop) once to install it.
 
 ## Clone ServerManagementScripts
 

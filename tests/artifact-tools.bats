@@ -160,7 +160,7 @@ STUB
   output="$(PATH="$empty" "$(command -v bash)" "$script" 2>&1)" || status=$?
 
   [[ "$status" -eq 1 ]] || fail "expected exit status 1, got $status"
-  [[ "$output" == *'Install Determinate Nix as in step 1 of BOOTSTRAP.md'* ]] \
+  [[ "$output" == *'Rerun the bootstrap command in BOOTSTRAP.md'* ]] \
     || fail "message does not name the Nix install step: $output"
 }
 

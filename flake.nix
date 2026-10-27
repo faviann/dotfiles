@@ -220,6 +220,7 @@
         fileset = nixpkgs.lib.fileset.unions [
           ./.chezmoidata
           ./.chezmoiscripts
+          ./bootstrap.sh
           ./dot_claude/executable_statusline.sh
           ./dot_claude/hooks/executable_track-session-prs.sh
           ./dot_bash_profile.tmpl
