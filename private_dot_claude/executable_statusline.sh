@@ -111,6 +111,7 @@ line2=""
 pool_key="$HOME/.config/claude/gateway-admin-key"
 pool_cache="$cache_dir/pool"
 pool_hist="$cache_dir/pool.hist"
+pool_wall_cache="$cache_dir/pool.wall"
 sess_cache="$cache_dir/sessions"
 admin=https://gateway.ai.faviann.com/api/v1/admin
 hdr() { printf 'x-api-key: %s\n' "$(tr -d '[:space:]' <"$pool_key")"; }
@@ -124,13 +125,16 @@ pool_refresh() {
       jq -r --arg id "$id" --arg n "$name" '.data as $d | ("five_hour", "seven_day") | "\($id) \($n) \(.) \($d[.].utilization // 0) \($d[.].resets_at // "")"'
   done | while read -r id name w u r; do echo "$id $name $w $u $([[ -n $r ]] && date -d "$r" +%s || echo 0)"; done
 }
+# History is sampled every 5 minutes: every status line render reads all of it.
 pool_record() {
-  local obs
+  local obs last
   obs=$(date +%s)
   printf '%s\n' "$1" >"$pool_cache"
+  last=$(tail -n 1 "$pool_hist" 2>/dev/null | cut -d' ' -f1)
+  (( obs - ${last:-0} >= 300 )) || return 0
   { cat "$pool_hist" 2>/dev/null; printf '%s\n' "$1" | sed "s/^/$obs /"; } |
-    awk -v cut=$(( obs - 90000 )) '$1 >= cut' >"$pool_hist.tmp"
-  mv -f "$pool_hist.tmp" "$pool_hist"
+    awk -v cut=$(( obs - 90000 )) '$1 >= cut' >"$pool_hist.$$"
+  mv -f "$pool_hist.$$" "$pool_hist"
 }
 # Newest entries win; sessions absent from this page keep their last account.
 sess_refresh() {
@@ -221,7 +225,12 @@ pool_wall() {
 }
 pool_seg=""
 if [[ -s $pool_hist && -s $pool_cache ]]; then
-  read -r wall_label wall_at <<<"$(pool_wall)"
+  # Recomputed only when history changes; parsing it costs more than a render.
+  if [[ ! $pool_wall_cache -nt $pool_hist ]]; then
+    pool_wall >"$pool_wall_cache.$$"
+    mv -f "$pool_wall_cache.$$" "$pool_wall_cache"
+  fi
+  read -r wall_label wall_at <"$pool_wall_cache"
   if [[ $wall_label == clear ]]; then
     pool_seg="${GRN}pool clear${R}"
   elif [[ -n $wall_at ]]; then

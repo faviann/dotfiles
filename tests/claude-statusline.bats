@@ -97,3 +97,13 @@ assert_wall_near() {
   pool_line 2 beta seven_day 60 $((NOW + 7200))
   assert_wall_near wk 125100
 }
+
+@test "the wall follows history that changes after it was shown" {
+  climb 1 alpha seven_day 45 $((NOW + 259200)) 0 24
+  pool_line 1 alpha seven_day 45 $((NOW + 259200))
+  [[ $(line2) == "pool clear"* ]]
+  : >"$CACHE/pool.hist"
+  climb 1 alpha seven_day 45 $((NOW + 259200)) 1 24
+  touch -d "@$((NOW + 60))" "$CACHE/pool.hist"
+  assert_wall_near wk 198000
+}
