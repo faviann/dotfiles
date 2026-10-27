@@ -221,8 +221,8 @@
           ./.chezmoidata
           ./.chezmoiscripts
           ./bootstrap.sh
-          ./dot_claude/executable_statusline.sh
-          ./dot_claude/hooks/executable_track-session-prs.sh
+          ./private_dot_claude/executable_statusline.sh
+          ./private_dot_claude/hooks/executable_track-session-prs.sh
           ./dot_bash_profile.tmpl
           ./dot_bashrc.tmpl
           ./dot_local/bin/executable_artifact-server-mcp-headers
