@@ -87,8 +87,14 @@ script from the same branch:
 DOTFILES_REF=<branch> bash <(wget -qO- https://raw.githubusercontent.com/faviann/dotfiles/<branch>/bootstrap.sh)
 ```
 
+If the branch does not exist, the command prints nothing and exits without an
+error, because `wget -qO-` hides the 404. Check the branch name.
+
 `DOTFILES_REF` applies only to the first `chezmoi init`. When the chezmoi
-source already exists, the script applies that checkout as it is.
+source already exists, the script applies that checkout as it is. The script
+stops when the existing source is not a complete clone of this repository, for
+example another repository or a clone that was interrupted. Move the directory
+aside, then run the command again.
 
 ## Workstation
 
