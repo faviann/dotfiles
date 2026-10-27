@@ -17,6 +17,8 @@ in
   config = {
     agentTools.commands = [ "bun" "codex" "claude" "opencode" ];
 
+    home.packages = [ pkgs.uv ];
+
     # installPackages creates the profile the updater takes npm from. Before it,
     # ~/.nix-profile is a dangling symlink and the handoff fails.
     home.activation.bootstrapAgentTools =

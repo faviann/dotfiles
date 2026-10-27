@@ -1,0 +1,16 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- $key := (bitwarden "item" "dotfiles/opencode-api-key").notes | default "" | trim -}}
+{{- if not (regexMatch "^[[:graph:]]+$" $key) -}}
+{{-   fail "Bitwarden item dotfiles/opencode-api-key must hold one API key, on one line, in its Notes" -}}
+{{- end -}}
+{{- $auth := dict -}}
+{{- if trim .chezmoi.stdin -}}
+{{-   $auth = fromJson .chezmoi.stdin -}}
+{{- end -}}
+{{- $entry := dict "type" "api" "key" $key -}}
+{{- /* OpenCode writes its own key order and no final newline, so leave a current file untouched. */ -}}
+{{- if eq (toJson (get $auth "opencode")) (toJson $entry) -}}
+{{-   .chezmoi.stdin -}}
+{{- else -}}
+{{-   toPrettyJson "  " (set $auth "opencode" $entry) -}}
+{{- end -}}

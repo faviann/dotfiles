@@ -9,10 +9,18 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
-| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and the pi configuration | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, `update-agent-tools`, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
+| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, the pi configuration, and the Collie client CA | All nine items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, and `dotfiles/github-cli-token` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, `update-agent-tools`, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token` |
 
-The workstation also gets the Ansible controller key and vault password.
+Apply fails until every Bitwarden item in the profile's row exists, except
+`dotfiles/github-cli-token`, whose `gh` login only warns. Create them before the
+first apply. On an existing machine, create a new item before
+the `chezmoi update` or `workstation-update` that starts to read it.
+
+Every profile is a homelab-iac controller. It gets the Ansible controller key
+pair and vault passphrase, `uv`, and a homelab-iac clone. The workstation also
+gets the Collie client CA.
+
 Desktops get agent configuration and the `desktop` Home Manager profile, which
 installs the artifact-server publishing toolchain: the `artifactserver` CLI,
 Node.js, Chromium, and the DejaVu fonts. The profile also runs the Herdr user
@@ -20,6 +28,12 @@ service, and its switch hands off to `update-agent-tools` to install the
 [agent toolchain](docs/workstation/toolchain.md#agent-toolchain) without pi.
 Apply installs the profile, as in [step 3](#3-bootstrap-over-https); see the
 [desktop toolchain](docs/desktop-toolchain.md).
+
+Each secret has one Bitwarden item, and apply renders every copy from it. To
+rotate a secret, change its item and run `bw sync`. Then run
+`workstation-update --refresh-secrets` on the workstation or `chezmoi apply` on
+a desktop. The SSH key and the GitHub token have their own procedures, linked
+from their sections.
 
 ## 1. Install chezmoi and Bitwarden CLI
 
@@ -69,10 +83,15 @@ configuration sets.
 After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
 `~/.ssh/known_hosts`, the
 [Claude Code gateway](#bitwarden-claude-code-gateway-items) credentials in
-`~/.config/claude/`, and the
-[artifact-server API key](#bitwarden-artifact-server-api-key-item); the
-workstation also gets the Ansible controller key pair
-in `~/.ansible/ssh/`. Dotfiles pins GitHub's published Ed25519 SSH host key; it
+`~/.config/claude/`, the
+[artifact-server API key](#bitwarden-artifact-server-api-key-item), the
+[OpenCode API key](#bitwarden-opencode-api-key-item), the
+[Ansible controller key pair](#bitwarden-ansible-controller-key-item) in
+`~/.ansible/ssh/`, and the
+[vault passphrase](#bitwarden-ansible-vault-passphrase-item) in
+`~/.ansible/vault-pass`. The workstation also gets the
+[Collie client CA](#bitwarden-collie-client-ca-item) in `~/.ansible/collie-ca/`.
+Dotfiles pins GitHub's published Ed25519 SSH host key; it
 does not scan the network during apply. A run-after script then switches the
 chezmoi source repo origin to `git@github.com:faviann/dotfiles.git`.
 
@@ -83,15 +102,17 @@ Without `nix` on `PATH`, the error names step 1. Fix the cause and rerun
 `chezmoi apply` to retry the switch. After a successful switch, apply reruns it
 only when `flake.lock`, `flake.nix`, `home/`, or `packages/` change.
 
-Apply also clones `faviann/skillset` over HTTPS, without credentials, for the
-agent skills, so that repository must stay public.
+Apply also clones `faviann/skillset` for the agent skills and
+`faviann/homelab-iac` into `~/repos/homelab-iac`. Both clones use HTTPS without
+credentials, so both repositories must stay public. Once
+`~/repos/homelab-iac` exists, apply never touches it, so update it yourself.
+If the homelab-iac clone fails, apply prints a warning and the next apply
+retries it.
 
-On a desktop, log `gh` in once with the `main` token:
-
-```bash
-bw get notes dotfiles/github-cli-token \
-  | gh auth login --hostname github.com --with-token
-```
+Apply also logs `gh` in with the [GitHub token](#github-token). On a new
+workstation, `gh` is not installed during the first apply, so
+`workstation-setup` logs it in during
+[step 4](#4-apply-home-manager-on-the-workstation-lxc).
 
 ## 4. Apply Home Manager on the Workstation LXC
 
@@ -175,6 +196,15 @@ The item must contain:
 Check the rendered pair the same way as the workstation key, with
 `~/.ansible/ssh/proxmox_lxc` in place of `~/.ssh/id_ed25519`.
 
+## Bitwarden Ansible Vault Passphrase Item
+
+homelab-iac decrypts its Ansible vault with `~/.ansible/vault-pass`. Chezmoi
+renders the file from the Notes of one Bitwarden item:
+
+```text
+dotfiles/ansible-vault-pass
+```
+
 ## Bitwarden Claude Code Gateway Items
 
 Claude Code on every machine uses the JES AI gateway at
@@ -248,6 +278,70 @@ with Bitwarden unlocked, run `bw sync` so the CLI sees the edit, and run
 a desktop. The harnesses need no other change. Apply fails unless the Notes
 hold one key of printable ASCII characters on one line.
 
+## Bitwarden OpenCode API Key Item
+
+OpenCode authenticates to its `opencode` provider with an API key. On the
+workstation and desktops, chezmoi renders the key from the Notes of one
+Bitwarden item:
+
+```text
+dotfiles/opencode-api-key
+```
+
+Apply sets the `opencode` entry of `~/.local/share/opencode/auth.json` to the
+key and keeps every other entry, such as the logins OpenCode stores for other
+providers. A key that `opencode auth login` stores for the `opencode` provider
+is replaced on the next apply. Apply fails unless the Notes hold one key of
+printable ASCII characters on one line.
+
+To rotate the key, put the new key in the item's Notes. Then, on each machine
+with Bitwarden unlocked, run `bw sync`, and run
+`workstation-update --refresh-secrets` on the workstation or `chezmoi apply` on
+a desktop.
+
+## Bitwarden Collie Client CA Item
+
+Traefik lets the phone reach `collie-mobile.admin.faviann.com` only with a
+client certificate that the Collie client CA signed. On the workstation,
+chezmoi renders the CA from one Bitwarden item, so the CA survives an LXC
+rebuild:
+
+```text
+dotfiles/collie-ca
+```
+
+The item must contain:
+
+- Notes: the PEM private key for `~/.ansible/collie-ca/ca.key`
+- Custom field `certificate`: the PEM certificate for
+  `~/.ansible/collie-ca/ca.crt`, with or without its line breaks. Bitwarden's
+  apps drop line breaks from custom fields, and apply restores them.
+
+Apply sets the directory to mode `700` and both files to mode `600`. Apply
+fails unless the Notes hold a PEM private key with its line breaks and the
+field holds a PEM certificate, so a malformed item cannot replace the only copy
+of the CA. Chezmoi does not manage `ca.srl` or the
+`phone.*` files. To regenerate them, follow "Reissue the phone certificate" in
+homelab-iac's `stacks/portal/traefik3/README.md`.
+
+After you create the item, and before the first apply that renders it, check
+the item against the files on the workstation:
+
+```bash
+chezmoi verify ~/.ansible/collie-ca
+```
+
+Exit status 0 means the item matches the files. The command prints no file
+contents. Do not use `chezmoi diff` for this check: it does not descend into
+the directory, so it prints nothing even when the item differs.
+
+To rotate the CA, follow "Rotate the CA" in homelab-iac's
+`stacks/portal/traefik3/README.md`. It writes a new `ca.key` and `ca.crt` in
+`~/.ansible/collie-ca/`. Put the key in the item's Notes and the certificate in
+its `certificate` field, and run `bw sync` before the next
+`workstation-update`. Otherwise that apply restores the old CA without asking,
+and the new key is lost.
+
 ## GitHub Registration
 
 Register the same public key in GitHub twice:
@@ -284,8 +378,11 @@ GitHub should identify the account and report that shell access is not provided.
 On the workstation and desktops, HTTPS git and `gh` use one classic personal
 access token. Its Bitwarden item is `dotfiles/github-cli-token`, with the token
 in Notes, and its live copy is `gh`'s own login. Git reaches it through
-`gh auth git-credential`. `workstation-setup` logs `gh` in with it; on a
-desktop you log in once by hand, as in [step 3](#3-bootstrap-over-https).
+`gh auth git-credential`. On every profile, `chezmoi apply` logs `gh` in with
+the token when Bitwarden is unlocked and `gh` does not already hold it. A
+failed login prints a warning and does not fail the apply. On a new
+workstation, `gh` is not installed during the first apply, so the login in
+`workstation-setup` covers bootstrap.
 
 Create the token with an expiration date and these scopes:
 
@@ -317,6 +414,11 @@ terminal. It needs an unlocked Bitwarden session. It checks the token with
 GitHub, refuses a token without an expiration date, writes the token to the
 item's Notes, syncs Bitwarden, and logs `gh` in with it. An invalid token
 leaves Bitwarden unchanged.
+
+The other machines log in with the new token on their next apply with
+Bitwarden unlocked. On each one, run `bw sync`, then run
+`workstation-update --refresh-secrets` on the workstation or `chezmoi apply` on
+a desktop.
 
 At the end of every run, `workstation-update` runs
 `github-token check-expiry`. This prints a warning when the token expires

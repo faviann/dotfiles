@@ -12,6 +12,8 @@ profile, so both machines get the same pins.
 - `artifactserver`, the artifact-server CLI, pinned to the release tarball in
   [`packages/artifact-server.nix`](../packages/artifact-server.nix).
 - Node.js, which the render check runs on.
+- `uv`, which homelab-iac runs Ansible with. Every profile is a homelab-iac
+  controller, so `home/agent-tools.nix` installs `uv` on both profiles.
 - Chromium and DejaVu fonts, with `fonts.fontconfig.enable`, so a headless
   screenshot shows readable text.
 - The fontconfig tools, such as `fc-list` and `fc-match`, to check which fonts

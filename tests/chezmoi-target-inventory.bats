@@ -13,15 +13,19 @@ readonly INVENTORY='
 .agents/AGENTS.md                               workstation desktop
 .agents/artifact-server/api-key                 workstation desktop
 .agents/forks.md                                workstation desktop
-.ansible/ssh/proxmox_lxc                        workstation
-.ansible/ssh/proxmox_lxc.pub                    workstation
-.ansible/vault-pass                             workstation
+.ansible/collie-ca/ca.crt                       workstation
+.ansible/collie-ca/ca.key                       workstation
+.ansible/ssh/proxmox_lxc                        workstation desktop
+.ansible/ssh/proxmox_lxc.pub                    workstation desktop
+.ansible/vault-pass                             workstation desktop
 .bash_profile                                   workstation desktop
 .bashrc                                         workstation desktop
+.chezmoiscripts/clone-homelab-iac.sh            workstation desktop
 .chezmoiscripts/github-known-hosts.sh           workstation desktop
 .chezmoiscripts/install-herdr-integrations.sh   workstation desktop
 .chezmoiscripts/install-herdr.sh                workstation desktop
 .chezmoiscripts/install-packages.sh             desktop
+.chezmoiscripts/login-github-cli.sh             workstation desktop
 .chezmoiscripts/reconcile-agent-skills.sh       workstation desktop
 .chezmoiscripts/register-claude-mcp-server.sh   workstation desktop
 .chezmoiscripts/switch-chezmoi-origin-to-ssh.sh workstation desktop
@@ -46,6 +50,7 @@ readonly INVENTORY='
 .local/bin/github-token                         workstation desktop
 .local/bin/update-agent-tools                   workstation desktop
 .local/bin/workstation-update                   workstation
+.local/share/opencode/auth.json                 workstation desktop
 .npmrc                                          workstation desktop
 .pi/agent/AGENTS.md                             workstation
 .pi/agent/mcp.json                              workstation
