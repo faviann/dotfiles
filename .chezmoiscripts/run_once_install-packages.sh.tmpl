@@ -2,6 +2,10 @@
 set -e
 
 if ! command -v fish &>/dev/null; then
-    sudo apt update
-    sudo apt install -y fish
+    for attempt in $(seq 60); do
+        sudo apt-get update && break
+        [ "$attempt" -lt 60 ] || exit 1
+        sleep 10
+    done
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y fish
 fi

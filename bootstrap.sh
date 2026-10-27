@@ -47,9 +47,20 @@ apt_done() {
     [[ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null)" == installed ]] || return 1
   done
 }
+# DPkg::Lock::Timeout does not cover the lists lock that apt-get update takes,
+# and the daily apt job holds it on a freshly installed desktop.
+apt_update() {
+  local attempt
+  for attempt in $(seq 60); do
+    sudo apt-get update && return 0
+    ((attempt < 60)) || return 1
+    say "apt-get update failed; retrying in 10 seconds ($attempt of 60)"
+    sleep 10
+  done
+}
 apt_run() {
-  sudo apt-get update || die 'apt-get update failed'
-  sudo apt-get install -y "${APT_PACKAGES[@]}" \
+  apt_update || die 'apt-get update failed'
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y "${APT_PACKAGES[@]}" \
     || die "cannot install ${APT_PACKAGES[*]} with apt-get"
 }
 

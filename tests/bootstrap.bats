@@ -24,7 +24,7 @@ setup() {
   unset BW_SESSION DOTFILES_REF XDG_CONFIG_HOME XDG_DATA_HOME
 
   local tool
-  for tool in cat chmod git ln mkdir mktemp rm seq sha256sum sleep; do
+  for tool in cat chmod env git ln mkdir mktemp rm seq sha256sum sleep; do
     ln -s "$(command -v "$tool")" "$TOOLS/$tool"
   done
 
@@ -46,7 +46,7 @@ printf 'sudo %s\n' "$*" >>"$CALLS"
 "$@"
 STUB
   stub apt-get <<'STUB'
-[[ "$1" != install ]] || : >"$STATE/apt"
+[[ " $* " != *" install "* ]] || : >"$STATE/apt"
 STUB
   stub curl <<'STUB'
 url="${*: -1}"
@@ -368,10 +368,61 @@ EXPECTED
   [ "$status" -eq 0 ]
   diff -u - <(actions) <<'EXPECTED'
 sudo apt-get update
-sudo apt-get install -y git curl jq gh unzip
+sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y git curl jq gh unzip
 chezmoi apply
 chezmoi apply sees BW_SESSION=
 EXPECTED
+}
+
+@test "test_bootstrap_retries_apt_get_update_while_it_fails" {
+  given chezmoi bw bw-logged-in bw-unlocked nix nix-daemon
+  given_initialized_chezmoi
+  stub apt-get <<'STUB'
+if [[ "$1" == update && ! -e "$STATE/update-failed" ]]; then
+  : >"$STATE/update-failed"
+  exit 100
+fi
+[[ " $* " != *" install "* ]] || : >"$STATE/apt"
+STUB
+  stub sleep <<'STUB'
+printf 'sleep %s\n' "$*" >>"$CALLS"
+STUB
+  ln -sf .sleep "$STUBS/sleep"
+
+  run_bootstrap
+
+  [ "$status" -eq 0 ]
+  diff -u - <(actions) <<'EXPECTED'
+sudo apt-get update
+sleep 10
+sudo apt-get update
+sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y git curl jq gh unzip
+chezmoi apply
+chezmoi apply sees BW_SESSION=
+EXPECTED
+  [[ "$output" == *"bootstrap: apt-get update failed; retrying in 10 seconds (1 of 60)"* ]] \
+    || fail "no retry notice: $output"
+}
+
+@test "test_bootstrap_stops_when_apt_get_update_keeps_failing" {
+  given chezmoi bw bw-logged-in bw-unlocked nix nix-daemon
+  given_initialized_chezmoi
+  stub apt-get <<'STUB'
+[[ "$1" != update ]] || exit 100
+: >"$STATE/apt"
+STUB
+  stub sleep <<'STUB'
+printf 'sleep %s\n' "$*" >>"$CALLS"
+STUB
+  ln -sf .sleep "$STUBS/sleep"
+
+  run_bootstrap
+
+  [ "$status" -eq 1 ]
+  [ "$(grep -c '^sudo apt-get update$' "$CALLS")" -eq 60 ]
+  [ "$(grep -c '^sleep 10$' "$CALLS")" -eq 59 ]
+  ! grep -q ' install ' "$CALLS" || fail "installed after update gave up: $(cat "$CALLS")"
+  [[ "$stderr" == *"bootstrap: error: apt-get update failed"* ]] || fail "no error: $stderr"
 }
 
 @test "test_bootstrap_stops_on_a_download_that_fails_its_checksum" {
