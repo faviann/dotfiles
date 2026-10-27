@@ -12,8 +12,9 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 | `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, the pi configuration, and the Collie client CA | All nine items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, and `dotfiles/github-cli-token` |
 | anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, `update-agent-tools`, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token` |
 
-Apply fails until every Bitwarden item in the profile's row exists, so create
-them before the first apply. On an existing machine, create a new item before
+Apply fails until every Bitwarden item in the profile's row exists, except
+`dotfiles/github-cli-token`, whose `gh` login only warns. Create them before the
+first apply. On an existing machine, create a new item before
 the `chezmoi update` or `workstation-update` that starts to read it.
 
 Every profile is a homelab-iac controller. It gets the Ansible controller key
@@ -318,8 +319,8 @@ The item must contain:
 
 Apply sets the directory to mode `700` and both files to mode `600`. Apply
 fails unless the Notes hold a PEM private key with its line breaks and the
-field holds a PEM certificate, so a wrong item cannot replace the only copy of
-the CA. Chezmoi does not manage `ca.srl` or the
+field holds a PEM certificate, so a malformed item cannot replace the only copy
+of the CA. Chezmoi does not manage `ca.srl` or the
 `phone.*` files. To regenerate them, follow "Reissue the phone certificate" in
 homelab-iac's `stacks/portal/traefik3/README.md`.
 
@@ -327,10 +328,12 @@ After you create the item, and before the first apply that renders it, check
 the item against the files on the workstation:
 
 ```bash
-chezmoi diff ~/.ansible/collie-ca
+chezmoi verify ~/.ansible/collie-ca
 ```
 
-No output means the item matches the files.
+Exit status 0 means the item matches the files. The command prints no file
+contents. Do not use `chezmoi diff` for this check: it does not descend into
+the directory, so it prints nothing even when the item differs.
 
 To rotate the CA, follow "Rotate the CA" in homelab-iac's
 `stacks/portal/traefik3/README.md`. It writes a new `ca.key` and `ca.crt` in

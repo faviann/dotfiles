@@ -73,7 +73,7 @@ apply_auth() {
       <(printf '{\n  "opencode": {\n    "key": "%s",\n    "type": "api"\n  }\n}\n' "$KEY") \
       || fail "$profile: auth.json is not the opencode entry alone: $(cat "$home/$AUTH")"
     [[ "$(stat -c %a "$home/.local/share" "$home/.local/share/opencode" "$home/$AUTH")" \
-      == $'700\n700\n600' ]] || fail "$profile: auth.json or its directories are not owner-only"
+      == $'775\n700\n600' ]] || fail "$profile: ~/.local/share changed, or auth.json and its directory are not owner-only"
   done
 }
 
