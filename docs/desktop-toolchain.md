@@ -40,8 +40,8 @@ after it installs them, for example while it installs a plugin, a new
 The desktop chezmoi profile runs
 [`run_onchange_after_switch-home-manager.sh.tmpl`](../.chezmoiscripts/run_onchange_after_switch-home-manager.sh.tmpl)
 on `chezmoi apply`. It runs `home-manager switch --impure` against the chezmoi
-source, with the Home Manager CLI the flake pins. Nix must be installed first,
-as in [BOOTSTRAP.md](../BOOTSTRAP.md#1-install-chezmoi-and-bitwarden-cli).
+source, with the Home Manager CLI the flake pins. Nix must be installed first;
+the [bootstrap command](../BOOTSTRAP.md#desktop) installs it.
 
 `home/desktop.nix` reads the user name and home directory from `USER` and
 `HOME`, so the profile does not depend on one account. Pure evaluation, as in
