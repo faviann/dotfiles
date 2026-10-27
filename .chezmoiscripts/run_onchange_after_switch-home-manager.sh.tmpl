@@ -14,7 +14,7 @@ set -euo pipefail
 readonly source_dir={{ .chezmoi.sourceDir | quote }}
 
 if ! command -v nix >/dev/null 2>&1; then
-  printf 'error: nix is not on PATH. Install Determinate Nix as in step 1 of BOOTSTRAP.md, then open a new shell and rerun chezmoi apply.\n' >&2
+  printf 'error: nix is not on PATH. Rerun the bootstrap command in BOOTSTRAP.md; it installs Determinate Nix and runs chezmoi apply again.\n' >&2
   exit 1
 fi
 
