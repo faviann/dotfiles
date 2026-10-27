@@ -24,21 +24,24 @@ Home Manager provides Node/npm and writes the npm prefix as
 
 ## Agent toolchain
 
-Dotfiles and the complete agent toolchain are maintained through one
-operator-facing command:
+`update-agent-tools` installs and updates the agent toolchain on every machine.
+On the workstation, dotfiles and the complete agent toolchain are maintained
+through one operator-facing command:
 
 ```bash
 workstation-update
 ```
+
+On a desktop, run `update-agent-tools` directly. On every profile, the Home
+Manager switch also runs it when a managed command is missing.
 
 The managed unit contains:
 
 - the Bun runtime the harnesses execute under
 - the standalone Codex CLI (`@openai/codex`)
 - Claude Code (`@anthropic-ai/claude-code`)
-- Pi (`@earendil-works/pi-coding-agent`)
 - OpenCode (`opencode-ai`)
-- Oh My Pi (`@oh-my-pi/pi-coding-agent`)
+- Pi (`@earendil-works/pi-coding-agent`), on the workstation only
 
 [Bun's upstream installer](https://bun.sh/install) supplies its latest runtime,
 selects a CPU-compatible build (including baseline x64), and replaces the binary
@@ -54,9 +57,42 @@ Bun engines: the updater installs the latest Bun and runs Bun and the Bun-using
 harnesses to confirm they start. If an upstream package needs a newer Node,
 update the nixpkgs input; the failed preflight leaves installed tools unchanged.
 
-Pi and Oh My Pi intentionally coexist while OMP is evaluated as a separate
-harness. The `pi` command continues to use `~/.pi`; the distinct `omp` command
-uses its own default `~/.omp` state. OMP does not replace Pi.
+## Claude Code plugins
+
+`update-agent-tools` declares the Claude Code plugins every machine gets:
+
+- `pstack@pstack-claude`
+- `codex@openai-codex`
+- `frontend-design@anthropic-plugin-directory`
+- `skill-creator@anthropic-plugin-directory`
+
+It also declares the two marketplaces these plugins come from beyond the
+built-in `anthropic-plugin-directory`: `pstack-claude` from GitHub
+`michael-denyer/pstack-claude`, and `openai-codex` from GitHub
+`openai/codex-plugin-cc`. Each run adds a declared marketplace that
+`claude plugin marketplace list` does not show. It then installs each declared
+plugin that `claude plugin list` does not show and updates the others. A
+failure names the marketplace or plugin. Plugins that you install by hand stay
+installed and are not updated. Declaring a plugin in `~/.claude/settings.json`
+does not install it, so chezmoi does not manage plugins there.
+
+## Agent defaults
+
+Agents on every machine run without approval prompts or a sandbox. Chezmoi sets
+`permissions.defaultMode = "bypassPermissions"` and
+`skipDangerousModePermissionPrompt = true` in `~/.claude/settings.json`. The
+rest of `permissions`, such as `permissions.allow`, stays as Claude Code wrote
+it.
+
+Chezmoi pins these keys in `~/.codex/config.toml`:
+
+- `approval_policy = "never"`
+- `sandbox_mode = "danger-full-access"`
+- `agents.max_concurrent_threads_per_session = 24`
+- `personality = "pragmatic"`
+
+Apply leaves the file byte for byte unchanged when every managed key is
+current. Otherwise it rewrites the file as sorted TOML and drops its comments.
 
 ## .NET SDK policy
 

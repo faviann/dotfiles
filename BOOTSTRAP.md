@@ -9,13 +9,15 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
-| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and `update-agent-tools` | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
+| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and the pi configuration | All six items below, plus `dotfiles/github-cli-token` for `workstation-setup` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, `github-token` rotation, agent setup, `update-agent-tools`, fish, and the `desktop` Home Manager profile | `dotfiles/workstation-ssh-key`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, plus `dotfiles/github-cli-token` for the one-time `gh` login |
 
 The workstation also gets the Ansible controller key and vault password.
 Desktops get agent configuration and the `desktop` Home Manager profile, which
 installs the artifact-server publishing toolchain: the `artifactserver` CLI,
-Node.js, Chromium, and the DejaVu fonts. Desktops still get no agent binaries.
+Node.js, Chromium, and the DejaVu fonts. The profile also runs the Herdr user
+service, and its switch hands off to `update-agent-tools` to install the
+[agent toolchain](docs/workstation/toolchain.md#agent-toolchain) without pi.
 Apply installs the profile, as in [step 3](#3-bootstrap-over-https); see the
 [desktop toolchain](docs/desktop-toolchain.md).
 
@@ -29,7 +31,7 @@ sudo snap install bw
 On a desktop, also install the tools the dotfiles call:
 
 ```bash
-sudo apt install git curl jq gh
+sudo apt install git curl jq gh unzip
 ```
 
 A desktop also needs Nix for its Home Manager profile. Install Determinate Nix,
@@ -209,11 +211,14 @@ that file when it connects:
   `~/.config/faviann-skills/artifact-server.json`.
 - Claude Code and Codex run `artifact-server-mcp-headers`, which prints the
   `Authorization` header from the file.
-- OpenCode and pi read the file from their MCP configuration.
+- OpenCode, and pi on the workstation, read the file from their MCP
+  configuration.
 
 Apply sets only the `artifact-server` server in `~/.claude.json` and the
-`artifact_server` server in `~/.codex/config.toml`, and owns
-`~/.config/opencode/opencode.json` and `~/.pi/agent/mcp.json`. Other servers
+`artifact_server` server in `~/.codex/config.toml`, plus the Codex
+[agent defaults](docs/workstation/toolchain.md#agent-defaults), and owns
+`~/.config/opencode/opencode.json` and, on the workstation,
+`~/.pi/agent/mcp.json`. Other servers
 and other keys in those two files stay, as do keys of the artifact-server entry
 such as Codex's `enabled`. The entry's competing auth keys are removed so the
 helper is the only auth: Claude Code's `headers`, and Codex's
@@ -323,9 +328,10 @@ After bootstrap, use `workstation-update` for routine maintenance on the
 workstation. See the canonical
 [workstation maintenance guidance](docs/workstation/maintenance.md) for source
 guards, Bitwarden sessions, and failure recovery. Desktops use
-`chezmoi update`. A desktop set up before the `desktop` Home Manager profile
-existed needs Nix, as in [step 1](#1-install-chezmoi-and-bitwarden-cli), before
-its next `chezmoi update`.
+`chezmoi update`, and `update-agent-tools` for the agent toolchain. A desktop
+set up before the `desktop` Home Manager profile existed needs Nix, as in
+[step 1](#1-install-chezmoi-and-bitwarden-cli), before its next
+`chezmoi update`.
 
 ## Clone ServerManagementScripts
 

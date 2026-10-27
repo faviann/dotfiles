@@ -1,13 +1,19 @@
 {{- /* chezmoi:modify-template */ -}}
-{{- /* Rewriting drops TOML comments, so leave the file untouched when the server is already current. */ -}}
+{{- /* Rewriting drops TOML comments, so leave the file untouched when every managed key is already current. */ -}}
 {{- $config := dict -}}
 {{- if trim .chezmoi.stdin -}}
 {{-   $config = fromToml .chezmoi.stdin -}}
 {{- end -}}
+{{- $before := toJson $config -}}
 {{- $current := get (get $config "mcp_servers" | default dict) "artifact_server" | default dict -}}
 {{- $server := mergeOverwrite (omit $current "bearer_token_env_var" "http_headers" "env_http_headers") (dict "url" (printf "%s/mcp" .artifactServer.url) "http_headers_helper" (joinPath .chezmoi.homeDir ".local/bin/artifact-server-mcp-headers" | squote)) -}}
-{{- if eq (toJson $server) (toJson $current) -}}
+{{- $config = setValueAtPath "mcp_servers.artifact_server" $server $config -}}
+{{- $config = setValueAtPath "approval_policy" "never" $config -}}
+{{- $config = setValueAtPath "sandbox_mode" "danger-full-access" $config -}}
+{{- $config = setValueAtPath "agents.max_concurrent_threads_per_session" 24 $config -}}
+{{- $config = setValueAtPath "personality" "pragmatic" $config -}}
+{{- if eq (toJson $config) $before -}}
 {{-   .chezmoi.stdin -}}
 {{- else -}}
-{{-   toToml (setValueAtPath "mcp_servers.artifact_server" $server $config) -}}
+{{-   toToml $config -}}
 {{- end -}}

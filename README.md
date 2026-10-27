@@ -3,7 +3,8 @@
 Personal dotfiles managed with [chezmoi](https://chezmoi.io) + Bitwarden CLI,
 plus a Home Manager flake with two profiles. The `workstation` profile
 provisions the Debian LXC workstation and its agent toolchain. The `desktop`
-profile gives every other machine the artifact-server publishing toolchain.
+profile gives every other machine the agent toolchain and the artifact-server
+publishing toolchain.
 
 This is a personal repository: no support, no stability guarantees. It is not
 directly reusable, because chezmoi renders secrets from the maintainer's
@@ -18,7 +19,7 @@ Setting up a new machine? Start with **[BOOTSTRAP.md](BOOTSTRAP.md)**.
 | --- | --- |
 | `workstation-update` | Routine maintenance: source update, chezmoi apply, Home Manager, agent tools. See [maintenance](docs/workstation/maintenance.md). |
 | `workstation-setup` | Ansible-installed bootstrap/activation helper. |
-| `update-agent-tools` | Targeted agent-toolchain repair only. |
+| `update-agent-tools` | Agent-toolchain update on a desktop; targeted repair only on the workstation. |
 | `dev-session ensure <project> <issue>` | Provision a coding worker for one GitHub issue. See [dev sessions](docs/workstation/dev-sessions.md). |
 | `home-manager build --flake .#workstation` | Build the workstation profile while developing. |
 | `nix flake check` | Full validation gate (ShellCheck + every Bats suite). |

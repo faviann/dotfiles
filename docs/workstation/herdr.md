@@ -10,15 +10,20 @@
 - **Configuration**: `~/.config/herdr/config.toml` is optional and app-owned.
 - **Integrations**: every `chezmoi apply` runs
   `.chezmoiscripts/run_after_install-herdr-integrations.sh.tmpl`, which
-  installs the Claude Code, Codex, Pi, OMP, and OpenCode integrations that
-  Herdr does not report as current. Herdr resumes agent panes after a server
-  restart only through these integrations. A running agent loads a new
-  integration only after it restarts. See the runbook for the update
-  sequence.
+  installs each integration that Herdr does not report as current: Claude
+  Code, Codex, and OpenCode, plus Pi on the workstation. Herdr resumes agent
+  panes after a server restart only through these integrations. A running
+  agent loads a new integration only after it restarts. See the runbook for
+  the update sequence.
 - **Supervision**: Home Manager owns the foreground `herdr.service` under
   `default.target`, with user lingering for boot startup and a five-second
-  failure-restart delay. Intentional stops remain stopped. Shutdown ends pane
-  processes; restore from `~/.config/herdr/session.json` is reconstructive.
+  failure-restart delay. Desktops get the same unit from
+  [`home/agent-tools.nix`](../../home/agent-tools.nix); without lingering, it
+  starts when the user logs in. On a desktop that already runs a detached
+  Herdr server, stop it with `herdr server stop` before the first switch, or
+  the unit cannot start. Intentional stops remain stopped. Shutdown
+  ends pane processes; restore from `~/.config/herdr/session.json` is
+  reconstructive.
 
 Use the [Herdr operations and recovery runbook](../runbooks/herdr.md) for
 service control, safe updates, detached-server recovery, and restore limits.

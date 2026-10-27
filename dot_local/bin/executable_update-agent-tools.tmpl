@@ -18,10 +18,13 @@ flock 9
 packages=(
   @openai/codex@latest
   @anthropic-ai/claude-code@latest
-  @earendil-works/pi-coding-agent@latest
   opencode-ai@latest
-  @oh-my-pi/pi-coding-agent@latest
 )
+bun_harnesses=(opencode)
+{{- if eq .profile "workstation" }}
+packages+=(@earendil-works/pi-coding-agent@latest)
+bun_harnesses+=(pi)
+{{- end }}
 
 # npm is moving install scripts behind an explicit allowlist and already warns
 # about every unreviewed one. Approval cannot be recorded for a global install,
@@ -34,7 +37,6 @@ allow_scripts=(
   @anthropic-ai/claude-code
   opencode-ai
   esbuild
-  onnxruntime-node
   protobufjs
   @google/genai
 )
@@ -57,22 +59,44 @@ else
     || fail 'Bun installation failed'
 fi
 ln -sfn bun "$prefix/bin/bunx"
-bun --version >/dev/null || fail 'installed Bun does not run on this workstation'
+bun --version >/dev/null || fail 'installed Bun does not run on this machine'
 npm install --global --prefix "$prefix" --force=false --engine-strict \
   --allow-scripts="$allowed_scripts" "${packages[@]}" \
   || fail 'npm installation failed'
 
-for harness in opencode omp pi; do
+for harness in "${bun_harnesses[@]}"; do
   "$harness" --version >/dev/null || fail "verification failed: $harness"
 done
 
-# Claude Code's background plugin updates are off on this workstation, so
-# maintenance updates these when present. Each update refreshes its marketplace.
-claude_plugins=(pstack@pstack-claude)
+# Claude Code's background plugin updates are off. An update that cannot reach
+# its marketplace reports the plugin as current and exits 0.
+# anthropic-plugin-directory is built in and absent from
+# `claude plugin marketplace list`.
+claude_marketplaces=(
+  pstack-claude=michael-denyer/pstack-claude
+  openai-codex=openai/codex-plugin-cc
+)
+claude_plugins=(
+  pstack@pstack-claude
+  codex@openai-codex
+  frontend-design@anthropic-plugin-directory
+  skill-creator@anthropic-plugin-directory
+)
+known_marketplaces="$(claude plugin marketplace list --json | jq -r '.[].name')" \
+  || fail 'listing Claude Code plugin marketplaces failed'
+for marketplace in "${claude_marketplaces[@]}"; do
+  name="${marketplace%%=*}"
+  grep -qxF "$name" <<<"$known_marketplaces" && continue
+  claude plugin marketplace add "${marketplace#*=}" \
+    || fail "Claude Code plugin marketplace add failed: $name"
+done
 installed_plugins="$(claude plugin list --json | jq -r '.[].id')" \
   || fail 'listing Claude Code plugins failed'
 for plugin in "${claude_plugins[@]}"; do
-  grep -qxF "$plugin" <<<"$installed_plugins" || continue
-  claude plugin update "$plugin" || fail "Claude Code plugin update failed: $plugin"
+  if grep -qxF "$plugin" <<<"$installed_plugins"; then
+    claude plugin update "$plugin" || fail "Claude Code plugin update failed: $plugin"
+  else
+    claude plugin install "$plugin" || fail "Claude Code plugin install failed: $plugin"
+  fi
 done
 printf 'Agent tools updated.\n'

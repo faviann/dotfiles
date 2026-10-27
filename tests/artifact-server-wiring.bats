@@ -353,10 +353,12 @@ TOML
     || fail 'could not parse the applied config.toml'
   diff -u \
     <(jq -S --arg origin "$ORIGIN" --arg helper "'$HOME_DIR/.local/bin/artifact-server-mcp-headers'" \
-      '.mcp_servers.artifact_server = {url: ($origin + "/mcp"), http_headers_helper: $helper, enabled: false, startup_timeout_sec: 30}' \
+      '.mcp_servers.artifact_server = {url: ($origin + "/mcp"), http_headers_helper: $helper, enabled: false, startup_timeout_sec: 30}
+        | .sandbox_mode = "danger-full-access" | .personality = "pragmatic"
+        | .agents.max_concurrent_threads_per_session = 24' \
       "$BATS_TEST_TMPDIR/existing.json") \
     <(jq -S . "$BATS_TEST_TMPDIR/applied.json") \
-    || fail 'apply did not keep other keys and set exactly the artifact_server entry'
+    || fail 'apply did not keep other keys and set exactly the managed keys'
   [[ "$(stat -c %a "$config")" == 600 ]] || fail 'config.toml is not owner-only'
 }
 
@@ -366,8 +368,20 @@ TOML
   mkdir -p "$HOME_DIR/.codex"
   printf '{"theme":"dark","mcpServers":{"artifact-server":{"headersHelper":"%s","url":"%s/mcp","type":"http"}}}' \
     "$helper" "$ORIGIN" >"$HOME_DIR/.claude.json"
-  printf '# Written by hand.\nmodel = "gpt-5.5"\n\n[mcp_servers.artifact_server]\nurl = "%s/mcp"\nhttp_headers_helper = "%s"\n' \
-    "$ORIGIN" "$helper" >"$HOME_DIR/.codex/config.toml"
+  cat >"$HOME_DIR/.codex/config.toml" <<TOML
+# Written by hand.
+model = "gpt-5.5"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+personality = "pragmatic"
+
+[agents]
+max_concurrent_threads_per_session = 24
+
+[mcp_servers.artifact_server]
+url = "$ORIGIN/mcp"
+http_headers_helper = "$helper"
+TOML
   cp "$HOME_DIR/.claude.json" "$BATS_TEST_TMPDIR/claude.json"
   cp "$HOME_DIR/.codex/config.toml" "$BATS_TEST_TMPDIR/config.toml"
 
@@ -388,7 +402,7 @@ TOML
     "$HOME_DIR/.claude.json" >/dev/null || fail 'null mcpServers did not get only the server'
 }
 
-@test "test_missing_harness_configs_get_only_the_server" {
+@test "test_missing_harness_configs_get_only_the_managed_keys" {
   local helper="'$HOME_DIR/.local/bin/artifact-server-mcp-headers'"
 
   apply_workstation "$CLAUDE_MCP_TARGET" .codex/config.toml || fail 'apply failed'
@@ -402,9 +416,15 @@ TOML
     || fail 'could not parse the applied config.toml'
   diff -u \
     <(jq -nS --arg url "$ORIGIN/mcp" --arg helper "$helper" \
-      '{mcp_servers: {artifact_server: {url: $url, http_headers_helper: $helper}}}') \
+      '{
+        approval_policy: "never",
+        sandbox_mode: "danger-full-access",
+        personality: "pragmatic",
+        agents: {max_concurrent_threads_per_session: 24},
+        mcp_servers: {artifact_server: {url: $url, http_headers_helper: $helper}}
+      }') \
     <(jq -S . "$BATS_TEST_TMPDIR/applied.json") \
-    || fail 'missing config.toml did not get only the server'
+    || fail 'missing config.toml did not get only the managed keys'
 }
 
 @test "test_missing_or_blank_claude_json_gets_only_the_server_and_owner_only_mode" {

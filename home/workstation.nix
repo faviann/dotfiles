@@ -8,13 +8,6 @@ let
     runtimeInputs = [ pkgs.nodejs ];
     text = builtins.readFile ../scripts/lobu-bootstrap;
   };
-  # Host tools update-agent-tools shells out to that neither home.packages nor
-  # Home Manager's activation PATH provides.
-  updaterHostTools = lib.makeBinPath [
-    pkgs.util-linux
-    pkgs.curl
-    pkgs.unzip
-  ];
   collieBootstrap = pkgs.writeShellApplication {
     name = "collie-bootstrap";
     runtimeInputs = [ pkgs.bash pkgs.coreutils pkgs.jq ];
@@ -105,7 +98,12 @@ let
   };
 in
 {
-  imports = [ ./artifact-tools.nix ];
+  imports = [
+    ./agent-tools.nix
+    ./artifact-tools.nix
+  ];
+
+  agentTools.commands = [ "pi" ];
 
   home.username = "faviann";
   home.homeDirectory = "/home/faviann";
@@ -244,28 +242,6 @@ in
     Install.WantedBy = [ "default.target" ];
   };
 
-  # installPackages creates the profile the updater takes npm from. Before it,
-  # ~/.nix-profile is a dangling symlink and the handoff fails.
-  home.activation.bootstrapAgentTools =
-    lib.hm.dag.entryAfter [ "installPackages" "linkGeneration" ] ''
-      export PATH="$HOME/.local/bin:${config.home.profileDirectory}/bin:${updaterHostTools}:$PATH"
-
-      _agent_tools_missing=false
-      for _agent_tool in \
-        bun codex claude pi opencode omp; do
-        if ! command -v "$_agent_tool" >/dev/null 2>&1; then
-          _agent_tools_missing=true
-          break
-        fi
-      done
-
-      if [ "$_agent_tools_missing" = true ]; then
-        command -v update-agent-tools >/dev/null 2>&1 \
-          || { echo "Agent-tool bootstrap requires the dotfiles updater" >&2; exit 1; }
-        run update-agent-tools
-      fi
-    '';
-
   # Collie's generated unit is lost on an LXC rebuild. Resolve the persisted
   # installation at each boot rather than retaining its generated executable paths.
   systemd.user.services.collie-bootstrap = {
@@ -342,20 +318,6 @@ in
     Install.WantedBy = [ "default.target" ];
   };
 
-  # Boot supervision assumes the one-time detached-server cutover is complete.
-  systemd.user.services.herdr.Install.WantedBy = [ "default.target" ];
-  # An update activation must never restart herdr: a restart ends every pane
-  # process, including the agent running the update.
-  systemd.user.services.herdr.Unit.X-RestartIfChanged = false;
-  systemd.user.services.herdr.Service = {
-    Type = "simple";
-    Environment =
-      "PATH=/home/faviann/.local/bin:/home/faviann/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin";
-    ExecStart = "/home/faviann/.local/bin/herdr server";
-    Restart = "on-failure";
-    RestartSec = 5;
-    WorkingDirectory = "/home/faviann";
-  };
   programs.openclaw = {
     enable = true;
     stateDir = "${config.home.homeDirectory}/.openclaw";

@@ -28,6 +28,8 @@ managed_for() {
   },
   \"apiKeyHelper\": \"cat ~/.config/claude/gateway-token\",
   \"attribution\": {\"commit\": \"\", \"pr\": \"\"},
+  \"permissions\": {\"defaultMode\": \"bypassPermissions\"},
+  \"skipDangerousModePermissionPrompt\": true,
   \"hooks\": {\"PostToolUse\": [$TRACK_PRS]}
 }"
 }
@@ -80,10 +82,29 @@ JSON
 
   cmp -s "$first_apply" "$settings" \
     || fail 'second apply changed settings.json'
-  diff -u \
-    <(jq -S --argjson managed "$(managed_for "$GATEWAY")" --argjson track "$TRACK_PRS" \
-      '. * ($managed | del(.hooks)) | .hooks.PostToolUse += [$track]' "$existing") \
-    <(jq -S . "$settings") \
+  diff -u <(jq -S . <<'JSON'
+{
+  "model": "opus",
+  "permissions": {"allow": ["Bash(ls:*)"], "defaultMode": "bypassPermissions"},
+  "skipDangerousModePermissionPrompt": true,
+  "statusLine": {"type": "command", "command": "~/.claude/statusline.sh", "refreshInterval": 60},
+  "env": {
+    "OTHER": "kept",
+    "ANTHROPIC_BASE_URL": "https://ai-gateway.jungleservices.net",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "apiKeyHelper": "cat ~/.config/claude/gateway-token",
+  "attribution": {"commit": "", "pr": ""},
+  "hooks": {
+    "SessionStart": [{"matcher": "^(startup|resume)$", "hooks": [{"type": "command", "command": "bash 'herdr-agent-state.sh' session", "timeout": 10}]}],
+    "PostToolUse": [
+      {"matcher": "Edit", "hooks": [{"type": "command", "command": "format && lint"}]},
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "bash \"$HOME/.claude/hooks/track-session-prs.sh\"", "timeout": 5}]}
+    ]
+  }
+}
+JSON
+  ) <(jq -S . "$settings") \
     || fail 'merge did not keep other keys and set exactly the managed keys'
 }
 

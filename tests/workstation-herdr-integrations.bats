@@ -13,6 +13,7 @@ export REAL_BASH
 
 render_hook() {
   local output="$1"
+  local profile="$2"
   local destination
   local render_dir
 
@@ -25,6 +26,7 @@ render_hook() {
     --config /dev/null \
     --config-format toml \
     --persistent-state "$render_dir/chezmoistate.boltdb" \
+    --override-data "{\"profile\":\"$profile\"}" \
     execute-template \
     --file "$REPO_ROOT/.chezmoiscripts/run_after_install-herdr-integrations.sh.tmpl" \
     >"$output"
@@ -47,7 +49,7 @@ printf 'herdr %s\n' "$*" >>"$COMMAND_LOG"
 
 case "${2:-}" in
   status)
-    for target in pi omp claude codex opencode; do
+    for target in pi claude codex opencode; do
       state=$(cat "$HERDR_STATE/$target" 2>/dev/null || printf 'not installed')
       [[ "$state" == current ]] && state='current (v1)'
       printf '%s: %s (%s)\n' "$target" "$state" "$HOME/.$target"
@@ -59,7 +61,6 @@ case "${2:-}" in
       claude) dir="$HOME/.claude" ;;
       codex) dir="$HOME/.codex" ;;
       pi) dir="$HOME/.pi/agent" ;;
-      omp) dir="$HOME/.omp/agent" ;;
       opencode) dir="$HOME/.config/opencode" ;;
       *) exit 98 ;;
     esac
@@ -74,10 +75,11 @@ STUB
 
 run_hook() {
   local test_dir="$1"
+  local profile="${2:-workstation}"
   local script="$test_dir/hook"
 
   mkdir -p "$test_dir/home" "$test_dir/state"
-  [[ -x "$script" ]] || render_hook "$script"
+  [[ -x "$script" ]] || render_hook "$script" "$profile"
   make_herdr_stub "$test_dir/bin"
   env \
     HOME="$test_dir/home" \
@@ -101,10 +103,10 @@ installs() {
   run_hook "$test_dir" || fail 'integration install failed'
 
   diff -u \
-    <(printf 'herdr integration install %s\n' codex pi omp opencode) \
+    <(printf 'herdr integration install %s\n' codex pi opencode) \
     <(installs "$test_dir") \
     || fail 'did not install exactly the integrations Herdr does not report as current'
-  for dir in .codex .pi .omp .config/opencode; do
+  for dir in .codex .pi .config/opencode; do
     [[ "$(stat -c %a "$test_dir/home/$dir")" == 700 ]] \
       || fail "created config directory $dir is not private"
   done
@@ -122,4 +124,22 @@ installs() {
 
   [[ -z "$(installs "$test_dir")" ]] \
     || fail 'second apply reinstalled current integrations'
+}
+
+@test "test_each_profile_installs_its_harness_integrations" {
+  local test_dir
+
+  test_dir="$(mktemp -d)"
+  run_hook "$test_dir" workstation || fail 'workstation integration install failed'
+  diff -u \
+    <(printf 'herdr integration install %s\n' claude codex pi opencode) \
+    <(installs "$test_dir") \
+    || fail 'workstation did not install the Claude Code, Codex, pi, and OpenCode integrations'
+
+  test_dir="$(mktemp -d)"
+  run_hook "$test_dir" desktop || fail 'desktop integration install failed'
+  diff -u \
+    <(printf 'herdr integration install %s\n' claude codex opencode) \
+    <(installs "$test_dir") \
+    || fail 'desktop did not install exactly the Claude Code, Codex, and OpenCode integrations'
 }
