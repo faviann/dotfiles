@@ -454,9 +454,11 @@ password. Apply gives the profile to NetworkManager in a file that only you can
 read, and deletes the file after the import. NetworkManager keeps the private
 key in a root-only file.
 
-Apply imports the profile again only when the item changes or no connection
-uses the `wg-homelab` interface. It first deletes every connection on that
-interface, including one renamed in the GUI or created by hand. If the Notes do
+Apply imports the profile again only when the item changes or the connection
+it imported last no longer uses the `wg-homelab` interface. Renaming that
+connection in the GUI does not trigger an import. Before an import, apply
+deletes every connection on that interface, including one renamed in the GUI
+or created by hand. If the Notes do
 not hold one `[Interface]` and one `[Peer]` section, apply fails and keeps the
 old connection. If NetworkManager rejects the new profile, apply fails after
 it removes the old connection. Fix the item and run `chezmoi apply` again.

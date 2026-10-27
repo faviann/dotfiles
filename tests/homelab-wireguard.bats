@@ -164,6 +164,9 @@ nmcli -g UUID connection show
 nmcli -g connection.interface-name connection show uuid uuid-wifi
 sudo nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
 nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
+nmcli -g connection.interface-name connection show uuid uuid-1
 CALLS
   diff -u - "$STATE/imported.conf" <<<"$IMPORTED"
   [ "$(<"$STATE/import-modes")" = '600 700' ]
@@ -172,8 +175,8 @@ CALLS
 uuid-wifi:Home Wi-Fi:wlp2s0
 uuid-1:wg-homelab:wg-homelab
 CONNECTIONS
-  local state_file="$XDG_STATE_HOME/connect-homelab-wireguard/profile.sha256"
-  [ "$(<"$state_file")" = "$(sha256sum <<<"$IMPORTED" | cut -d ' ' -f 1)" ]
+  local state_file="$XDG_STATE_HOME/connect-homelab-wireguard/imported"
+  [ "$(<"$state_file")" = "$(sha256sum <<<"$IMPORTED" | cut -d ' ' -f 1) uuid-1" ]
   [ "$(stat -c %a "$state_file")" = 600 ]
 }
 
@@ -222,6 +225,9 @@ sudo nmcli connection delete uuid uuid-1
 nmcli connection delete uuid uuid-1
 sudo nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
 nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
+nmcli -g connection.interface-name connection show uuid uuid-2
 CALLS
   diff -u - "$STATE/imported.conf" <<IMPORTED
 [Interface]
@@ -257,6 +263,9 @@ nmcli -g UUID connection show
 nmcli -g connection.interface-name connection show uuid uuid-wifi
 sudo nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
 nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
+nmcli -g connection.interface-name connection show uuid uuid-2
 CALLS
   diff -u - "$STATE/connections" <<'CONNECTIONS'
 uuid-wifi:Home Wi-Fi:wlp2s0
@@ -305,6 +314,43 @@ uuid-1:Homelab VPN:wg-homelab
 CONNECTIONS
 }
 
+@test "test_foreign_connection_on_the_interface_is_replaced_when_ours_is_gone" {
+  run_connect
+  [ "$output" = "$IMPORTED_LINE" ]
+  printf 'uuid-wifi:Home Wi-Fi:wlp2s0\nuuid-foo:foo:wg-homelab\n' >"$STATE/connections"
+
+  run_connect
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$IMPORTED_LINE" ]
+  [ "$stderr" = '' ]
+  diff -u - "$STATE/connections" <<'CONNECTIONS'
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-2:wg-homelab:wg-homelab
+CONNECTIONS
+}
+
+@test "test_hash_only_state_file_is_imported_again_once" {
+  printf 'uuid-wifi:Home Wi-Fi:wlp2s0\nuuid-old:wg-homelab:wg-homelab\n' >"$STATE/connections"
+  mkdir -p "$XDG_STATE_HOME/connect-homelab-wireguard"
+  sha256sum <<<"$IMPORTED" | cut -d ' ' -f 1 >"$XDG_STATE_HOME/connect-homelab-wireguard/profile.sha256"
+
+  run_connect
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$IMPORTED_LINE" ]
+  diff -u - "$STATE/connections" <<'CONNECTIONS'
+uuid-wifi:Home Wi-Fi:wlp2s0
+uuid-1:wg-homelab:wg-homelab
+CONNECTIONS
+
+  run_connect
+
+  [ "$status" -eq 0 ]
+  [ "$output" = '' ]
+  [ "$stderr" = '' ]
+}
+
 @test "test_every_connection_on_the_interface_is_replaced" {
   printf 'uuid-wifi:Home Wi-Fi:wlp2s0\nuuid-foo:foo:wg-homelab\nuuid-old:Homelab VPN:wg-homelab\n' >"$STATE/connections"
 
@@ -325,6 +371,9 @@ sudo nmcli connection delete uuid uuid-old
 nmcli connection delete uuid uuid-old
 sudo nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
 nmcli connection import type wireguard file $XDG_RUNTIME_DIR/connect-homelab-wireguard.XXXXXX/wg-homelab.conf
+nmcli -g UUID connection show
+nmcli -g connection.interface-name connection show uuid uuid-wifi
+nmcli -g connection.interface-name connection show uuid uuid-1
 CALLS
   diff -u - "$STATE/connections" <<'CONNECTIONS'
 uuid-wifi:Home Wi-Fi:wlp2s0
@@ -352,7 +401,7 @@ CONNECTIONS
   [ "$status" -eq 1 ]
   [ "$output" = '' ]
   [ "$stderr" = 'Error: failed to import the connection.' ]
-  [ ! -e "$XDG_STATE_HOME/connect-homelab-wireguard/profile.sha256" ]
+  [ ! -e "$XDG_STATE_HOME/connect-homelab-wireguard/imported" ]
   [ "$(ls -A "$XDG_RUNTIME_DIR")" = '' ]
 
   run_connect

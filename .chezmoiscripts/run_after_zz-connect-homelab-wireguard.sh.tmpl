@@ -4,7 +4,7 @@ umask 077
 
 readonly item={{ printf "dotfiles/wireguard/%s" .chezmoi.hostname | quote }}
 readonly connection=wg-homelab
-readonly state_file="${XDG_STATE_HOME:-$HOME/.local/state}/connect-homelab-wireguard/profile.sha256"
+readonly state_file="${XDG_STATE_HOME:-$HOME/.local/state}/connect-homelab-wireguard/imported"
 
 # bw get matches names by substring, so host desk would receive the desktop profile.
 items="$(bw list items --search "$item")"
@@ -49,23 +49,31 @@ fi
 
 hash="$(sha256sum <"$conf")"
 hash="${hash%% *}"
-# NetworkManager 1.46 on Ubuntu 24.04 aborts an import while any connection,
-# renamed or foreign, holds the interface name, so those go first.
-existing=()
-for uuid in $(nmcli -g UUID connection show); do
-  if [[ "$(nmcli -g connection.interface-name connection show uuid "$uuid")" == "$connection" ]]; then
-    existing+=("$uuid")
+
+interface_connections() {
+  local uuid
+  for uuid in $(nmcli -g UUID connection show); do
+    if [[ "$(nmcli -g connection.interface-name connection show uuid "$uuid")" == "$connection" ]]; then
+      printf '%s\n' "$uuid"
+    fi
+  done
+}
+
+mapfile -t existing < <(interface_connections)
+for uuid in "${existing[@]}"; do
+  if [[ -f "$state_file" && "$(<"$state_file")" == "$hash $uuid" ]]; then
+    exit 0
   fi
 done
-if ((${#existing[@]})) && [[ -f "$state_file" && "$(<"$state_file")" == "$hash" ]]; then
-  exit 0
-fi
 
+# NetworkManager 1.46 on Ubuntu 24.04 aborts an import while any connection,
+# renamed or foreign, holds the interface name, so those go first.
 for uuid in "${existing[@]}"; do
   sudo nmcli connection delete uuid "$uuid" >/dev/null
 done
 sudo nmcli connection import type wireguard file "$conf" >/dev/null
 
+mapfile -t imported < <(interface_connections)
 mkdir -p "${state_file%/*}"
-printf '%s\n' "$hash" >"$state_file"
+printf '%s %s\n' "$hash" "${imported[*]}" >"$state_file"
 printf 'connect-homelab-wireguard: imported the %s connection from Bitwarden item %s\n' "$connection" "$item"
