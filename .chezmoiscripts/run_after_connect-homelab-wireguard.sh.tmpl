@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+readonly item={{ printf "dotfiles/wireguard/%s" .chezmoi.hostname | quote }}
+readonly connection=wg-homelab
+readonly state_file="${XDG_STATE_HOME:-$HOME/.local/state}/connect-homelab-wireguard/profile.sha256"
+
+# bw get matches names by substring, so host desk would receive the desktop profile.
+items="$(bw list items --search "$item")"
+count="$(printf '%s\n' "$items" | jq --arg name "$item" 'map(select(.name == $name)) | length')"
+case "$count" in
+  0)
+    printf 'connect-homelab-wireguard: no Bitwarden item %s; skipping the homelab tunnel\n' "$item" >&2
+    exit 0
+    ;;
+  1) ;;
+  *)
+    printf 'connect-homelab-wireguard: error: %s Bitwarden items are named %s; keep one\n' "$count" "$item" >&2
+    exit 1
+    ;;
+esac
+
+if ! command -v nmcli >/dev/null 2>&1; then
+  printf 'connect-homelab-wireguard: error: nmcli is not installed; install NetworkManager to bring up the homelab tunnel\n' >&2
+  exit 1
+fi
+
+dir="$(mktemp -d "${XDG_RUNTIME_DIR:-/dev/shm}/connect-homelab-wireguard.XXXXXX")"
+trap 'rm -rf "$dir"' EXIT
+# NetworkManager names the connection and its interface after the file.
+conf="$dir/$connection.conf"
+
+# Naming search domains stops the import adding the
+# catch-all ~ domain, so only homelab names resolve through the tunnel.
+if ! printf '%s\n' "$items" \
+  | jq -r --arg name "$item" '.[] | select(.name == $name) | .notes // ""' \
+  | awk '
+      { sub(/\r$/, ""); key = tolower($0); gsub(/[[:space:]]/, "", key) }
+      key ~ /^dns=/ { next }
+      { print }
+      key == "[interface]" { interfaces++; print "DNS = 10.1.0.1, ~faviann.vms, ~proxmox.lan" }
+      key == "[peer]" { peers++; print "AllowedIPs = 10.1.0.0/18, 10.0.0.2/32" }
+      END { exit !(interfaces == 1 && peers == 1) }
+    ' >"$conf"; then
+  printf 'connect-homelab-wireguard: error: the Notes of Bitwarden item %s must hold a WireGuard profile with one [Interface] and one [Peer] section\n' "$item" >&2
+  exit 1
+fi
+
+hash="$(sha256sum <"$conf")"
+hash="${hash%% *}"
+existing="$(nmcli -g UUID,NAME connection show | awk -F: -v name="$connection" '$2 == name { print $1 }')"
+if [[ -n "$existing" && -f "$state_file" && "$(<"$state_file")" == "$hash" ]]; then
+  exit 0
+fi
+
+# NetworkManager 1.46 on Ubuntu 24.04 aborts when an import reuses the name of an
+# existing connection, so the old one goes first.
+for uuid in $existing; do
+  sudo nmcli connection delete uuid "$uuid" >/dev/null
+done
+sudo nmcli connection import type wireguard file "$conf" >/dev/null
+
+mkdir -p "${state_file%/*}"
+printf '%s\n' "$hash" >"$state_file"
+printf 'connect-homelab-wireguard: imported the %s connection from Bitwarden item %s\n' "$connection" "$item"

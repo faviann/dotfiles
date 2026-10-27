@@ -35,6 +35,7 @@ packages/**
 # Desktop only
 .config/fish/
 .config/fish/**
+.chezmoiscripts/connect-homelab-wireguard.sh
 .chezmoiscripts/install-packages.sh
 .chezmoiscripts/switch-home-manager.sh
 {{- end }}
