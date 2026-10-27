@@ -2,9 +2,11 @@
 set -euo pipefail
 
 readonly DOTFILES_REPO=https://github.com/faviann/dotfiles.git
+readonly DOTFILES_SSH_REPO=git@github.com:faviann/dotfiles.git
 readonly DOTFILES_REF="${DOTFILES_REF:-main}"
 readonly BIN_DIR="$HOME/.local/bin"
-readonly NIX_PROFILE_SCRIPT=/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+readonly NIX_PROFILE_SCRIPT="${BOOTSTRAP_TEST_ROOT:-}/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
+readonly SYSTEMD_DIR="${BOOTSTRAP_TEST_ROOT:-}/run/systemd/system"
 readonly CHEZMOI_SOURCE="${XDG_DATA_HOME:-$HOME/.local/share}/chezmoi"
 readonly CHEZMOI_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi/chezmoi.toml"
 
@@ -88,14 +90,14 @@ nix_run() {
   download "https://github.com/DeterminateSystems/nix-installer/releases/download/v$NIX_INSTALLER_VERSION/nix-installer-x86_64-linux" \
     "$NIX_INSTALLER_SHA256" "$installer"
   chmod 755 "$installer"
-  [[ -d /run/systemd/system ]] || plan=(linux --init none)
+  [[ -d "$SYSTEMD_DIR" ]] || plan=(linux --init none)
   sudo "$installer" install "${plan[@]}" --no-confirm || die 'the Determinate Nix installer failed'
   load_nix
 }
 
 nix_daemon_done() { nix store info >/dev/null 2>&1; }
 nix_daemon_run() {
-  [[ ! -d /run/systemd/system ]] \
+  [[ ! -d "$SYSTEMD_DIR" ]] \
     || die 'nix cannot reach its daemon; check systemctl status nix-daemon.socket'
   sudo sh -c 'nohup /nix/var/nix/profiles/default/bin/nix-daemon >/var/log/nix-daemon.log 2>&1 &'
   local _
@@ -106,7 +108,19 @@ nix_daemon_run() {
   die 'the Nix daemon did not start; see /var/log/nix-daemon.log'
 }
 
-chezmoi_init_done() { [[ -d "$CHEZMOI_SOURCE/.git" && -f "$CHEZMOI_CONFIG" ]]; }
+chezmoi_source_is_dotfiles() {
+  local origin
+  origin="$(git --git-dir="$CHEZMOI_SOURCE/.git" remote get-url origin 2>/dev/null)" || return 1
+  [[ "$origin" == "$DOTFILES_REPO" || "$origin" == "$DOTFILES_SSH_REPO" ]] \
+    && git --git-dir="$CHEZMOI_SOURCE/.git" rev-parse --verify --quiet HEAD >/dev/null
+}
+
+chezmoi_init_done() {
+  [[ -e "$CHEZMOI_SOURCE" ]] || return 1
+  chezmoi_source_is_dotfiles \
+    || die "$CHEZMOI_SOURCE is not a complete clone of $DOTFILES_REPO; move it aside, then rerun this command"
+  [[ -f "$CHEZMOI_CONFIG" ]]
+}
 chezmoi_init_run() {
   chezmoi init --branch "$DOTFILES_REF" "$DOTFILES_REPO" || die "chezmoi init of $DOTFILES_REF failed"
 }
