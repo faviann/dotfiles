@@ -206,7 +206,7 @@ pool_wall() {
       len = min(bt[i] + 3600, now) - bt[i]
       return len > 0 ? bc[i] * max(min(bt[i] + 3600, min(now, e)) - max(bt[i], a), 0) / len : 0
     }
-    function spent(a, e,    i, s) { for (i = 1; i <= nb; i++) s += part(i, a, e); return s }
+    function spent(a, e,    i, s) { for (i = 1; i <= nb; i++) if (bt[i] < e && bt[i] + 3600 > a) s += part(i, a, e); return s }
     FILENAME == ARGV[1] {
       nb++; bid[nb] = $1; bt[nb] = $2; bc[nb] = $3
       if (!first || $2 < first) first = $2
