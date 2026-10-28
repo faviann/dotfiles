@@ -206,6 +206,8 @@ pool_wall() {
       len = min(bt[i] + 3600, now) - bt[i]
       return len > 0 ? bc[i] * max(min(bt[i] + 3600, min(now, e)) - max(bt[i], a), 0) / len : 0
     }
+    # Spend per second across the pool in the hour holding x; the current hour runs to now.
+    function rate(x,    h, len) { h = int(x / 3600) * 3600; len = min(h + 3600, now) - h; return len > 0 ? hr[h] / len : 0 }
     function spent(a, e,    i, s) { for (i = 1; i <= nb; i++) if (bt[i] < e && bt[i] + 3600 > a) s += part(i, a, e); return s }
     FILENAME == ARGV[1] {
       nb++; bid[nb] = $1; bt[nb] = $2; bc[nb] = $3
@@ -228,6 +230,19 @@ pool_wall() {
       if (used5 >= 5 && cost5 > 0) price["five_hour"] = cost5 / used5
       for (i = 1; i <= nb; i++) if (bid[i] in wopen) costw += part(i, wopen[bid[i]], seen[bid[i]])
       if (usedw > 0 && costw > 0) price["seven_day"] = costw / usedw
+      for (i = 1; i <= nb; i++) hr[bt[i]] += bc[i]
+      # With a week of history the weekly burn replays the same hour last week,
+      # so quiet weekends and busy weekdays land where they fall, scaled by how
+      # the last day compared with the same day a week before. A week that
+      # ramped up or wound down is no model for the next, so beyond half or
+      # double the last day pace is used instead.
+      if (first && first <= now - 604800) {
+        replay = 1; scale = 1
+        if (first <= now - 691200 && (prior = spent(now - 691200, now - 604800)) > 0) {
+          scale = spent(now - 86400, now) / prior
+          if (scale < 0.5 || scale > 2) replay = 0
+        }
+      }
       for (wi = 1; wi <= nw; wi++) {
         w = order[wi]
         n = 0
@@ -260,7 +275,7 @@ pool_wall() {
         for (i = 1; i <= n; i++) rem[i] = amt[i]
         wall = "clear"
         for (t = now; t < now + hor[w]; t += 300) {
-          need = need0
+          need = (w == "seven_day" && replay) ? scale * rate(t - 604800 + 150) * 300 / price[w] : need0
           for (q = 1; q <= n && need > 1e-9; q++) {
             c = idx[q]
             if (st[c] <= t && t < ex[c] && rem[c] > 0) {
@@ -283,7 +298,6 @@ pool_wall() {
         f5 = int(last5 / price["five_hour"] * (cover < 18000 ? 18000 / cover : 1) / na + 0.5)
       }
       if ("five_hour" in price && cover >= 18000) {
-        for (i = 1; i <= nb; i++) hr[bt[i]] += bc[i]
         best = last5
         for (s = int(now / 3600) * 3600 - 14400; s >= max(first, now - 604800); s -= 3600) {
           run = hr[s] + hr[s + 3600] + hr[s + 7200] + hr[s + 10800] + hr[s + 14400]
@@ -291,7 +305,10 @@ pool_wall() {
         }
         peak = int(best / price["five_hour"] / na + 0.5)
       }
-      print "used", wspan, wpct, f5, peak
+      # The share of five-hour capacity a week can sustain around the clock:
+      # k five-hour budgets spread over the 33.6 five-hour spans in a week.
+      even = ("seven_day" in price && "five_hour" in price) ? int(100 * price["seven_day"] / price["five_hour"] / 33.6 + 0.5) : "-"
+      print "used", wspan, wpct, f5, peak, even
       if (!("seven_day" in price && "five_hour" in price)) { print "cap -"; exit }
       k = price["seven_day"] / price["five_hour"]
       nh = split("1h 3600 2h 7200 4h 14400 8h 28800 1d 86400 2d 172800 4d 345600 7d 604800", hz, " ")
@@ -312,7 +329,7 @@ if [[ -s $pool_cost && -s $pool_cache ]]; then
     mv -f "$pool_wall_cache.$$" "$pool_wall_cache"
   fi
   first_wall=""
-  while read -r label at span pct peak; do
+  while read -r label at span pct peak even; do
     if [[ $label == used ]]; then
       used=""
       if [[ $span != - ]]; then
@@ -321,7 +338,14 @@ if [[ -s $pool_cost && -s $pool_cache ]]; then
         else wspan="$(( at / 3600 ))h"; fi
         used+=" · ${wspan} $(color_load "$span")${span}%${R}"
       fi
-      [[ $pct != - ]] && used+=" · 5h $(color_load "$pct")${pct}%${R}"
+      if [[ $pct != - && $even != - ]]; then
+        load=$GRN
+        (( pct > even )) && load=$YEL
+        (( pct > 2 * even )) && load=$RED
+        used+=" · 5h ${load}${pct}%${R}/${even}%"
+      elif [[ $pct != - ]]; then
+        used+=" · 5h $(color_load "$pct")${pct}%${R}"
+      fi
       [[ $peak != - ]] && used+=" · peak $(color_load "$peak")${peak}%${R}"
       [[ -n $used ]] && line2+="${SEP}used${used# ·}"
       continue

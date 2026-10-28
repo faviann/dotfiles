@@ -48,11 +48,12 @@ render() { bash "$REPO_ROOT/private_dot_claude/executable_statusline.sh" <<<'{}'
 line2() { render | sed -n 2p | sed 's/\x1b\[[0-9;]*m//g'; }
 line3() { render | sed -n 3p | sed 's/\x1b\[[0-9;]*m//g'; }
 
-# The wall lands on a 5-minute step of the script's own clock; accept 15 minutes either side.
+# The wall lands on a 5-minute step of the script's own clock; accept 15
+# minutes either side, or the tolerance given in seconds.
 assert_wall_near() {
-  local label="$1" offset="$2" line d
+  local label="$1" offset="$2" tol="${3:-900}" line d
   line=$(line2)
-  for d in $(seq -900 60 900); do
+  for d in $(seq -"$tol" 60 "$tol"); do
     if [[ $line == *"$label wall $(TZ=America/Toronto date -d "@$((NOW + offset + d))" '+%a %H:%M')"* ]]; then
       return
     fi
@@ -256,4 +257,53 @@ CURL
   pool_line 2 beta five_hour 0 0
   week 2 beta 100 $((NOW + 108000)) 0 0
   [[ $(line2) == "5h dry │ wk dry until $(TZ=America/Toronto date -d "@$((NOW + 72000))" '+%a %H:%M') │ "* ]]
+}
+
+@test "five-hour use is shown against the level a week can sustain" {
+  # k = $8 a weekly point / $1 a five-hour point = 8, so a week sustains
+  # 8 / 33.6 = 24% of the pool's five-hour capacity. The last 5 hours spent
+  # $40, which is 40 points of alpha's 100.
+  pool_line 1 alpha five_hour 50 $((NOW + 4200)) 50
+  week 1 alpha 90 $((NOW + 172800)) 1 26
+  [[ $(line2) == *"· 5h 40%/24% ·"* ]]
+  [[ $(render | sed -n 2p) == *$'5h \e[33m40%'* ]]
+}
+
+# A week with two quiet days in it. alpha's weekly window opened a day ago;
+# the last day's $192 at 24 points prices a point at $8, so a busy hour burns
+# one point against 76 points of headroom. Args: dollars_per_hour a week before
+# the last day
+replay_week() {
+  pool_line 1 alpha seven_day 24 $((NOW + 518400))
+  spend 1 "$1" $((NOW - 691200)) $((NOW - 604800))
+  spend 1 8 $((NOW - 432000))
+}
+
+@test "the weekly wall replays last week hour by hour" {
+  # The next two days repeat last week's quiet ones, so the 76 points last
+  # 48 + 76 hours, not the 76 hours the last day's pace alone would give.
+  # Hourly buckets blur the quiet days' edges by up to an hour.
+  replay_week 8
+  assert_wall_near wk 446400 7200
+}
+
+@test "the replay is scaled by how the last day compares with a week before" {
+  # $192 against $144 a week earlier: busy hours now burn 4/3 of a point,
+  # so the 76 points last 48 + 57 hours.
+  replay_week 6
+  assert_wall_near wk 378000 7200
+}
+
+@test "a replay without the week before's day keeps last week's scale" {
+  pool_line 1 alpha seven_day 24 $((NOW + 518400))
+  spend 1 8 $((NOW - 432000))
+  spend 1 0.000001 $((NOW - 604800)) $((NOW - 601200))
+  assert_wall_near wk 446400 7200
+}
+
+@test "a week unlike the last falls back to the last day's pace" {
+  # $192 against $48 a week earlier: usage quadrupled, so last week's shape
+  # is no guide and the 76 points last 76 hours at the last day's pace.
+  replay_week 2
+  assert_wall_near wk 273600
 }
