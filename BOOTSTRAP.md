@@ -268,8 +268,10 @@ renders two credentials that sub2api issued, each from the Notes of one
 Bitwarden item.
 
 - `dotfiles/sub2api-gateway-token`: the token Claude Code authenticates to the
-  JES AI gateway with, rendered to `~/.config/claude/gateway-token`. The
-  `apiKeyHelper` in `~/.claude/settings.json` reads it.
+  JES AI gateway with. Chezmoi writes it into `env.ANTHROPIC_CUSTOM_HEADERS`
+  in `~/.claude/settings.json` and also renders it to
+  `~/.config/claude/gateway-token`, which is the fallback for an
+  `apiKeyHelper`.
 - `dotfiles/sub2api-admin-key`: the sub2api admin API key, rendered to
   `~/.config/claude/gateway-admin-key`. The status line uses it to read each
   Claude account's 5-hour and weekly usage from the sub2api admin API at
@@ -280,6 +282,11 @@ Create both items before the first apply. Chezmoi sets only its own keys in
 the file already holds those values, apply leaves it as written. Claude Code
 and Herdr write the file in their own key order, so their edits do not make
 `chezmoi verify` fail.
+
+For claude.ai artifacts, run `/login` once in Claude Code and choose "Claude
+account with subscription" with the work account. If the Artifact tool is
+missing, run one session with `DISABLE_TELEMETRY` unset to refresh the cached
+feature flags.
 
 ## Bitwarden artifact-server API Key Item
 

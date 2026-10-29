@@ -19,3 +19,7 @@ Push only to `origin`, and open PRs against `upstream` only when I ask. In a for
 <important if="you are about to post to GitHub: an issue, PR, comment, review, or pushed commit message">
 Write references to issues, PRs, and users outside me and my orgs unlinked, as "PR 1612", unless I confirm the link: `#N`, `owner/repo#N`, a URL, or `@name` notifies them and leaves a backlink on their side.
 </important>
+
+<important if="you are about to publish a page, report, chart, or other file for me to view in a browser">
+In a repository whose `origin` or `upstream` remote is under `github.com/thecompanylive`, publish with Claude Code's Artifact tool so it lands in my work claude.ai org. Everywhere else, use the `publish-artifact` skill. Never publish work-repository content to artifact-server, or anything else to claude.ai.
+</important>

@@ -8,8 +8,20 @@
 {{- end -}}
 {{- $settings = setValueAtPath "statusLine" (dict "type" "command" "command" "~/.claude/statusline.sh" "refreshInterval" 60) $settings -}}
 {{- $settings = setValueAtPath "env.ANTHROPIC_BASE_URL" "https://ai-gateway.jungleservices.net" $settings -}}
-{{- $settings = setValueAtPath "env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" "1" $settings -}}
-{{- $settings = setValueAtPath "apiKeyHelper" "cat ~/.config/claude/gateway-token" $settings -}}
+{{- /* The gateway token rides in a header so the session stays signed in to claude.ai, which the Artifact tool needs; an apiKeyHelper replaces that sign-in. */ -}}
+{{- $gatewayToken := trim (bitwarden "item" "dotfiles/sub2api-gateway-token").notes -}}
+{{- $settings = setValueAtPath "env.ANTHROPIC_CUSTOM_HEADERS" (printf "Authorization: Bearer %s" $gatewayToken) $settings -}}
+{{- $settings = unset $settings "apiKeyHelper" -}}
+{{- /* CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC turns artifacts off, so telemetry goes off piecemeal. With telemetry off Claude Code ignores its cached feature flags, the artifact flag among them, unless told to read them. */ -}}
+{{- $_ := unset $settings.env "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" -}}
+{{- $settings = setValueAtPath "env.DISABLE_TELEMETRY" "1" $settings -}}
+{{- $settings = setValueAtPath "env.DISABLE_ERROR_REPORTING" "1" $settings -}}
+{{- $settings = setValueAtPath "env.DISABLE_AUTOUPDATER" "1" $settings -}}
+{{- $settings = setValueAtPath "env.CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF" "1" $settings -}}
+{{- /* Keep the claude.ai org's connectors, skills, and plugins out of every session. */ -}}
+{{- $settings = setValueAtPath "env.ENABLE_CLAUDEAI_MCP_SERVERS" "false" $settings -}}
+{{- $settings = setValueAtPath "syncClaudeAiSkills" false $settings -}}
+{{- $settings = setValueAtPath "syncClaudeAiPlugins" false $settings -}}
 {{- $settings = setValueAtPath "attribution" (dict "commit" "" "pr" "") $settings -}}
 {{- $settings = setValueAtPath "permissions.defaultMode" "bypassPermissions" $settings -}}
 {{- $settings = setValueAtPath "skipDangerousModePermissionPrompt" true $settings -}}

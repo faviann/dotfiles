@@ -11,6 +11,13 @@ setup() {
   CHEZMOI_ONLY_PATH="$BATS_TEST_TMPDIR/chezmoi-only"
   mkdir -p "$CHEZMOI_ONLY_PATH"
   ln -s "$(command -v chezmoi)" "$CHEZMOI_ONLY_PATH/chezmoi"
+  BW_LOG="$BATS_TEST_TMPDIR/bw.log"
+  cat >"$CHEZMOI_ONLY_PATH/bw" <<EOF
+#!$(command -v bash)
+printf '%s\n' "\$*" >>"$BW_LOG"
+printf '%s\n' '{"notes": "gw-token-fixture\n"}'
+EOF
+  chmod +x "$CHEZMOI_ONLY_PATH/bw"
 }
 
 # $HOME is literal: Claude Code expands it when it runs the hook.
@@ -24,9 +31,15 @@ managed_for() {
   \"statusLine\": {\"type\": \"command\", \"command\": \"~/.claude/statusline.sh\", \"refreshInterval\": 60},
   \"env\": {
     \"ANTHROPIC_BASE_URL\": \"$gateway\",
-    \"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC\": \"1\"
+    \"ANTHROPIC_CUSTOM_HEADERS\": \"Authorization: Bearer gw-token-fixture\",
+    \"DISABLE_TELEMETRY\": \"1\",
+    \"DISABLE_ERROR_REPORTING\": \"1\",
+    \"DISABLE_AUTOUPDATER\": \"1\",
+    \"CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF\": \"1\",
+    \"ENABLE_CLAUDEAI_MCP_SERVERS\": \"false\"
   },
-  \"apiKeyHelper\": \"cat ~/.config/claude/gateway-token\",
+  \"syncClaudeAiSkills\": false,
+  \"syncClaudeAiPlugins\": false,
   \"attribution\": {\"commit\": \"\", \"pr\": \"\"},
   \"permissions\": {\"defaultMode\": \"bypassPermissions\"},
   \"skipDangerousModePermissionPrompt\": true,
@@ -70,7 +83,8 @@ settings_chezmoi() {
 {
   "model": "opus",
   "permissions": {"allow": ["Bash(ls:*)"]},
-  "env": {"OTHER": "kept", "ANTHROPIC_BASE_URL": "https://stale.example"},
+  "env": {"OTHER": "kept", "ANTHROPIC_BASE_URL": "https://stale.example", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+  "apiKeyHelper": "cat ~/.config/claude/gateway-token",
   "attribution": {"pr": "stale"},
   "hooks": {
     "SessionStart": [{"matcher": "^(startup|resume)$", "hooks": [{"type": "command", "command": "bash 'herdr-agent-state.sh' session", "timeout": 10}]}],
@@ -96,9 +110,15 @@ JSON
   "env": {
     "OTHER": "kept",
     "ANTHROPIC_BASE_URL": "https://ai-gateway.jungleservices.net",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    "ANTHROPIC_CUSTOM_HEADERS": "Authorization: Bearer gw-token-fixture",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF": "1",
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
   },
-  "apiKeyHelper": "cat ~/.config/claude/gateway-token",
+  "syncClaudeAiSkills": false,
+  "syncClaudeAiPlugins": false,
   "attribution": {"commit": "", "pr": ""},
   "hooks": {
     "SessionStart": [{"matcher": "^(startup|resume)$", "hooks": [{"type": "command", "command": "bash 'herdr-agent-state.sh' session", "timeout": 10}]}],
