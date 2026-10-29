@@ -320,6 +320,7 @@
           '';
           TEST_BOOTSTRAP_ACTIVATIONS = bootstrapAgentToolsActivations;
           TEST_WORKSTATION_RENDERED_CONFIGURATION = workstationRenderedConfiguration;
+          TZDIR = "${pkgs.tzdata}/share/zoneinfo";
         } ''
           export HOME="$TMPDIR/home"
           export XDG_CACHE_HOME="$TMPDIR/cache"
@@ -334,6 +335,7 @@
 
       devShells.${system}.default = pkgs.mkShell {
         packages = behavioralTestInputs ++ [ pkgs.shellcheck ];
+        TZDIR = "${pkgs.tzdata}/share/zoneinfo";
       };
 
       homeConfigurations = homeConfigurationsByProfile;

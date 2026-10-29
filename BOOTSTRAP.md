@@ -272,10 +272,10 @@ Bitwarden item.
   in `~/.claude/settings.json` and also renders it to
   `~/.config/claude/gateway-token`, which is the fallback for an
   `apiKeyHelper`.
-- `dotfiles/sub2api-admin-key`: the sub2api admin API key, rendered to
-  `~/.config/claude/gateway-admin-key`. The status line uses it to read each
-  Claude account's 5-hour and weekly usage from the sub2api admin API at
-  `gateway.ai.faviann.com`, which is separate from the gateway Claude Code uses.
+- `dotfiles/sub2api-admin-key`: the JES AI gateway's admin API key, rendered
+  to `~/.config/claude/gateway-admin-key`. The status line uses it to read
+  each Claude account's 5-hour and weekly usage and hourly cost from the JES
+  AI gateway's admin API.
 
 Create both items before the first apply. Chezmoi sets only its own keys in
 `~/.claude/settings.json` and leaves the rest of the file to Claude Code. When
