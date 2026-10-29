@@ -36,6 +36,7 @@ managed_for() {
     \"DISABLE_ERROR_REPORTING\": \"1\",
     \"DISABLE_AUTOUPDATER\": \"1\",
     \"CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF\": \"1\",
+    \"_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\": \"1\",
     \"ENABLE_CLAUDEAI_MCP_SERVERS\": \"false\"
   },
   \"syncClaudeAiSkills\": false,
@@ -115,6 +116,7 @@ JSON
     "DISABLE_ERROR_REPORTING": "1",
     "DISABLE_AUTOUPDATER": "1",
     "CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF": "1",
+    "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL": "1",
     "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
   },
   "syncClaudeAiSkills": false,
