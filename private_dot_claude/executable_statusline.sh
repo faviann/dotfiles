@@ -311,7 +311,7 @@ pool_wall() {
       print "used", wspan, wpct, f5, peak, even
       if (!("seven_day" in price && "five_hour" in price)) { print "cap -"; exit }
       k = price["seven_day"] / price["five_hour"]
-      nh = split("1h 3600 2h 7200 4h 14400 8h 28800 1d 86400 2d 172800 4d 345600 7d 604800", hz, " ")
+      nh = split("5h 18000 1d 86400 2d 172800 3d 259200 4d 345600 5d 432000 7d 604800", hz, " ")
       for (h = 1; h < nh; h += 2) {
         got = zero = 0
         for (a in acct) {
@@ -351,10 +351,10 @@ if [[ -s $pool_cost && -s $pool_cache ]]; then
       continue
     fi
     if [[ $label == cap ]]; then
-      if [[ $at == - ]]; then line3="cap ${DIM}measuring${R}"; continue; fi
+      if [[ $at == - ]]; then line3="capacity vs fresh ${DIM}measuring${R}"; continue; fi
       cell=$GRN
       [[ -n $first_wall ]] && (( first_wall <= now + span )) && cell=$RED
-      line3="${line3:-cap} ${DIM}${at}${R} ${cell}${pct}%${R}"
+      line3="${line3:-capacity vs fresh} ${DIM}${at}${R} ${cell}${pct}%${R}"
       continue
     fi
     case $at in
