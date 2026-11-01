@@ -336,7 +336,7 @@ if [[ -s $pool_cost && -s $pool_cache ]]; then
         if (( at >= 604800 )); then wspan=7d
         elif (( at >= 86400 )); then wspan="$(( at / 86400 ))d"
         else wspan="$(( at / 3600 ))h"; fi
-        used+=" · ${wspan} $(color_load "$span")${span}%${R}"
+        line2+="${SEP}weekly pace $(color_load "$span")${span}%${R} (${wspan})"
       fi
       if [[ $pct != - && $even != - ]]; then
         load=$GRN
