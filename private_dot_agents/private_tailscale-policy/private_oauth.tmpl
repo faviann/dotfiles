@@ -1,0 +1,11 @@
+{{- $item := bitwarden "item" "dotfiles/tailscale-policy-oauth" -}}
+{{- $id := dig "login" "username" "" $item | trim -}}
+{{- $secret := dig "login" "password" "" $item | trim -}}
+{{- if not (regexMatch "^[[:graph:]]+$" $id) -}}
+{{-   fail "Bitwarden item dotfiles/tailscale-policy-oauth must hold the OAuth client ID in its username" -}}
+{{- end -}}
+{{- if not (regexMatch "^tskey-client-[[:graph:]]+$" $secret) -}}
+{{-   fail "Bitwarden item dotfiles/tailscale-policy-oauth must hold the OAuth client secret, starting with tskey-client-, in its password" -}}
+{{- end -}}
+TS_OAUTH_CLIENT_ID={{ $id }}
+TS_OAUTH_CLIENT_SECRET={{ $secret }}

@@ -42,6 +42,8 @@ packages/**
 
 {{- if ne .profile "workstation" }}
 # Workstation only
+.agents/tailscale-policy/
+.agents/tailscale-policy/**
 .ansible/collie-ca/
 .ansible/collie-ca/**
 .local/bin/workstation-update
