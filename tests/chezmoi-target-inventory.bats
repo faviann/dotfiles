@@ -13,6 +13,7 @@ readonly INVENTORY='
 .agents/AGENTS.md                               workstation desktop
 .agents/artifact-server/api-key                 workstation desktop
 .agents/forks.md                                workstation desktop
+.agents/tailscale-policy/oauth                  workstation
 .ansible/collie-ca/ca.crt                       workstation
 .ansible/collie-ca/ca.key                       workstation
 .ansible/ssh/proxmox_lxc                        workstation desktop

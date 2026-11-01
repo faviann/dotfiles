@@ -1,0 +1,25 @@
+{{- $name := "dotfiles/tailscale-policy-oauth" -}}
+{{- /* Only bitwarden functions honor --skip-secrets, so call one first. It runs no vault command. */ -}}
+{{- $_ := bitwarden "template" "item" -}}
+{{- /* bw matches names by substring, so keep only the exact name. */ -}}
+{{- $found := list -}}
+{{- range (output "bw" "list" "items" "--search" $name | fromJson) -}}
+{{-   if eq .name $name -}}
+{{-     $found = append $found . -}}
+{{-   end -}}
+{{- end -}}
+{{- if gt (len $found) 1 -}}
+{{-   fail (printf "%d Bitwarden items are named %s; keep one" (len $found) $name) -}}
+{{- end -}}
+{{- if eq (len $found) 1 -}}
+{{-   $id := dig "login" "username" "" (index $found 0) | trim -}}
+{{-   $secret := dig "login" "password" "" (index $found 0) | trim -}}
+{{-   if not (regexMatch "^[[:graph:]]+$" $id) -}}
+{{-     fail "Bitwarden item dotfiles/tailscale-policy-oauth must hold the OAuth client ID in its username" -}}
+{{-   end -}}
+{{-   if not (regexMatch "^tskey-client-[[:graph:]]+$" $secret) -}}
+{{-     fail "Bitwarden item dotfiles/tailscale-policy-oauth must hold the OAuth client secret, starting with tskey-client-, in its password" -}}
+{{-   end -}}
+TS_OAUTH_CLIENT_ID={{ $id }}
+TS_OAUTH_CLIENT_SECRET={{ $secret }}
+{{ end -}}

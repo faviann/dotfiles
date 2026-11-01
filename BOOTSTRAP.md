@@ -11,12 +11,13 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
-| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, the pi configuration, and the Collie client CA | All nine items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, and `dotfiles/github-cli-token` |
+| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, the pi configuration, and the Collie client CA | All nine items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/tailscale-policy-oauth` |
 | anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, `update-agent-tools`, fish, the `desktop` Home Manager profile, and the homelab WireGuard tunnel | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` |
 
 Apply fails until every Bitwarden item in the profile's row exists, except
 `dotfiles/github-cli-token`, whose `gh` login only warns, and the optional
-[WireGuard item](#bitwarden-wireguard-item). Create them before the
+[WireGuard item](#bitwarden-wireguard-item) and
+[Tailscale policy item](#bitwarden-tailscale-policy-oauth-item). Create them before the
 first apply. On an existing machine, create a new item before
 the `chezmoi update` or `workstation-update` that starts to read it.
 
@@ -341,6 +342,36 @@ with Bitwarden unlocked, run `bw sync` so the CLI sees the edit, and run
 `workstation-update --refresh-secrets` on the workstation or `chezmoi apply` on
 a desktop. The harnesses need no other change. Apply fails unless the Notes
 hold one key of printable ASCII characters on one line.
+
+## Bitwarden Tailscale Policy OAuth Item
+
+An agent on the workstation edits the work tailnet's policy file through the
+Tailscale API. It reads an OAuth client credential from one Bitwarden Login
+item:
+
+```text
+dotfiles/tailscale-policy-oauth
+```
+
+The item must contain:
+
+- Username: the Tailscale OAuth client ID
+- Password: the OAuth client secret, which starts with `tskey-client-`
+
+The item is optional. Without it, apply writes nothing and continues. Only the
+workstation reads it, because only the workstation uses the work tailnet. With
+the item, apply writes two lines to `~/.agents/tailscale-policy/oauth`, mode
+`0600` in a private directory:
+
+```text
+TS_OAUTH_CLIENT_ID=<client ID>
+TS_OAUTH_CLIENT_SECRET=<client secret>
+```
+
+Apply fails, naming the item, if either field is empty or malformed, or if two
+items share the name. Deleting the item removes the file at the next apply. To
+rotate the secret, change the item, run `bw sync`, then run
+`workstation-update --refresh-secrets`.
 
 ## Bitwarden OpenCode API Key Item
 
