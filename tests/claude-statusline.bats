@@ -71,7 +71,7 @@ assert_wall_near() {
 @test "a pool that is not burning shows clear" {
   pool_line 1 alpha five_hour 20 $((NOW + 10800)) 20
   week 1 alpha 45 $((NOW + 259200)) 0 0
-  [[ $(line2) == "5h clear │ wk clear │ used "* ]]
+  [[ $(line2) == "5h clear │ wk clear │ weekly pace "* ]]
 }
 
 @test "a limit without enough history shows measuring" {
@@ -186,14 +186,14 @@ assert_wall_near() {
   spend 2 2 $((NOW - 691200))
   pool_line 1 alpha seven_day 48 $((NOW + 259200))
   pool_line 2 beta seven_day 24 $((NOW + 259200))
-  [[ $(line2) == "5h measuring │ wk "*"│ used 7d 63%" ]]
+  [[ $(line2) == "5h measuring │ wk "*"│ weekly pace 63% (7d)" ]]
 }
 
 @test "until a week is recorded, use is projected from the days measured" {
   # $4 an hour at $8 a point is 84 points a week on 1 account.
   spend 1 4 $((HOUR - 172800))
   pool_line 1 alpha seven_day 18 $((NOW + 475200))
-  [[ $(line2) == *"│ used 2d 84%" ]]
+  [[ $(line2) == *"│ weekly pace 84% (2d)" ]]
   [[ $(render | sed -n 2p) == *$'\e[33m84%'* ]]
 }
 
@@ -265,7 +265,7 @@ CURL
   # $40, which is 40 points of alpha's 100.
   pool_line 1 alpha five_hour 50 $((NOW + 4200)) 50
   week 1 alpha 90 $((NOW + 172800)) 1 26
-  [[ $(line2) == *"· 5h 40%/24% ·"* ]]
+  [[ $(line2) == *"│ used 5h 40%/24% ·"* ]]
   [[ $(render | sed -n 2p) == *$'5h \e[33m40%'* ]]
 }
 
