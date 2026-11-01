@@ -11,7 +11,7 @@ readonly TARGET=.agents/tailscale-policy/oauth
 
 setup() {
   export TMPDIR="$BATS_TEST_TMPDIR"
-  export ITEMS="$BATS_TEST_TMPDIR/items.json"
+  export ITEM="$BATS_TEST_TMPDIR/item.json"
   HOME_DIR="$BATS_TEST_TMPDIR/home"
   local bin="$BATS_TEST_TMPDIR/bin"
 
@@ -19,11 +19,8 @@ setup() {
   cat >"$bin/bw" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-case "$*" in
-  'get template item') printf '{}\n' ;;
-  'list items --search dotfiles/tailscale-policy-oauth') cat "$ITEMS" ;;
-  *) exit 64 ;;
-esac
+[[ "$1 $2 $3" == 'get item dotfiles/tailscale-policy-oauth' ]] || exit 64
+cat "$ITEM"
 STUB
   sed -i "1c #!$(command -v bash)" "$bin/bw"
   chmod +x "$bin/bw"
@@ -51,7 +48,7 @@ apply_profile() {
 
 write_item() {
   jq -n --arg name "$1" --arg id "$2" --arg secret "$3" \
-    '[{name: $name, login: {username: $id, password: $secret}}]' >"$ITEMS"
+    '{name: $name, login: {username: $id, password: $secret}}' >"$ITEM"
 }
 
 @test "test_oauth_credential_renders_two_lines_owner_only_on_the_workstation" {
@@ -66,28 +63,6 @@ write_item() {
     || fail 'credential directory is not owner-only'
   [[ "$(stat -c %a "$HOME_DIR/$TARGET")" == 600 ]] \
     || fail 'credential file is not owner-only'
-}
-
-@test "test_oauth_credential_ignores_a_similarly_named_item" {
-  jq -n --arg id "$CLIENT_ID" --arg secret "$CLIENT_SECRET" '[
-    {name: "dotfiles/tailscale-policy-oauth-old", login: {username: "other", password: "tskey-client-other"}},
-    {name: "dotfiles/tailscale-policy-oauth", login: {username: $id, password: $secret}}
-  ]' >"$ITEMS"
-
-  apply_profile workstation
-
-  grep -qxF "TS_OAUTH_CLIENT_ID=$CLIENT_ID" "$HOME_DIR/$TARGET" \
-    || fail 'credential came from the similarly named item'
-}
-
-@test "test_oauth_credential_is_absent_and_apply_succeeds_without_the_item" {
-  for items in '[]' '[{"name":"dotfiles/tailscale-policy-oauth-old","login":{"username":"x","password":"tskey-client-x"}}]'; do
-    printf '%s\n' "$items" >"$ITEMS"
-
-    apply_profile workstation
-
-    [[ ! -e "$HOME_DIR/$TARGET" ]] || fail 'apply wrote a credential file without the item'
-  done
 }
 
 @test "test_oauth_credential_apply_fails_naming_the_item_when_a_field_is_empty_or_malformed" {
@@ -110,24 +85,23 @@ write_item() {
   done
 }
 
+@test "test_oauth_credential_apply_fails_when_the_item_does_not_exist" {
+  rm -f "$ITEM"
+
+  if apply_profile workstation 2>"$BATS_TEST_TMPDIR/stderr"; then
+    fail 'apply succeeded without the item'
+  fi
+  [[ ! -e "$HOME_DIR/$TARGET" ]] || fail 'apply wrote a credential file without the item'
+}
+
 @test "test_oauth_credential_apply_fails_when_the_item_has_no_login" {
-  jq -n '[{name: "dotfiles/tailscale-policy-oauth", notes: "x"}]' >"$ITEMS"
+  jq -n '{name: "dotfiles/tailscale-policy-oauth", notes: "x"}' >"$ITEM"
 
   if apply_profile workstation 2>"$BATS_TEST_TMPDIR/stderr"; then
     fail 'apply succeeded with no login'
   fi
   grep -qF "Bitwarden item $ITEM_NAME must hold" "$BATS_TEST_TMPDIR/stderr" \
     || fail 'apply error does not name the item'
-}
-
-@test "test_oauth_credential_apply_fails_when_two_items_share_the_name" {
-  jq -n '[range(2) | {name: "dotfiles/tailscale-policy-oauth", login: {username: "a", password: "tskey-client-a"}}]' >"$ITEMS"
-
-  if apply_profile workstation 2>"$BATS_TEST_TMPDIR/stderr"; then
-    fail 'apply succeeded with two items'
-  fi
-  grep -qF "2 Bitwarden items are named $ITEM_NAME" "$BATS_TEST_TMPDIR/stderr" \
-    || fail 'apply error does not report the duplicate'
 }
 
 @test "test_oauth_credential_is_secret_backed_for_workstation_update" {
