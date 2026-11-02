@@ -29,6 +29,24 @@ verified_harnesses() {
   grep ' --version$' "$COMMAND_LOG" | grep -v '^bun '
 }
 
+# Writes the files the embedded Codex plugin fix expects, built from its own
+# context and removed lines, so the fix applies as it would to an unfixed plugin.
+write_unfixed_codex_plugin() {
+  sed -n "/^  cat <<'PATCH'$/,/^PATCH$/p" "$COMMAND" | sed '1d;$d' \
+    | awk -v root="$CODEX_PLUGIN" '
+        /^diff --git / { hunk = 0; next }
+        /^\+\+\+ b\/plugins\/codex\// {
+          file = root "/" substr($2, length("b/plugins/codex/") + 1)
+          dir = file; sub(/\/[^\/]*$/, "", dir)
+          system("mkdir -p \"" dir "\""); printf "" > file
+          next
+        }
+        /^@@ / { hunk = 1; next }
+        hunk && /^[ -]/ { print substr($0, 2) >> file; next }
+        hunk && /^$/ { print "" >> file }
+      '
+}
+
 setup() {
   bats_require_minimum_version 1.5.0
   export HOME="$BATS_TEST_TMPDIR/home"
@@ -42,7 +60,11 @@ setup() {
   export MARKETPLACE_LIST="$BATS_TEST_TMPDIR/marketplaces.json"
   printf '[{"name":"openai-codex","source":"github","repo":"openai/codex-plugin-cc"}]\n' >"$MARKETPLACE_LIST"
   export PLUGIN_LIST="$BATS_TEST_TMPDIR/plugins.json"
-  printf '[{"id":"codex@openai-codex","scope":"user"},{"id":"context7@claude-plugins-official","scope":"user"}]\n' >"$PLUGIN_LIST"
+  export CODEX_PLUGIN="$BATS_TEST_TMPDIR/codex-plugin"
+  mkdir -p "$CODEX_PLUGIN/scripts"
+  printf 'normalizeArgv(argv, { splitSingleArgument })\n' >"$CODEX_PLUGIN/scripts/codex-companion.mjs"
+  printf '[{"id":"codex@openai-codex","scope":"user","installPath":"%s"},{"id":"context7@claude-plugins-official","scope":"user"}]\n' \
+    "$CODEX_PLUGIN" >"$PLUGIN_LIST"
   local tool
   for tool in npm curl bun opencode pi claude; do
     printf '#!%s\n' "$(command -v bash)" >"$HOME/.local/bin/$tool"
@@ -165,13 +187,14 @@ claude plugin install pstack@pstack-claude
 claude plugin update codex@openai-codex
 claude plugin install frontend-design@anthropic-plugin-directory
 claude plugin install skill-creator@anthropic-plugin-directory
+claude plugin list --json
 LOG
 }
 
 @test "test_update_of_reconciled_claude_plugins_only_updates_the_declared_ones" {
   printf '[{"name":"openai-codex"},{"name":"pstack-claude"},{"name":"claude-plugins-official"}]\n' \
     >"$MARKETPLACE_LIST"
-  printf '[%s]\n' '{"id":"skill-creator@anthropic-plugin-directory"},{"id":"pstack@pstack-claude"},{"id":"context7@claude-plugins-official"},{"id":"frontend-design@anthropic-plugin-directory"},{"id":"codex@openai-codex"}' \
+  printf '[%s]\n' '{"id":"skill-creator@anthropic-plugin-directory"},{"id":"pstack@pstack-claude"},{"id":"context7@claude-plugins-official"},{"id":"frontend-design@anthropic-plugin-directory"},{"id":"codex@openai-codex","installPath":"'"$CODEX_PLUGIN"'"}' \
     >"$PLUGIN_LIST"
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
@@ -182,7 +205,41 @@ claude plugin update pstack@pstack-claude
 claude plugin update codex@openai-codex
 claude plugin update frontend-design@anthropic-plugin-directory
 claude plugin update skill-creator@anthropic-plugin-directory
+claude plugin list --json
 LOG
+}
+
+@test "test_update_fixes_an_unfixed_codex_plugin_task_prompt" {
+  rm -r "$CODEX_PLUGIN"
+  write_unfixed_codex_plugin
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Applied the Codex plugin task-prompt fix'* ]]
+  [[ "$output" == *'Agent tools updated'* ]]
+  grep -q 'splitSingleArgument: false' "$CODEX_PLUGIN/scripts/codex-companion.mjs"
+  grep -qF 'task [runtime flags] -- "<raw prompt>"' "$CODEX_PLUGIN/agents/codex-rescue.md"
+  grep -qF 'task [runtime flags] -- "<raw prompt>"' "$CODEX_PLUGIN/skills/codex-cli-runtime/SKILL.md"
+}
+
+@test "test_update_leaves_a_fixed_codex_plugin_alone" {
+  local before
+  before="$(cat "$CODEX_PLUGIN/scripts/codex-companion.mjs")"
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'Codex plugin task-prompt fix'* ]]
+  [ "$(cat "$CODEX_PLUGIN/scripts/codex-companion.mjs")" = "$before" ]
+}
+
+@test "test_codex_plugin_fix_that_no_longer_applies_warns_and_changes_nothing" {
+  rm -r "$CODEX_PLUGIN"
+  write_unfixed_codex_plugin
+  printf 'reshaped upstream\n' >"$CODEX_PLUGIN/scripts/codex-companion.mjs"
+  cp -r "$CODEX_PLUGIN" "$BATS_TEST_TMPDIR/codex-plugin-before"
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'warning: the Codex plugin task-prompt fix no longer applies'* ]]
+  [[ "$output" == *'Agent tools updated'* ]]
+  diff -r "$BATS_TEST_TMPDIR/codex-plugin-before" "$CODEX_PLUGIN"
 }
 
 @test "test_failed_marketplace_add_names_the_marketplace" {
