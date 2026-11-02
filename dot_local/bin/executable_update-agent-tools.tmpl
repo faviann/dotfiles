@@ -99,4 +99,112 @@ for plugin in "${claude_plugins[@]}"; do
     claude plugin install "$plugin" || fail "Claude Code plugin install failed: $plugin"
   fi
 done
+
+# Codex plugin 1.0.6 re-splits a `task` prompt passed as one argument, so words
+# in the prompt such as `-C <dir>` or `--write` become real options: a review
+# runs in a missing directory, reported as "Codex CLI is not installed", or gets
+# write access. Upstream PR 555 (openai/codex-plugin-cc) fixes it. A plugin
+# update installs a fresh unpatched copy, so the fix is reapplied after every
+# update. Delete this step once a release contains `splitSingleArgument`.
+codex_plugin_task_prompt_fix() {
+  cat <<'PATCH'
+diff --git a/plugins/codex/agents/codex-rescue.md b/plugins/codex/agents/codex-rescue.md
+--- a/plugins/codex/agents/codex-rescue.md
++++ b/plugins/codex/agents/codex-rescue.md
+@@ -19,7 +19,8 @@ Selection guidance:
+
+ Forwarding rules:
+
+-- Use exactly one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task ...`.
++- Use exactly one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task [runtime flags] -- "<raw prompt>"`.
++- Put every runtime flag before `--` and the complete user request after it as one argument. Never re-tokenize prompt text or interpret flag-looking words inside it as runtime controls.
+ - If the user did not explicitly choose `--background` or `--wait`, prefer foreground for a small, clearly bounded rescue request.
+ - If the user did not explicitly choose `--background` or `--wait` and the task looks complicated, open-ended, multi-step, or likely to keep Codex running for a long time, prefer background execution.
+ - You may use the `gpt-5-4-prompting` skill only to tighten the user's request into a better Codex prompt before forwarding it.
+diff --git a/plugins/codex/scripts/codex-companion.mjs b/plugins/codex/scripts/codex-companion.mjs
+--- a/plugins/codex/scripts/codex-companion.mjs
++++ b/plugins/codex/scripts/codex-companion.mjs
+@@ -79,7 +79,7 @@ function printUsage() {
+       "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
+       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
+       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
+-      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
++      "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [--prompt-file <path>|-- <prompt>]",
+       "  node scripts/codex-companion.mjs transfer [--source <claude-jsonl>] [--json]",
+       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
+       "  node scripts/codex-companion.mjs result [job-id] [--json]",
+@@ -127,8 +127,8 @@ function normalizeReasoningEffort(effort) {
+   return normalized;
+ }
+
+-function normalizeArgv(argv) {
+-  if (argv.length === 1) {
++function normalizeArgv(argv, options = {}) {
++  if (options.splitSingleArgument !== false && argv.length === 1) {
+     const [raw] = argv;
+     if (!raw || !raw.trim()) {
+       return [];
+@@ -139,11 +139,12 @@ function normalizeArgv(argv) {
+ }
+
+ function parseCommandInput(argv, config = {}) {
+-  return parseArgs(normalizeArgv(argv), {
+-    ...config,
++  const { splitSingleArgument, ...parseConfig } = config;
++  return parseArgs(normalizeArgv(argv, { splitSingleArgument }), {
++    ...parseConfig,
+     aliasMap: {
+       C: "cwd",
+-      ...(config.aliasMap ?? {})
++      ...(parseConfig.aliasMap ?? {})
+     }
+   });
+ }
+@@ -761,6 +762,10 @@ async function handleReview(argv) {
+
+ async function handleTask(argv) {
+   const { options, positionals } = parseCommandInput(argv, {
++    // A task prompt is free text, not a shell command line. Re-tokenizing a
++    // single prompt argument strips quotes/backslashes and lets prose such as
++    // "--model" or "--write" mutate runtime options.
++    splitSingleArgument: false,
+     valueOptions: ["model", "effort", "cwd", "prompt-file"],
+     booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background"],
+     aliasMap: {
+diff --git a/plugins/codex/skills/codex-cli-runtime/SKILL.md b/plugins/codex/skills/codex-cli-runtime/SKILL.md
+--- a/plugins/codex/skills/codex-cli-runtime/SKILL.md
++++ b/plugins/codex/skills/codex-cli-runtime/SKILL.md
+@@ -9,7 +9,7 @@ user-invocable: false
+ Use this skill only inside the `codex:codex-rescue` subagent.
+
+ Primary helper:
+-- `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task "<raw arguments>"`
++- `node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task [runtime flags] -- "<raw prompt>"`
+
+ Execution rules:
+ - The rescue subagent is a forwarder, not an orchestrator. Its only job is to invoke `task` once and return that stdout unchanged.
+@@ -25,6 +25,7 @@ Execution rules:
+
+ Command selection:
+ - Use exactly one `task` invocation per rescue handoff.
++- Pass runtime flags as separate arguments before `--`, then pass the complete user request as one prompt argument after `--`. This boundary keeps flag-like prose, quotes, backslashes, and newlines inside the prompt.
+ - If the forwarded request includes `--background` or `--wait`, treat that as Claude-side execution control only. Strip it before calling `task`, and do not treat it as part of the natural-language task text.
+ - If the forwarded request includes `--model`, normalize `spark` to `gpt-5.3-codex-spark` and pass it through to `task`.
+ - If the forwarded request includes `--effort`, pass it through to `task`.
+PATCH
+}
+codex_plugin_dir="$(claude plugin list --json \
+  | jq -r '.[] | select(.id == "codex@openai-codex") | .installPath')" \
+  || fail 'listing Claude Code plugins failed'
+[[ -n "$codex_plugin_dir" ]] \
+  || fail 'Claude Code plugin has no install path: codex@openai-codex'
+if ! grep -q splitSingleArgument "$codex_plugin_dir/scripts/codex-companion.mjs" 2>/dev/null; then
+  # A stale fix leaves the plugin as upstream shipped it, so warn and go on.
+  if codex_plugin_task_prompt_fix | (cd "$codex_plugin_dir" && git apply -p3); then
+    printf 'Applied the Codex plugin task-prompt fix (upstream PR 555).\n'
+  else
+    printf 'update-agent-tools: warning: the Codex plugin task-prompt fix no longer applies to %s; check whether upstream PR 555 shipped.\n' \
+      "$codex_plugin_dir" >&2
+  fi
+fi
 printf 'Agent tools updated.\n'
