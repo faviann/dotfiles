@@ -10,7 +10,7 @@ home-manager build --flake .#workstation
 
 ## Base tools
 
-The .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, Azure CLI (`az`), `jq`,
+The .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, `jq`,
 `ripgrep`, `fd`, `fzf`, Hermes, Moraine, and Tailscale with the
 `with-jes-gateway` wrapper ([tailscale](tailscale.md)). The workstation also
 gets the publishing toolchain it shares with desktops: the `artifactserver`
@@ -42,12 +42,15 @@ The managed unit contains:
 - Claude Code (`@anthropic-ai/claude-code`)
 - OpenCode (`opencode-ai`)
 - Pi (`@earendil-works/pi-coding-agent`), on the workstation only
+- Azure CLI (`azure-cli`, through `uv tool`), on the workstation only
 
 [Bun's upstream installer](https://bun.sh/install) supplies its latest runtime,
 selects a CPU-compatible build (including baseline x64), and replaces the binary
-by renaming it into `~/.local/bin`. npm owns package versions, dependency
-resolution, integrity checks, and installation. There is no repository-owned
-release discovery or version cache.
+by renaming it into `~/.local/bin`. npm owns the harness package versions,
+dependency resolution, integrity checks, and installation. `uv tool install
+--upgrade` owns the Azure CLI version in the same way, so `az upgrade` does not
+apply: run `workstation-update` instead. There is no repository-owned release
+discovery or version cache.
 
 Before replacing executables, an npm dry run with
 [`--engine-strict`](https://docs.npmjs.com/cli/v11/using-npm/config/#engine-strict)
