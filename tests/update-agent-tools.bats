@@ -66,7 +66,7 @@ setup() {
   printf '[{"id":"codex@openai-codex","scope":"user","installPath":"%s"},{"id":"context7@claude-plugins-official","scope":"user"}]\n' \
     "$CODEX_PLUGIN" >"$PLUGIN_LIST"
   local tool
-  for tool in npm curl bun opencode pi claude; do
+  for tool in npm curl bun opencode pi claude uv az; do
     printf '#!%s\n' "$(command -v bash)" >"$HOME/.local/bin/$tool"
     cat >>"$HOME/.local/bin/$tool" <<'STUB'
 set -euo pipefail
@@ -91,7 +91,7 @@ case "$name" in
       [[ "${FAIL_AT:-}" != bun ]]
     fi
     ;;
-  opencode|pi) [[ "${FAIL_AT:-}" != "$name" ]] ;;
+  opencode|pi|uv|az) [[ "${FAIL_AT:-}" != "$name" ]] ;;
   claude)
     case "$*" in
       'plugin marketplace list --json')
@@ -143,7 +143,7 @@ STUB
 
 @test "test_failed_installation_or_harness_fails_update" {
   local phase
-  for phase in bun bun-upgrade npm opencode pi marketplace-list marketplace-add \
+  for phase in bun bun-upgrade npm opencode pi uv az marketplace-list marketplace-add \
     plugin-list plugin-install plugin-update; do
     run env FAIL_AT="$phase" bash "$COMMAND"
     [ "$status" -ne 0 ]
@@ -284,4 +284,27 @@ ARGS
 opencode --version
 pi --version
 LOG
+}
+
+@test "test_workstation_installs_or_upgrades_azure_cli_through_uv_and_verifies_it" {
+  run bash "$COMMAND"
+  [ "$status" -eq 0 ]
+  grep -qx 'uv tool install --upgrade azure-cli' "$COMMAND_LOG"
+  grep -qx 'az version' "$COMMAND_LOG"
+}
+
+@test "test_failed_azure_cli_installation_names_the_failure" {
+  run env FAIL_AT=uv bash "$COMMAND"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'Azure CLI installation failed'* ]]
+  [[ "$output" != *'Agent tools updated'* ]]
+  run env FAIL_AT=az bash "$COMMAND"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'verification failed: az'* ]]
+}
+
+@test "test_desktop_does_not_install_azure_cli" {
+  run bash "$(render_updater desktop)"
+  [ "$status" -eq 0 ]
+  run ! grep -qE '^(uv|az) ' "$COMMAND_LOG"
 }

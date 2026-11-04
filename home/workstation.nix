@@ -103,7 +103,7 @@ in
     ./artifact-tools.nix
   ];
 
-  agentTools.commands = [ "pi" ];
+  agentTools.commands = [ "pi" "az" ];
 
   home.username = "faviann";
   home.homeDirectory = "/home/faviann";
@@ -115,7 +115,6 @@ in
     dotnetSdk
     nodejs
     gh
-    azure-cli
     jq
     ripgrep
     fd
