@@ -30,6 +30,9 @@ jobs:
 
       - name: Update and validate the tracked flake inputs
         id: update
+        # An explicit bash shell adds pipefail, so a failed update fails the
+        # step instead of taking tee's exit status.
+        shell: bash
         run: |
           scripts/update-flake-lock | tee "$RUNNER_TEMP/summary.txt"
           if git diff --quiet -- flake.lock; then
