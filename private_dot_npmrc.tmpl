@@ -1,0 +1,6 @@
+{{- $token := (bitwarden "item" "dotfiles/github-cli-token").notes | default "" | trim -}}
+{{- if not (regexMatch "^[[:graph:]]+$" $token) -}}
+{{-   fail "Bitwarden item dotfiles/github-cli-token must hold one GitHub token, on one line, in its Notes" -}}
+{{- end -}}
+prefix=/home/faviann/.local
+//npm.pkg.github.com/:_authToken={{ $token }}

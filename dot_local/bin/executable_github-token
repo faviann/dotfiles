@@ -87,6 +87,8 @@ rotate() {
 
   [[ "$(live_token)" == "$new_token" ]] \
     || fail 'the gh login does not match Bitwarden after reload'
+  chezmoi apply "$HOME/.npmrc" \
+    || fail 'token rotated, but ~/.npmrc still holds the old token; run: chezmoi apply ~/.npmrc'
   printf 'github-token: token rotated; expires %s\n' "$token_expiry"
 }
 

@@ -19,8 +19,10 @@ CLI, Chromium, the DejaVu fonts, and the fontconfig tools
 `github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
 credentials and runtime configuration stay in `~/.hermes`.
 
-Home Manager provides Node/npm and writes the npm prefix as
-`/home/faviann/.local`; all npm-managed commands resolve from `~/.local/bin`.
+Home Manager provides Node/npm, and chezmoi's `~/.npmrc` sets the npm prefix
+to `/home/faviann/.local`; all npm-managed commands resolve from
+`~/.local/bin`. The same file holds the
+[GitHub token](../../BOOTSTRAP.md#github-token).
 
 ## Agent toolchain
 
