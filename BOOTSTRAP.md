@@ -15,8 +15,7 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 | anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, `update-agent-tools`, fish, the `desktop` Home Manager profile, and the homelab WireGuard tunnel | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` |
 
 Apply fails until every Bitwarden item in the profile's row exists, except
-`dotfiles/github-cli-token`, whose `gh` login only warns, and the optional
-[WireGuard item](#bitwarden-wireguard-item). Create them before the
+the optional [WireGuard item](#bitwarden-wireguard-item). Create them before the
 first apply. On an existing machine, create a new item before
 the `chezmoi update` or `workstation-update` that starts to read it.
 
@@ -171,6 +170,7 @@ After apply, chezmoi writes `~/.ssh/id_ed25519`, `~/.ssh/id_ed25519.pub`,
 `~/.config/claude/`, the
 [artifact-server API key](#bitwarden-artifact-server-api-key-item), the
 [OpenCode API key](#bitwarden-opencode-api-key-item), the
+[GitHub token](#github-token) in `~/.npmrc`, the
 [Ansible controller key pair](#bitwarden-ansible-controller-key-item) in
 `~/.ansible/ssh/`, and the
 [vault passphrase](#bitwarden-ansible-vault-passphrase-item) in
@@ -543,8 +543,12 @@ GitHub should identify the account and report that shell access is not provided.
 
 On the workstation and desktops, HTTPS git and `gh` use one classic personal
 access token. Its Bitwarden item is `dotfiles/github-cli-token`, with the token
-in Notes, and its live copy is `gh`'s own login. Git reaches it through
-`gh auth git-credential`. On every profile, `chezmoi apply` logs `gh` in with
+in Notes. Its live copies are `gh`'s own login and an owner-only
+`~/.npmrc`. Git reaches it through `gh auth git-credential`. npm reads it from
+`~/.npmrc` to install `@thecompanylive` packages, such as the Jungle engine,
+from GitHub Packages; each project's own `.npmrc` maps the scope to
+`https://npm.pkg.github.com`. Apply replaces any line added to `~/.npmrc` by
+hand or by `npm login`. On every profile, `chezmoi apply` logs `gh` in with
 the token when Bitwarden is unlocked and `gh` does not already hold it. A
 failed login prints a warning and does not fail the apply. On a new
 workstation, `gh` is not installed during the first apply, so the login in
@@ -554,7 +558,7 @@ Create the token with an expiration date and these scopes:
 
 - `repo`, with all of its sub-scopes
 - `workflow`
-- `write:packages`, which includes `read:packages`
+- `write:packages`, which includes the `read:packages` that npm needs
 - `read:org`, under `admin:org`; `gh` refuses to log in without it
 
 If the organization enforces SAML single sign-on, authorize the token for it
@@ -578,11 +582,11 @@ github-token rotate
 The command reads the token from standard input, without echoing it on a
 terminal. It needs an unlocked Bitwarden session. It checks the token with
 GitHub, refuses a token without an expiration date, writes the token to the
-item's Notes, syncs Bitwarden, and logs `gh` in with it. An invalid token
+item's Notes, syncs Bitwarden, logs `gh` in with it, and applies `~/.npmrc`. An invalid token
 leaves Bitwarden unchanged.
 
-The other machines log in with the new token on their next apply with
-Bitwarden unlocked. On each one, run `bw sync`, then run
+The other machines pick up the new token, for `gh` and npm, on their next
+apply with Bitwarden unlocked. On each one, run `bw sync`, then run
 `workstation-update --refresh-secrets` on the workstation or `chezmoi apply` on
 a desktop.
 

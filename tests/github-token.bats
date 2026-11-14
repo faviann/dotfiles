@@ -63,6 +63,14 @@ case "$1 ${2:-}" in
   *) exit 64 ;;
 esac
 STUB
+  # Renders ~/.npmrc the way chezmoi would: from the item's Notes at call time.
+  cat >"$bin/chezmoi" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'chezmoi %s\n' "$*" >>"$CALLS"
+[[ "$*" == "apply $HOME/.npmrc" && -z "${CHEZMOI_FAILS:-}" ]] || exit 1
+jq -r '.[] | select(.name == "dotfiles/github-cli-token") | .notes' "$STATE/items.json" >"$STATE/npmrc-token"
+STUB
   cp "$REPO_ROOT/dot_local/bin/executable_github-token" "$bin/github-token"
   sed -i "1c #!$(command -v bash)" "$bin/"*
   chmod +x "$bin/"*
@@ -104,6 +112,17 @@ token_expires() {
   [[ "$output" != *new-secret-token* ]]
   [ "$(item_notes dotfiles/github-cli-token)" = new-secret-token ]
   [ "$(item_notes dotfiles/other)" = other-notes ]
+  [ "$(cat "$STATE/gh-token")" = new-secret-token ]
+  [ "$(cat "$STATE/npmrc-token")" = new-secret-token ]
+}
+
+@test "test_rotate_fails_loudly_when_npmrc_cannot_be_refreshed" {
+  token_expires new-secret-token '+60 days'
+  export CHEZMOI_FAILS=1
+  run github-token rotate <<<'new-secret-token'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'token rotated, but ~/.npmrc still holds the old token; run: chezmoi apply ~/.npmrc'* ]]
+  [ "$(item_notes dotfiles/github-cli-token)" = new-secret-token ]
   [ "$(cat "$STATE/gh-token")" = new-secret-token ]
 }
 
