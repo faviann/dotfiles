@@ -1,12 +1,10 @@
-Classify a clone by the original repo's owner, using my role there (`gh api user/memberships/orgs/<owner> --jq .role`):
+Classify a clone by the original repo's owner (`gh api user/memberships/orgs/<owner> --jq .role`):
 
-| Owner | Kind | Remotes |
-|---|---|---|
-| me, or an org where I'm admin | my repo | `origin` |
-| an org where I'm a member | contribution fork | `origin` = my fork, `upstream` = theirs |
-| anyone else | personal fork | `origin` = my fork, `source` = theirs |
+| Owner | Kind | Remotes | PRs target |
+|---|---|---|---|
+| me | my repo | `origin` | `origin` |
+| an org I belong to | contribution fork | `origin` = my fork, `upstream` = theirs | `upstream` |
+| anyone else | personal fork | `origin` = my fork, `source` = theirs | `origin` |
 
-- Fix mismatched remotes before working: rename them, or run `gh repo fork --remote` when the fork is missing; then point `gh repo set-default` at the PR target. Tell me the kind you picked.
-- In my repo or a personal fork, PRs target `origin`.
-- A contribution fork has a `source` remote only where I added one.
-- Sync from `source` only when I ask: branch from the usual base, merge a `source` tag, and open a PR.
+- Fix mismatched remotes before working: rename them, or `gh repo fork --remote` when the fork is missing, then `gh repo set-default` to the PR target. Tell me the kind.
+- Sync from `source` only when I ask: branch from the usual base, merge a `source` tag, open a PR.

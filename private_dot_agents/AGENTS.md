@@ -9,7 +9,7 @@ Make changes in a git worktree; keep the main checkout for reading, pulling, and
 </important>
 
 <important if="you are about to create a worktree, push, or open a pull request">
-Push only to `origin`, and open PRs against `upstream` only when I ask. In a fork or someone else's clone, read `~/.agents/forks.md` first.
+Push only to `origin`. Open PRs to orgs I admin as drafts, and to other owners only when I ask. Outside my personal account, read `~/.agents/forks.md` first.
 </important>
 
 <important if="you are about to post to GitHub: an issue, PR, comment, review, or pushed commit message">
