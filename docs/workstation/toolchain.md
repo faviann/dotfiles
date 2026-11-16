@@ -11,13 +11,11 @@ home-manager build --flake .#workstation
 ## Base tools
 
 The .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, `jq`,
-`ripgrep`, `fd`, `fzf`, Hermes, Moraine, and Tailscale with the
+`ripgrep`, `fd`, `fzf`, Moraine, and Tailscale with the
 `with-jes-gateway` wrapper ([tailscale](tailscale.md)). The workstation also
 gets the publishing toolchain it shares with desktops: the `artifactserver`
 CLI, Chromium, the DejaVu fonts, and the fontconfig tools
-([desktop toolchain](../desktop-toolchain.md)). Hermes is installed from
-`github:NousResearch/hermes-agent` as a normal non-NixOS package; provider
-credentials and runtime configuration stay in `~/.hermes`.
+([desktop toolchain](../desktop-toolchain.md)).
 
 Home Manager provides Node/npm, and chezmoi's `~/.npmrc` sets the npm prefix
 to `/home/faviann/.local`; all npm-managed commands resolve from

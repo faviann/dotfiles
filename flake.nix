@@ -12,12 +12,6 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    hermes-agent.url = "github:NousResearch/hermes-agent";
-    nix-openclaw = {
-      url = "github:openclaw/nix-openclaw";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.home-manager.follows = "home-manager";
-    };
   };
 
   outputs =
@@ -26,18 +20,12 @@
       dotnet-nixpkgs,
       fenix,
       home-manager,
-      hermes-agent,
-      nix-openclaw,
       ...
     }:
     let
       system = "x86_64-linux";
-      openclawOverlay = import "${nix-openclaw}/nix/overlay.nix" {
-        openclawToolPkgs = nix-openclaw.inputs.nix-openclaw-tools.packages.${system};
-      };
       pkgs = import nixpkgs {
         inherit system;
-        overlays = [ openclawOverlay ];
         config.allowUnfree = true;
       };
       dotnetPkgs = import dotnet-nixpkgs {
@@ -79,10 +67,8 @@
         inherit pkgs;
         extraSpecialArgs = {
           inherit artifactServerPackage dotnetSdk morainePackage;
-          hermesPackage = hermes-agent.packages.${system}.default;
         };
         modules = [
-          nix-openclaw.homeManagerModules.openclaw
           ./home/workstation.nix
         ];
       };
