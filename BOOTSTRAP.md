@@ -146,10 +146,8 @@ steps in order:
 The bootstrap handoff is part of `workstation-setup`, not SSH login or a
 background schedule.
 
-Hermes runtime state lives in `~/.hermes`. On a rebuilt workstation that already
-has Hermes state, move that directory into `/ephemeral/workstation/home/.hermes`
-before enabling the bind mount. For Collie's service-regeneration prerequisites
-and retry command, see [recovery after an LXC rebuild](docs/runbooks/collie.md#recovery-after-an-lxc-rebuild).
+For Collie's service-regeneration prerequisites and retry command, see
+[recovery after an LXC rebuild](docs/runbooks/collie.md#recovery-after-an-lxc-rebuild).
 
 Setup does not log in Azure CLI. There is no service principal, so agents act as
 your own account. Log in once; the session in `~/.azure` persists until it goes
