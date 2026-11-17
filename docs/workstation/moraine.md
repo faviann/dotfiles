@@ -1,28 +1,21 @@
 # Workstation Moraine
 
-## Pinned build
+## Pinned release
 
-The workstation profile source-builds Moraine at commit `91cd7a13ba29`, the
-mainline merge of upstream PR #658 after v0.7.3, with the upstream Rust 1.96.0
-toolchain and locked Cargo closure. It installs matching CLI, ingest,
-monitor-compatibility alias, and MCP executables, while reusing the unchanged,
-hash-pinned v0.7.3 monitor assets. There is intentionally no separate monitor
-unit; the unified MCP/backend executable owns the monitor HTTP listener, native
-loopback `/mcp` endpoint, and private MCP socket. The source still reports
-version 0.7.3, so use the commit-bearing `moraine --version` output, not the
-semantic version alone, to identify this build.
+The workstation profile installs the official upstream Moraine v0.7.8 release
+bundle for `x86_64-unknown-linux-gnu`, pinned by its SHA-256 hash in
+`packages/moraine.nix`. It installs the CLI, ingest, monitor-compatibility
+alias, and MCP executables, plus the monitor assets from the same bundle.
+There is intentionally no separate monitor unit; the unified MCP/backend
+executable owns the monitor HTTP listener, native loopback `/mcp` endpoint, and
+private MCP socket. `moraine --version` reports the release version with
+upstream's build commit, such as `0.7.8+gfbaa99c95345`.
 
-## Memory headroom
-
-The package temporarily gives Moraine's interactive query profile 8 GiB, its
-ClickHouse user a 16 GiB aggregate limit, and managed ClickHouse a 48 GiB
-process limit on this 64 GiB host. This keeps session discovery usable while
-upstream issue #599's bounded summary query remains unresolved. Background
-queries retain upstream's 256 MiB ceiling. Remove
-`packages/moraine-managed-memory-headroom.patch` when a bounded upstream
-discovery path is pinned. Managed ClickHouse refuses startup below 2 GiB of
-detected memory; `moraine up` may restart it when managed resource settings
-change.
+To upgrade, change the version and hash in `packages/moraine.nix` together,
+and compare the new release's notes and `moraine <command> --help` output with
+the invocations in `scripts/moraine-service` and `home/workstation.nix`. Since
+v0.7.4, `--output` belongs to each command, so the health check runs
+`moraine status --output json`.
 
 ## Configuration and state
 
@@ -47,12 +40,12 @@ stack. Upstream `moraine up` owns managed ClickHouse readiness, database
 migrations, ingest, and unified-backend startup. The foreground unit monitors
 aggregate Moraine health and restarts the complete stack on failure. Default
 Moraine topology explicitly keeps the HTTP listener on `127.0.0.1:8080`, where
-the pinned build serves `POST /mcp`, and its per-user MCP Unix socket at mode
+the pinned release serves `POST /mcp`, and its per-user MCP Unix socket at mode
 0600; there is no non-loopback listener. Applying a Home Manager generation
 restarts the service when the managed Moraine configuration changes, so
 ingestion reloads newly declared sources.
 
-For this pinned build, HTTP MCP requires an explicit loopback IP in
+For this pinned release, HTTP MCP requires an explicit loopback IP in
 `backend.bind`: wildcards, non-loopback addresses, and `localhost` do not enable
 `/mcp`, even with an `auth_token`. HTTP uses the default backend; named-backend
 routing and `--project-only` retrieval remain stdio-only because HTTP has no
