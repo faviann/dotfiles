@@ -2,11 +2,10 @@
 set -euo pipefail
 
 # GitHub-hosted runners ship toolchains this repository never uses, and the
-# images grow over time. Building Moraine's Rust toolchain from source needs
-# more room than the stock image leaves free, so reclaim the unused trees
-# before Nix creates /nix. Removal is best effort: a path the current image no
-# longer ships is not an error, and a failure here must not mask the real
-# validation result.
+# images grow over time. Nix builds can need more room than the stock image
+# leaves free, so reclaim the unused trees before Nix creates /nix. Removal is
+# best effort: a path the current image no longer ships is not an error, and a
+# failure here must not mask the real validation result.
 
 fail() {
   printf 'reclaim-runner-disk: %s\n' "$*" >&2
