@@ -16,7 +16,7 @@ readonly status_interval="${MORAINE_STATUS_INTERVAL_SECONDS:-5}"
 readonly control=("$moraine_command" --config "$config_path")
 
 stack_is_healthy() {
-  "${control[@]}" --output json status \
+  "${control[@]}" status --output json \
     | jq -e '
         ([.services[] | select(.state == "running") | .service] | sort)
           == ["backend", "clickhouse", "ingest"] and

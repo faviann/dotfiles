@@ -166,7 +166,7 @@ rendered_moraine_config() {
   printf '%s\n' \
     "#!$(command -v bash)" \
     'printf '\''%s\n'\'' "$*" >>"$TEST_INVOCATION_LOG"' \
-    'if [[ "$*" == *" status" ]]; then' \
+    'if [[ "$*" == *" status --output json" ]]; then' \
     '  count="$(wc -l <"$TEST_INVOCATION_LOG")"' \
     '  if (( count < 3 )); then' \
     '    printf '\''%s\n'\'' '\''{"services":[{"service":"clickhouse","state":"running"},{"service":"ingest","state":"running"},{"service":"backend","state":"running"}],"doctor":{"clickhouse_healthy":true,"database_exists":true,"pending_migrations":[],"missing_tables":[],"errors":[]}}'\''' \
@@ -187,8 +187,8 @@ rendered_moraine_config() {
   diff -u \
     <(printf '%s\n' \
       "--config $test_dir/config.toml up" \
-      "--config $test_dir/config.toml --output json status" \
-      "--config $test_dir/config.toml --output json status") \
+      "--config $test_dir/config.toml status --output json" \
+      "--config $test_dir/config.toml status --output json") \
     "$invocation_log" \
     || fail 'Moraine service runner does not start upstream before monitoring stack health'
 }
