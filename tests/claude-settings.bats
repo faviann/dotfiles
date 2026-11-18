@@ -36,9 +36,9 @@ managed_for() {
     \"DISABLE_ERROR_REPORTING\": \"1\",
     \"DISABLE_AUTOUPDATER\": \"1\",
     \"CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF\": \"1\",
-    \"_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\": \"1\",
-    \"ENABLE_CLAUDEAI_MCP_SERVERS\": \"false\"
+    \"_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\": \"1\"
   },
+  \"allowedMcpServers\": [{\"serverUrl\": \"https://artifact-server.public.faviann.com/mcp\"}, {\"serverUrl\": \"https://api.anthropic.com/v1/pages/mcp\"}],
   \"syncClaudeAiSkills\": false,
   \"syncClaudeAiPlugins\": false,
   \"attribution\": {\"commit\": \"\", \"pr\": \"\"},
@@ -84,7 +84,9 @@ settings_chezmoi() {
 {
   "model": "opus",
   "permissions": {"allow": ["Bash(ls:*)"]},
-  "env": {"OTHER": "kept", "ANTHROPIC_BASE_URL": "https://stale.example", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+  "env": {"OTHER": "kept", "ANTHROPIC_BASE_URL": "https://stale.example", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
+  "disableClaudeAiConnectors": true,
+  "allowedMcpServers": [{"serverName": "stale"}],
   "apiKeyHelper": "cat ~/.config/claude/gateway-token",
   "attribution": {"pr": "stale"},
   "hooks": {
@@ -116,9 +118,12 @@ JSON
     "DISABLE_ERROR_REPORTING": "1",
     "DISABLE_AUTOUPDATER": "1",
     "CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF": "1",
-    "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL": "1",
-    "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
+    "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL": "1"
   },
+  "allowedMcpServers": [
+    {"serverUrl": "https://artifact-server.public.faviann.com/mcp"},
+    {"serverUrl": "https://api.anthropic.com/v1/pages/mcp"}
+  ],
   "syncClaudeAiSkills": false,
   "syncClaudeAiPlugins": false,
   "attribution": {"commit": "", "pr": ""},
