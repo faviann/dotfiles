@@ -286,6 +286,13 @@ account with subscription" with the work account. If the Artifact tool is
 missing, run one session with `DISABLE_TELEMETRY` unset to refresh the cached
 feature flags.
 
+Chezmoi also sets `allowedMcpServers` in `~/.claude/settings.json`, so Claude
+Code loads only artifact-server and the claude.ai Claude Docs connector, which
+reads Claude Docs links. Every other MCP server stays out until it is listed
+there, including servers added with `claude mcp add`, plugin servers, and the
+org's other claude.ai connectors. After a Claude Code update, run `claude mcp
+list` and check that no other claude.ai connector appears.
+
 ## Bitwarden artifact-server API Key Item
 
 Agents publish to artifact-server at `artifact-server.public.faviann.com` and

@@ -20,8 +20,11 @@
 {{- $settings = setValueAtPath "env.CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF" "1" $settings -}}
 {{- /* Undocumented. Behind a custom base URL Claude Code never fetches the org policy, and the Artifact tool needs it. */ -}}
 {{- $settings = setValueAtPath "env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL" "1" $settings -}}
-{{- /* Keep the claude.ai org's connectors, skills, and plugins out of every session. */ -}}
-{{- $settings = setValueAtPath "env.ENABLE_CLAUDEAI_MCP_SERVERS" "false" $settings -}}
+{{- /* Load claude.ai connectors but admit only artifact-server and the first-party Claude Docs connector, so a link to a Claude Doc is readable. Any other MCP server, a newly added org connector included, stays out until listed here. Either kill switch would hide Claude Docs too. */ -}}
+{{- $_ = unset $settings.env "ENABLE_CLAUDEAI_MCP_SERVERS" -}}
+{{- $settings = unset $settings "disableClaudeAiConnectors" -}}
+{{- $settings = setValueAtPath "allowedMcpServers" (list (dict "serverUrl" (printf "%s/mcp" .artifactServer.url)) (dict "serverUrl" "https://api.anthropic.com/v1/pages/mcp")) $settings -}}
+{{- /* Keep the claude.ai org's skills and plugins out of every session. */ -}}
 {{- $settings = setValueAtPath "syncClaudeAiSkills" false $settings -}}
 {{- $settings = setValueAtPath "syncClaudeAiPlugins" false $settings -}}
 {{- $settings = setValueAtPath "attribution" (dict "commit" "" "pr" "") $settings -}}
