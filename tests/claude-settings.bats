@@ -24,6 +24,7 @@ EOF
 # shellcheck disable=SC2016
 TRACK_PRS='{"matcher":"Bash","hooks":[{"type":"command","command":"bash \"$HOME/.claude/hooks/track-session-prs.sh\"","timeout":5}]}'
 GATEWAY="https://ai-gateway.jungleservices.net"
+ARTIFACT_MCP="$(sed -n 's/^ *url = "\(.*\)"$/\1/p' "$REPO_ROOT/.chezmoidata/artifact-server.toml")/mcp"
 
 managed_for() {
   local gateway="$1"
@@ -38,7 +39,7 @@ managed_for() {
     \"CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF\": \"1\",
     \"_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL\": \"1\"
   },
-  \"allowedMcpServers\": [{\"serverUrl\": \"https://artifact-server.public.faviann.com/mcp\"}, {\"serverUrl\": \"https://api.anthropic.com/v1/pages/mcp\"}],
+  \"allowedMcpServers\": [{\"serverUrl\": \"$ARTIFACT_MCP\"}, {\"serverUrl\": \"https://api.anthropic.com/v1/pages/mcp\"}],
   \"syncClaudeAiSkills\": false,
   \"syncClaudeAiPlugins\": false,
   \"attribution\": {\"commit\": \"\", \"pr\": \"\"},
@@ -104,7 +105,7 @@ JSON
 
   cmp -s "$first_apply" "$settings" \
     || fail 'second apply changed settings.json'
-  diff -u <(jq -S . <<'JSON'
+  diff -u <(jq -S --arg artifact "$ARTIFACT_MCP" '.allowedMcpServers[0].serverUrl = $artifact' <<'JSON'
 {
   "model": "opus",
   "permissions": {"allow": ["Bash(ls:*)"], "defaultMode": "bypassPermissions"},
@@ -121,7 +122,7 @@ JSON
     "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL": "1"
   },
   "allowedMcpServers": [
-    {"serverUrl": "https://artifact-server.public.faviann.com/mcp"},
+    {"serverUrl": "artifact-server, from .chezmoidata"},
     {"serverUrl": "https://api.anthropic.com/v1/pages/mcp"}
   ],
   "syncClaudeAiSkills": false,

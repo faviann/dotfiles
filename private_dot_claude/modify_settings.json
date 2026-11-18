@@ -23,7 +23,7 @@
 {{- /* Load claude.ai connectors but admit only artifact-server and the first-party Claude Docs connector, so a link to a Claude Doc is readable. Any other MCP server, a newly added org connector included, stays out until listed here. Either kill switch would hide Claude Docs too. */ -}}
 {{- $_ = unset $settings.env "ENABLE_CLAUDEAI_MCP_SERVERS" -}}
 {{- $settings = unset $settings "disableClaudeAiConnectors" -}}
-{{- $settings = setValueAtPath "allowedMcpServers" (list (dict "serverUrl" "https://artifact-server.public.faviann.com/mcp") (dict "serverUrl" "https://api.anthropic.com/v1/pages/mcp")) $settings -}}
+{{- $settings = setValueAtPath "allowedMcpServers" (list (dict "serverUrl" (printf "%s/mcp" .artifactServer.url)) (dict "serverUrl" "https://api.anthropic.com/v1/pages/mcp")) $settings -}}
 {{- /* Keep the claude.ai org's skills and plugins out of every session. */ -}}
 {{- $settings = setValueAtPath "syncClaudeAiSkills" false $settings -}}
 {{- $settings = setValueAtPath "syncClaudeAiPlugins" false $settings -}}
