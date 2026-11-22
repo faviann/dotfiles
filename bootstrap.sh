@@ -163,3 +163,4 @@ chezmoi apply || die 'chezmoi apply failed; fix the error above, then rerun this
 say 'done. Next steps:'
 say '  Open a new terminal so it picks up Nix and the new PATH.'
 say '  Run codex login to sign Codex in on this machine.'
+say "  Run tailscale up --operator=$(id -un) --accept-routes --accept-dns --shields-up and sign in with your work account."

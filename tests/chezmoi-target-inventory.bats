@@ -22,6 +22,7 @@ readonly INVENTORY='
 .bash_profile                                   workstation desktop
 .bashrc                                         workstation desktop
 .chezmoiscripts/clone-homelab-iac.sh            workstation desktop
+.chezmoiscripts/connect-work-tailscale.sh       desktop
 .chezmoiscripts/github-known-hosts.sh           workstation desktop
 .chezmoiscripts/install-herdr-integrations.sh   workstation desktop
 .chezmoiscripts/install-herdr.sh                workstation desktop
