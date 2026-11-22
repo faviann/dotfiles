@@ -468,7 +468,7 @@ EXPECTED
   STUB_APPLY_STATUS=1 run_bootstrap
   [ "$status" -eq 1 ]
   [ "$stderr" = 'bootstrap: error: chezmoi apply failed; fix the error above, then rerun this command' ]
-  [[ "$output" != *'Next steps'* ]] || fail 'printed next steps after a failed apply'
+  [[ "$output" != *'bootstrap: done.'* ]] || fail 'printed the done message after a failed apply'
 
   : >"$CALLS"
   run_bootstrap

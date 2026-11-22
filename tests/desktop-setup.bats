@@ -22,6 +22,7 @@ readonly ADMIN_URL=https://login.tailscale.com/admin/machines
 write_stub() {
   local name="$1"
   {
+    # shellcheck disable=SC2016 # the stub's own $* and $CALLS expand when it runs
     printf '#!%s\nset -euo pipefail\nprintf "%s %%s\\n" "$*" >>"$CALLS"\n' "$REAL_BASH" "$name"
     cat
   } >"$STUBS/$name"
@@ -154,13 +155,13 @@ assert_summary() {
 @test "test_summary_lists_every_step_as_done" {
   run_setup
 
-  assert_summary 'Tailscale sign-in' done
-  assert_summary 'Tailscale key expiry' done
-  assert_summary 'AI gateway reachable' done
-  assert_summary 'Codex sign-in' done
-  assert_summary 'Claude Code claude.ai login' done
-  assert_summary 'Azure CLI login' done
-  assert_summary 'Wi-Fi networks in Bitwarden' done
+  assert_summary 'Tailscale sign-in' 'done'
+  assert_summary 'Tailscale key expiry' 'done'
+  assert_summary 'AI gateway reachable' 'done'
+  assert_summary 'Codex sign-in' 'done'
+  assert_summary 'Claude Code claude.ai login' 'done'
+  assert_summary 'Azure CLI login' 'done'
+  assert_summary 'Wi-Fi networks in Bitwarden' 'done'
 }
 
 @test "test_tailscale_sign_in_runs_tailscale_up_with_all_four_flags" {
@@ -171,7 +172,7 @@ assert_summary() {
   [ "$status" -eq 0 ]
   grep -qxF "$UP_COMMAND" "$CALLS" || fail "no tailscale up with the four flags: $(calls)"
   [[ "$output" == *'https://login.tailscale.com/a/fixture'* ]]
-  assert_summary 'Tailscale sign-in' done
+  assert_summary 'Tailscale sign-in' 'done'
 }
 
 @test "test_a_device_waiting_for_approval_names_the_admin_page_and_rechecks_after_enter" {
@@ -182,7 +183,7 @@ assert_summary() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"A work-tailnet admin must approve this device at $ADMIN_URL."* ]] || fail "no approval message: $output"
   ! grep -q '^tailscale up' "$CALLS" || fail "ran tailscale up for a device that only awaits approval"
-  assert_summary 'Tailscale sign-in' done
+  assert_summary 'Tailscale sign-in' 'done'
 }
 
 @test "test_an_approval_that_has_not_happened_asks_again_until_skipped" {
@@ -203,7 +204,7 @@ assert_summary() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Open $ADMIN_URL, find this machine (glados),"* ]] || fail "no instructions: $output"
   [[ "$output" == *'"Disable key expiry"'* ]]
-  assert_summary 'Tailscale key expiry' done
+  assert_summary 'Tailscale key expiry' 'done'
 }
 
 @test "test_a_key_that_still_expires_can_be_skipped" {
@@ -235,7 +236,7 @@ assert_summary() {
   [[ "$output" == *'135.119.134.202 does not route through tailscale0'* ]] || fail "no route hint: $output"
   [[ "$output" == *'answered 000, not the expected 401'* ]] || fail "no status hint: $output"
   assert_summary 'AI gateway reachable' failed
-  assert_summary 'Codex sign-in' done
+  assert_summary 'Codex sign-in' 'done'
 }
 
 @test "test_codex_that_is_not_signed_in_runs_codex_login" {
@@ -245,7 +246,7 @@ assert_summary() {
 
   [ "$status" -eq 0 ]
   grep -qxF 'codex login' "$CALLS" || fail "no codex login: $(calls)"
-  assert_summary 'Codex sign-in' done
+  assert_summary 'Codex sign-in' 'done'
 }
 
 @test "test_claude_code_that_is_not_logged_in_runs_claude_auth_login" {
@@ -256,7 +257,7 @@ assert_summary() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'Only claude.ai artifacts need this'* ]]
   grep -qxF 'claude auth login --claudeai' "$CALLS" || fail "no claude auth login: $(calls)"
-  assert_summary 'Claude Code claude.ai login' done
+  assert_summary 'Claude Code claude.ai login' 'done'
 }
 
 @test "test_azure_that_is_not_logged_in_prompts_for_the_tenant_and_logs_in_by_device_code" {
@@ -268,7 +269,7 @@ assert_summary() {
   [[ "$output" == *'Tenant id or domain'* ]]
   grep -qxF 'az login --use-device-code --tenant contoso.example' "$CALLS" || fail "no az login: $(calls)"
   [[ "$output" == *'https://microsoft.com/devicelogin'* ]] || fail "device-code instructions were hidden: $output"
-  assert_summary 'Azure CLI login' done
+  assert_summary 'Azure CLI login' 'done'
 }
 
 @test "test_unsaved_wifi_networks_are_offered_to_wifi_sync" {
@@ -279,7 +280,7 @@ assert_summary() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'not in Bitwarden: Cafe'* ]]
   grep -qxF 'wifi-sync ' "$CALLS" || fail "wifi-sync did not run: $(calls)"
-  assert_summary 'Wi-Fi networks in Bitwarden' done
+  assert_summary 'Wi-Fi networks in Bitwarden' 'done'
 }
 
 @test "test_skip_answers_are_recorded_as_skipped_and_do_not_fail_the_run" {
@@ -309,8 +310,8 @@ assert_summary() {
   [ "$status" -eq 1 ]
   [[ "$output" == *'codex is not on PATH. Run update-agent-tools to install it.'* ]] || fail "no hint: $output"
   assert_summary 'Codex sign-in' failed
-  assert_summary 'Claude Code claude.ai login' done
-  assert_summary 'Wi-Fi networks in Bitwarden' done
+  assert_summary 'Claude Code claude.ai login' 'done'
+  assert_summary 'Wi-Fi networks in Bitwarden' 'done'
 }
 
 @test "test_without_a_terminal_it_prints_the_steps_and_asks_nothing" {
