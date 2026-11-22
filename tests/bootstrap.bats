@@ -35,7 +35,10 @@ case "$1" in
 esac
 STUB
   stub id <<'STUB'
-printf '%s\n' "${STUB_UID:-1000}"
+case "$1" in
+  -un) printf 'tester\n' ;;
+  *) printf '%s\n' "${STUB_UID:-1000}" ;;
+esac
 STUB
   stub dpkg-query <<'STUB'
 [[ -e "$STATE/apt" ]] || exit 1
@@ -196,6 +199,7 @@ bootstrap: chezmoi_apply: running
 bootstrap: done. Next steps:
 bootstrap:   Open a new terminal so it picks up Nix and the new PATH.
 bootstrap:   Run codex login to sign Codex in on this machine.
+bootstrap:   Run tailscale up --operator=tester --accept-routes --accept-dns --shields-up and sign in with your work account.
 EXPECTED
   diff -u - <(actions) <<'EXPECTED'
 chezmoi apply
