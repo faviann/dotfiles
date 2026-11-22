@@ -632,7 +632,7 @@ import-wifi-networks: error: NetworkManager rejected the profile of dotfiles/wif
   [ "$status" -eq 0 ]
   [[ "$output" == *'Hotel (wpa-psk)'* ]]
   grep -qxF 'bw login --raw' "$CALLS"
-  ! grep -qxF 'bw unlock --raw' "$CALLS"
+  run ! grep -qxF 'bw unlock --raw' "$CALLS"
 }
 
 @test "test_wifi_sync_reminder_stays_silent_when_the_vault_is_locked" {
