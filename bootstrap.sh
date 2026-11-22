@@ -160,7 +160,12 @@ done
 say 'chezmoi_apply: running'
 chezmoi apply || die 'chezmoi apply failed; fix the error above, then rerun this command'
 
-say 'done. Next steps:'
-say '  Open a new terminal so it picks up Nix and the new PATH.'
-say '  Run codex login to sign Codex in on this machine.'
-say "  Run tailscale up --operator=$(id -un) --accept-routes --accept-dns --shields-up and sign in with your work account."
+say 'done. Open a new terminal so it picks up Nix and the new PATH.'
+if [[ -t 0 ]]; then
+  say 'desktop-setup: running the steps that need you'
+  # The Home Manager profile is not on PATH until a new shell reads it.
+  PATH="$HOME/.nix-profile/bin:$PATH" desktop-setup \
+    || say 'desktop-setup left steps open; rerun desktop-setup to resume'
+else
+  say 'run desktop-setup in a terminal to finish the steps that need you'
+fi
