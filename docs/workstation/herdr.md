@@ -11,7 +11,7 @@
 - **Integrations**: every `chezmoi apply` runs
   `.chezmoiscripts/run_after_install-herdr-integrations.sh`, which
   installs each integration that Herdr does not report as current: Claude
-  Code, Codex, and OpenCode, plus Pi on the workstation. Herdr resumes agent
+  Code, Codex, pi, and OpenCode. Herdr resumes agent
   panes after a server restart only through these integrations. A running
   agent loads a new integration only after it restarts. See the runbook for
   the update sequence.

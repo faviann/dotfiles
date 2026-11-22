@@ -10,12 +10,11 @@ home-manager build --flake .#workstation
 
 ## Base tools
 
-The .NET 10 LTS SDK, Node.js/npm, `uv`, `gh`, `jq`,
-`ripgrep`, `fd`, `fzf`, Moraine, and Tailscale with the
+Node.js/npm, `gh`, `jq`, Moraine, and Tailscale with the
 `with-jes-gateway` wrapper ([tailscale](tailscale.md)). The workstation also
-gets the publishing toolchain it shares with desktops: the `artifactserver`
-CLI, Chromium, the DejaVu fonts, and the fontconfig tools
-([desktop toolchain](../desktop-toolchain.md)).
+gets what it shares with desktops: the .NET 10 LTS SDK, `ripgrep`, `fd`, `fzf`,
+and the publishing toolchain of the `artifactserver` CLI, Chromium, the DejaVu
+fonts, and the fontconfig tools ([desktop toolchain](../desktop-toolchain.md)).
 
 Home Manager provides Node/npm, and chezmoi's `~/.npmrc` sets the npm prefix
 to `/home/faviann/.local`; all npm-managed commands resolve from
@@ -41,15 +40,15 @@ The managed unit contains:
 - the standalone Codex CLI (`@openai/codex`)
 - Claude Code (`@anthropic-ai/claude-code`)
 - OpenCode (`opencode-ai`)
-- Pi (`@earendil-works/pi-coding-agent`), on the workstation only
-- Azure CLI (`azure-cli`, through `uv tool`), on the workstation only
+- Pi (`@earendil-works/pi-coding-agent`)
+- Azure CLI (`azure-cli`, through `uv tool`)
 
 [Bun's upstream installer](https://bun.sh/install) supplies its latest runtime,
 selects a CPU-compatible build (including baseline x64), and replaces the binary
 by renaming it into `~/.local/bin`. npm owns the harness package versions,
 dependency resolution, integrity checks, and installation. `uv tool install
 --upgrade` owns the Azure CLI version in the same way, so `az upgrade` does not
-apply: run `workstation-update` instead. There is no repository-owned release
+apply: run `workstation-update` or, on a desktop, `update-agent-tools` instead. There is no repository-owned release
 discovery or version cache.
 
 Before replacing executables, an npm dry run with
