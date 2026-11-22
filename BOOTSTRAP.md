@@ -25,9 +25,11 @@ gets the Collie client CA.
 
 Desktops get agent configuration and the `desktop` Home Manager profile, which
 installs the artifact-server publishing toolchain: the `artifactserver` CLI,
-Node.js, Chromium, and the DejaVu fonts, and the .NET 10 SDK with `ripgrep`, `fd`, and `fzf`. The profile also runs the Herdr user
-service, and its switch hands off to `update-agent-tools` to install the
-[agent toolchain](docs/workstation/toolchain.md#agent-toolchain), pi and the Azure CLI included.
+Node.js, Chromium, and the DejaVu fonts, plus the .NET 10 SDK, `ripgrep`,
+`fd`, and `fzf`. The profile also runs the Herdr user service, and its switch
+hands off to `update-agent-tools` to install the
+[agent toolchain](docs/workstation/toolchain.md#agent-toolchain), pi and the
+Azure CLI included.
 Apply installs the profile, as in [what apply sets up](#what-apply-sets-up);
 see the [desktop toolchain](docs/desktop-toolchain.md).
 
