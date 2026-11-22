@@ -41,6 +41,7 @@ packages/**
 .chezmoiscripts/switch-home-manager.sh
 .chezmoiscripts/import-wifi-networks.sh
 .local/bin/wifi-sync
+.local/bin/desktop-setup
 {{- end }}
 
 {{- if ne .profile "workstation" }}

@@ -12,7 +12,7 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
 | `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and the Collie client CA | All ten items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, `dotfiles/github-cli-token`, and `dotfiles/tailscale-policy-oauth` |
-| anything else | `desktop` | Bash config, global git ignore, the .NET 10 SDK, `ripgrep`, `fd`, `fzf`, the Azure CLI, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, the pi configuration, `update-agent-tools`, fish, the `desktop` Home Manager profile, the homelab WireGuard tunnel, [your saved Wi-Fi networks](#bitwarden-wi-fi-items) with the `wifi-sync` command, and [Tailscale for the work tailnet](#work-tailnet-on-desktops) | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` and any number of optional `dotfiles/wifi/<SSID>` |
+| anything else | `desktop` | Bash config, global git ignore, the .NET 10 SDK, `ripgrep`, `fd`, `fzf`, the Azure CLI, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, the pi configuration, `update-agent-tools`, fish, the `desktop` Home Manager profile, the homelab WireGuard tunnel, [your saved Wi-Fi networks](#bitwarden-wi-fi-items) with the `wifi-sync` command, [Tailscale for the work tailnet](#work-tailnet-on-desktops), and the [`desktop-setup`](#desktop) command for the steps only you can finish | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` and any number of optional `dotfiles/wifi/<SSID>` |
 
 Apply fails until every Bitwarden item in the profile's row exists, except
 the optional [WireGuard item](#bitwarden-wireguard-item) and
@@ -78,16 +78,30 @@ skips each step that is already done. Apply runs on every run, and it changes
 only what differs. After a container restart, run the command again to restart
 the Nix daemon.
 
-When the script finishes, it prints the remaining manual steps:
+When apply finishes and standard input is a terminal, the script runs
+`desktop-setup`, which walks through what only you can do. Open a new terminal
+afterwards, so that your shell finds Nix and `~/.local/bin`. Without a terminal,
+the script prints a reminder to run `desktop-setup` yourself.
 
-- Open a new terminal, so that your shell finds Nix and `~/.local/bin`.
-- Run `codex login` to sign in to Codex on this machine.
-- Run `az login` to sign in the Azure CLI, as in [Azure CLI login](#azure-cli-login).
-- Run `tailscale up --operator=<your user> --accept-routes --accept-dns --shields-up`
-  and sign in with your work account, to [join the work tailnet](#work-tailnet-on-desktops).
+`desktop-setup` checks each step, skips the ones that are done, and explains
+and runs the rest. Answer `s` at any prompt to skip a step. It covers, in order:
 
-Apply also prints a reminder to run `wifi-sync` when the machine holds Wi-Fi
-networks that Bitwarden does not, as in [Bitwarden Wi-Fi items](#bitwarden-wi-fi-items).
+1. Signing in to Tailscale with `tailscale up --operator=<your user> --accept-routes --accept-dns --shields-up`,
+   and waiting for a work-tailnet admin to approve the device when it needs
+   approval. See [Work tailnet on desktops](#work-tailnet-on-desktops).
+2. Disabling the machine's Tailscale key expiry in the admin console.
+3. Checking that the JES AI gateway answers over the tailnet. This step only
+   reports; it fixes nothing.
+4. `codex login`.
+5. `claude auth login`, which only claude.ai artifacts need. The gateway works
+   without it, and the step skips when `claude auth status` already succeeds.
+6. `az login --use-device-code --tenant <tenant>`, as in [Azure CLI login](#azure-cli-login).
+7. `wifi-sync`, when the machine holds Wi-Fi networks that Bitwarden does not,
+   as in [Bitwarden Wi-Fi items](#bitwarden-wi-fi-items).
+
+It ends with a summary of each step as done, skipped, or failed, and exits 1
+when a step failed. Rerun `desktop-setup` anytime to resume. It refuses to run
+without a terminal and prints the steps instead.
 
 To bootstrap from a branch, set `DOTFILES_REF` to the branch name and fetch the
 script from the same branch:
@@ -163,7 +177,8 @@ For Collie's service-regeneration prerequisites and retry command, see
 Every profile installs the Azure CLI.
 
 Setup does not log in Azure CLI. There is no service principal, so agents act as
-your own account. Log in once; the session in `~/.azure` persists until it goes
+your own account. On a desktop, `desktop-setup` asks for the tenant and runs the
+login below. Log in once; the session in `~/.azure` persists until it goes
 unused for about 90 days:
 
 ```bash
@@ -231,8 +246,8 @@ keeps these preferences, and sets nothing else:
   no global resolver.
 - `--shields-up`, so the laptop reaches work services and nothing reaches it.
 
-Apply never sets an exit node. Signing in is the one manual step, and apply
-prints it until you do it:
+Apply never sets an exit node. Signing in is a manual step that `desktop-setup`
+walks you through, and apply prints it until you do it:
 
 ```bash
 tailscale up --operator=<your user> --accept-routes --accept-dns --shields-up

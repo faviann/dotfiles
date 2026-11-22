@@ -50,6 +50,7 @@ readonly INVENTORY='
 .config/opencode/opencode.json                  workstation desktop
 .gitconfig                                      workstation desktop
 .local/bin/artifact-server-mcp-headers          workstation desktop
+.local/bin/desktop-setup                        desktop
 .local/bin/dev-session                          workstation
 .local/bin/github-token                         workstation desktop
 .local/bin/update-agent-tools                   workstation desktop

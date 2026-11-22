@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+# Walks through the steps only a person can finish on a desktop after
+# bootstrap.sh: sign-ins and one admin setting. Each step checks first and
+# skips what is already done, so rerun it anytime to resume.
+# The step_* functions run by name through STEPS, which ShellCheck cannot follow.
+# shellcheck disable=SC2329
+set -euo pipefail
+
+readonly GATEWAY_IP=135.119.134.202
+readonly GATEWAY_URL=https://ai-gateway.jungleservices.net/v1/models
+readonly ADMIN_URL=https://login.tailscale.com/admin/machines
+readonly OPERATOR="${USER:-$(id -un)}"
+
+readonly STEPS=(
+  tailscale_signin
+  tailscale_key_expiry
+  ai_gateway
+  codex_login
+  claude_login
+  azure_login
+  wifi_networks
+)
+readonly TITLES=(
+  'Tailscale sign-in'
+  'Tailscale key expiry'
+  'AI gateway reachable'
+  'Codex sign-in'
+  'Claude Code claude.ai login'
+  'Azure CLI login'
+  'Wi-Fi networks in Bitwarden'
+)
+
+readonly DONE=0 FAILED=1 SKIPPED=2
+
+say() { printf '%s\n' "$*"; }
+ok() { printf '  \342\234\223 %s\n' "$*"; } # a check mark, spelled in octal so ShellCheck needs no UTF-8 locale
+note() { say "  $*"; }
+
+# Asks whether to go on. Returns 1 when the person answers skip, or input ends.
+proceed() {
+  local reply
+  printf '  %s [Enter to continue, s to skip] ' "$1"
+  read -r reply || { say; return 1; }
+  [[ "${reply,,}" != s* ]]
+}
+
+# need <hint> <tool>...: reports the first missing tool and returns 1.
+need() {
+  local hint="$1" tool
+  shift
+  for tool in "$@"; do
+    command -v "$tool" >/dev/null 2>&1 || {
+      note "$tool is not on PATH. $hint"
+      return 1
+    }
+  done
+}
+
+tailscale_json() { tailscale status --json 2>/dev/null || true; }
+backend_state() { tailscale_json | jq -r '.BackendState // empty'; }
+# on, off, or unknown when this machine has no node yet.
+key_expiry_state() {
+  tailscale_json | jq -r 'if .Self == null then "unknown" elif .Self.KeyExpiry == null then "off" else "on" end'
+}
+
+step_tailscale_signin() {
+  local state
+  need 'Rerun chezmoi apply to install it.' tailscale jq || return "$FAILED"
+  state="$(backend_state)"
+  if [[ "$state" == Running ]]; then
+    ok 'signed in to the work tailnet'
+    return "$DONE"
+  fi
+  if [[ "$state" != NeedsMachineAuth ]]; then
+    note 'Tailscale is not signed in. This runs tailscale up, which prints a login URL'
+    note 'and waits while you sign in with your work account.'
+    proceed 'Sign in now?' || return "$SKIPPED"
+    tailscale up --operator="$OPERATOR" --accept-routes --accept-dns --shields-up || {
+      note 'tailscale up failed. Check systemctl status tailscaled, then rerun.'
+      return "$FAILED"
+    }
+    state="$(backend_state)"
+  fi
+  while [[ "$state" == NeedsMachineAuth ]]; do
+    note "A work-tailnet admin must approve this device at $ADMIN_URL."
+    proceed 'Press Enter once it is approved, and I will check again.' || return "$SKIPPED"
+    state="$(backend_state)"
+  done
+  if [[ "$state" == Running ]]; then
+    ok 'signed in to the work tailnet'
+    return "$DONE"
+  fi
+  note "Tailscale reports ${state:-no state} instead of Running. Rerun to try again."
+  return "$FAILED"
+}
+
+step_tailscale_key_expiry() {
+  local state host
+  need 'Rerun chezmoi apply to install it.' tailscale jq || return "$FAILED"
+  while :; do
+    state="$(key_expiry_state)"
+    case "$state" in
+      off)
+        ok 'key expiry is disabled'
+        return "$DONE"
+        ;;
+      unknown)
+        note 'This machine is not on the tailnet yet. Finish the Tailscale sign-in first.'
+        return "$FAILED"
+        ;;
+    esac
+    host="$(tailscale_json | jq -r '.Self.HostName')"
+    note 'The node key expires, which would cut off the work routes without warning.'
+    note "Open $ADMIN_URL, find this machine ($host),"
+    note 'and choose "Disable key expiry" from its menu.'
+    proceed 'Press Enter once it is done, and I will check again.' || return "$SKIPPED"
+  done
+}
+
+step_ai_gateway() {
+  local route code routed=0
+  need 'Install it, then rerun.' ip curl || return "$FAILED"
+  route="$(ip route get "$GATEWAY_IP" 2>&1)" || route=''
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$GATEWAY_URL")" || true
+  [[ "$route" =~ (^|[[:space:]])dev[[:space:]]tailscale0([[:space:]]|$) ]] && routed=1
+  if ((routed)) && [[ "$code" == 401 ]]; then
+    ok 'the gateway is reachable over tailscale0'
+    return "$DONE"
+  fi
+  ((routed)) \
+    || note "$GATEWAY_IP does not route through tailscale0. Check tailscale status and that routes are accepted."
+  [[ "$code" == 401 ]] \
+    || note "$GATEWAY_URL answered ${code:-no response}, not the expected 401. Check the tailnet connection."
+  return "$FAILED"
+}
+
+step_codex_login() {
+  need 'Run update-agent-tools to install it.' codex || return "$FAILED"
+  if codex login status >/dev/null 2>&1; then
+    ok 'Codex is signed in'
+    return "$DONE"
+  fi
+  note 'Codex is not signed in. This runs codex login.'
+  proceed 'Sign in now?' || return "$SKIPPED"
+  if ! { codex login && codex login status >/dev/null 2>&1; }; then
+    note 'Codex is still not signed in. Rerun to try again.'
+    return "$FAILED"
+  fi
+  ok 'Codex is signed in'
+}
+
+# Only claude.ai artifacts need this login; the AI gateway works without it.
+claude_ai_logged_in() {
+  claude auth status --json 2>/dev/null | jq -e '.authMethod == "claude.ai"' >/dev/null 2>&1
+}
+
+step_claude_login() {
+  need 'Run update-agent-tools to install it.' claude jq || return "$FAILED"
+  if claude_ai_logged_in; then
+    ok 'Claude Code is logged in'
+    return "$DONE"
+  fi
+  note 'Claude Code is not logged in to claude.ai. Only claude.ai artifacts need this;'
+  note 'the AI gateway works without it. Use your work Claude account.'
+  proceed 'Run claude auth login now?' || return "$SKIPPED"
+  if ! { claude auth login --claudeai && claude_ai_logged_in; }; then
+    note 'Claude Code is still not logged in. Rerun to try again.'
+    return "$FAILED"
+  fi
+  ok 'Claude Code is logged in'
+}
+
+step_azure_login() {
+  local tenant
+  need 'Rerun chezmoi apply to install it.' az || return "$FAILED"
+  if az account show >/dev/null 2>&1; then
+    ok 'the Azure CLI is logged in'
+    return "$DONE"
+  fi
+  note 'The Azure CLI is not logged in. Device login needs --tenant; without it the'
+  note "sign-in page's \"Sign in to an organization\" option fails."
+  printf '  Tenant id or domain (s to skip): '
+  read -r tenant || { say; return "$SKIPPED"; }
+  [[ -n "$tenant" && "${tenant,,}" != s ]] || return "$SKIPPED"
+  if ! { az login --use-device-code --tenant "$tenant" >/dev/null && az account show >/dev/null 2>&1; }; then
+    note 'az login did not complete. Rerun to try again.'
+    return "$FAILED"
+  fi
+  ok 'the Azure CLI is logged in'
+}
+
+step_wifi_networks() {
+  local reminder
+  need 'Rerun chezmoi apply to install it.' wifi-sync || return "$FAILED"
+  # wifi-sync remind stays silent with a locked vault, which would read as done.
+  if command -v bw >/dev/null 2>&1 && ! bw unlock --check >/dev/null 2>&1; then
+    note 'Bitwarden is locked, so the saved networks cannot be compared. wifi-sync unlocks it.'
+    proceed 'Run wifi-sync now?' || return "$SKIPPED"
+    wifi-sync || {
+      note 'wifi-sync failed. Rerun desktop-setup to try again.'
+      return "$FAILED"
+    }
+    ok 'Wi-Fi networks handled'
+    return "$DONE"
+  fi
+  reminder="$(wifi-sync remind 2>/dev/null)" || true
+  if [[ -z "$reminder" ]]; then
+    ok 'every saved Wi-Fi network is in Bitwarden or kept local'
+    return "$DONE"
+  fi
+  note "$reminder"
+  proceed 'Run wifi-sync now?' || return "$SKIPPED"
+  wifi-sync || {
+    note 'wifi-sync failed. Rerun desktop-setup to try again.'
+    return "$FAILED"
+  }
+  ok 'Wi-Fi networks handled'
+}
+
+if [[ ! -t 0 ]]; then
+  say 'desktop-setup: error: standard input is not a terminal, so I cannot ask anything.' >&2
+  say 'Run desktop-setup in a terminal to walk through:'
+  for i in "${!TITLES[@]}"; do
+    say "  $((i + 1)). ${TITLES[i]}"
+  done
+  exit 1
+fi
+
+results=()
+for i in "${!STEPS[@]}"; do
+  say ''
+  say "[$((i + 1))/${#STEPS[@]}] ${TITLES[i]}"
+  rc=0
+  "step_${STEPS[i]}" || rc=$?
+  results+=("$rc")
+done
+
+say ''
+say 'Summary'
+failed=0
+for i in "${!STEPS[@]}"; do
+  case "${results[i]}" in
+    "$DONE") label="done" ;;
+    "$SKIPPED") label=skipped ;;
+    *)
+      label=failed
+      failed=1
+      ;;
+  esac
+  printf '  %-30s %s\n' "${TITLES[i]}" "$label"
+done
+say ''
+say 'Rerun desktop-setup anytime to resume; it skips every step that is done.'
+exit "$failed"

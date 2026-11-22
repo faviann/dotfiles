@@ -9,6 +9,7 @@ shell_inputs=(
   "$REPO_ROOT/private_dot_claude/executable_statusline.sh"
   "$REPO_ROOT/private_dot_claude/hooks/executable_track-session-prs.sh"
   "$REPO_ROOT/dot_local/bin/executable_artifact-server-mcp-headers"
+  "$REPO_ROOT/dot_local/bin/executable_desktop-setup"
   "$REPO_ROOT/dot_local/bin/executable_dev-session"
   "$REPO_ROOT/dot_local/bin/executable_github-token"
   "$REPO_ROOT/dot_local/bin/executable_update-agent-tools"

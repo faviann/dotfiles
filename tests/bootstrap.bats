@@ -5,7 +5,8 @@ set -euo pipefail
 source "$BATS_TEST_DIRNAME/test_helper.bash"
 
 REAL_BASH="$(command -v bash)"
-readonly REAL_BASH
+SCRIPT_TOOL="$(command -v script)"
+readonly REAL_BASH SCRIPT_TOOL
 readonly SCRIPT="$REPO_ROOT/bootstrap.sh"
 
 SET_UP_STATE=(apt chezmoi bw bw-logged-in bw-unlocked nix nix-daemon)
@@ -85,6 +86,12 @@ case "$*" in
   *) exit 64 ;;
 esac
 STUB
+  stub desktop-setup <<'STUB'
+printf 'desktop-setup\n' >>"$CALLS"
+[[ ":$PATH:" == *":$HOME/.nix-profile/bin:"* ]] && on_path=yes || on_path=no
+printf 'desktop-setup finds the nix profile on PATH: %s\n' "$on_path" >>"$CALLS"
+exit "${STUB_SETUP_STATUS:-0}"
+STUB
   stub dotfiles-clone <<'STUB'
 source_dir="$HOME/.local/share/chezmoi"
 git init -q "$source_dir"
@@ -134,6 +141,21 @@ run_bootstrap() {
     ln -sf ".$name" "$STUBS/$name"
   done
   run --separate-stderr env PATH="$STUBS:$TOOLS" "$REAL_BASH" "$SCRIPT"
+}
+
+# Bootstrap hands the terminal to desktop-setup only when stdin is one, so feed
+# it a pty. script ends the session when its input ends, so hold the pipe open.
+run_bootstrap_on_a_terminal() {
+  local name
+  for name in uname id dpkg-query sudo apt-get curl sh; do
+    ln -sf ".$name" "$STUBS/$name"
+  done
+  mkdir -p "$HOME/.local/bin"
+  cp "$STUBS/.desktop-setup" "$HOME/.local/bin/desktop-setup"
+  # shellcheck disable=SC2016
+  run "$REAL_BASH" -c 'sleep 2 | "$1" -qec "env PATH=$2 $3 $4" /dev/null' \
+    _ "$SCRIPT_TOOL" "$STUBS:$TOOLS" "$REAL_BASH" "$SCRIPT"
+  output="${output//$'\r'/}"
 }
 
 given_initialized_chezmoi() {
@@ -196,10 +218,8 @@ bootstrap: nix: already done
 bootstrap: nix_daemon: already done
 bootstrap: chezmoi_init: already done
 bootstrap: chezmoi_apply: running
-bootstrap: done. Next steps:
-bootstrap:   Open a new terminal so it picks up Nix and the new PATH.
-bootstrap:   Run codex login to sign Codex in on this machine.
-bootstrap:   Run tailscale up --operator=tester --accept-routes --accept-dns --shields-up and sign in with your work account.
+bootstrap: done. Open a new terminal so it picks up Nix and the new PATH.
+bootstrap: run desktop-setup in a terminal to finish the steps that need you
 EXPECTED
   diff -u - <(actions) <<'EXPECTED'
 chezmoi apply
@@ -448,7 +468,7 @@ EXPECTED
   STUB_APPLY_STATUS=1 run_bootstrap
   [ "$status" -eq 1 ]
   [ "$stderr" = 'bootstrap: error: chezmoi apply failed; fix the error above, then rerun this command' ]
-  [[ "$output" != *'Next steps'* ]] || fail 'printed next steps after a failed apply'
+  [[ "$output" != *'bootstrap: done.'* ]] || fail 'printed the done message after a failed apply'
 
   : >"$CALLS"
   run_bootstrap
@@ -457,4 +477,31 @@ EXPECTED
 chezmoi apply
 chezmoi apply sees BW_SESSION=
 EXPECTED
+}
+
+@test "test_bootstrap_runs_desktop_setup_when_it_has_a_terminal" {
+  given "${SET_UP_STATE[@]}"
+  given_initialized_chezmoi
+
+  run_bootstrap_on_a_terminal
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'bootstrap: done. Open a new terminal so it picks up Nix and the new PATH.'* ]]
+  [[ "$output" != *'run desktop-setup in a terminal'* ]] || fail "told the person to run it by hand: $output"
+  diff -u - <(actions) <<'EXPECTED'
+chezmoi apply
+chezmoi apply sees BW_SESSION=
+desktop-setup
+desktop-setup finds the nix profile on PATH: yes
+EXPECTED
+}
+
+@test "test_bootstrap_still_succeeds_when_desktop_setup_leaves_steps_open" {
+  given "${SET_UP_STATE[@]}"
+  given_initialized_chezmoi
+
+  STUB_SETUP_STATUS=1 run_bootstrap_on_a_terminal
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'bootstrap: desktop-setup left steps open; rerun desktop-setup to resume'* ]] || fail "no rerun advice: $output"
 }
