@@ -15,7 +15,7 @@ in
   };
 
   config = {
-    agentTools.commands = [ "bun" "codex" "claude" "opencode" ];
+    agentTools.commands = [ "bun" "codex" "claude" "opencode" "pi" "az" ];
 
     home.packages = [ pkgs.uv ];
 

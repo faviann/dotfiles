@@ -19,12 +19,9 @@ packages=(
   @openai/codex@latest
   @anthropic-ai/claude-code@latest
   opencode-ai@latest
+  @earendil-works/pi-coding-agent@latest
 )
-bun_harnesses=(opencode)
-{{- if eq .profile "workstation" }}
-packages+=(@earendil-works/pi-coding-agent@latest)
-bun_harnesses+=(pi)
-{{- end }}
+bun_harnesses=(opencode pi)
 
 # npm is moving install scripts behind an explicit allowlist and already warns
 # about every unreviewed one. Approval cannot be recorded for a global install,
@@ -68,14 +65,11 @@ for harness in "${bun_harnesses[@]}"; do
   "$harness" --version >/dev/null || fail "verification failed: $harness"
 done
 
-{{- if eq .profile "workstation" }}
-
 # nixpkgs lags Azure CLI releases and its build can break, so uv installs it.
 # `az upgrade` does not manage a uv tool; this step does.
 UV_TOOL_BIN_DIR="$prefix/bin" uv tool install --upgrade azure-cli \
   || fail 'Azure CLI installation failed'
 az version >/dev/null || fail 'verification failed: az'
-{{- end }}
 
 # Claude Code's background plugin updates are off. An update that cannot reach
 # its marketplace reports the plugin as current and exits 0.

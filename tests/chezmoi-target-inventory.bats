@@ -55,8 +55,8 @@ readonly INVENTORY='
 .local/bin/workstation-update                   workstation
 .local/share/opencode/auth.json                 workstation desktop
 .npmrc                                          workstation desktop
-.pi/agent/AGENTS.md                             workstation
-.pi/agent/mcp.json                              workstation
+.pi/agent/AGENTS.md                             workstation desktop
+.pi/agent/mcp.json                              workstation desktop
 .ssh/allowed_signers                            workstation desktop
 .ssh/config                                     workstation desktop
 .ssh/id_ed25519                                 workstation desktop

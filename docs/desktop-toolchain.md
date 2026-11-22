@@ -1,17 +1,21 @@
 # Desktop toolchain
 
 The `desktop` Home Manager profile gives every Ubuntu laptop and desktop the
-agent toolchain, the Herdr user service, and the tools an agent needs to
-publish to artifact-server and check the render. It shares
-[`home/agent-tools.nix`](../home/agent-tools.nix) and
-[`home/artifact-tools.nix`](../home/artifact-tools.nix) with the workstation
-profile, so both machines get the same pins.
+agent toolchain with pi and the Azure CLI, the Herdr user service, the .NET SDK
+and search tools, and the tools an agent needs to publish to artifact-server
+and check the render. It shares
+[`home/agent-tools.nix`](../home/agent-tools.nix),
+[`home/artifact-tools.nix`](../home/artifact-tools.nix), and
+[`home/dev-tools.nix`](../home/dev-tools.nix) with the workstation profile, so
+both machines get the same pins.
 
 ## What it installs
 
 - `artifactserver`, the artifact-server CLI, pinned to the release tarball in
   [`packages/artifact-server.nix`](../packages/artifact-server.nix).
 - Node.js, which the render check runs on.
+- The .NET 10 SDK, `ripgrep`, `fd`, and `fzf`, from `home/dev-tools.nix`, so
+  both profiles share the SDK pin.
 - `uv`, which homelab-iac runs Ansible with. Every profile is a homelab-iac
   controller, so `home/agent-tools.nix` installs `uv` on both profiles.
 - Chromium and DejaVu fonts, with `fonts.fontconfig.enable`, so a headless
@@ -27,11 +31,11 @@ installs it from Tailscale's apt repository as a system service; see
 
 ## Agent toolchain
 
-The switch runs `update-agent-tools` when `bun`, `codex`, `claude`, or
-`opencode` is missing. The updater installs Bun, Codex, Claude Code, OpenCode,
-and the
+The switch runs `update-agent-tools` when `bun`, `codex`, `claude`, `opencode`,
+`pi`, or `az` is missing. The updater installs Bun, Codex, Claude Code,
+OpenCode, pi, the Azure CLI, and the
 [declared Claude Code plugins](workstation/toolchain.md#claude-code-plugins).
-Desktops do not get pi. To update the toolchain later, run
+To update the toolchain later, run
 `update-agent-tools`.
 
 The switch checks only that the commands exist. If `update-agent-tools` fails

@@ -11,8 +11,8 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
-| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, the pi configuration, and the Collie client CA | All ten items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, `dotfiles/github-cli-token`, and `dotfiles/tailscale-policy-oauth` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, `update-agent-tools`, fish, the `desktop` Home Manager profile, the homelab WireGuard tunnel, and [Tailscale for the work tailnet](#work-tailnet-on-desktops) | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` |
+| `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and the Collie client CA | All ten items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, `dotfiles/github-cli-token`, and `dotfiles/tailscale-policy-oauth` |
+| anything else | `desktop` | Bash config, global git ignore, the .NET 10 SDK, `ripgrep`, `fd`, `fzf`, the Azure CLI, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, the pi configuration, `update-agent-tools`, fish, the `desktop` Home Manager profile, the homelab WireGuard tunnel, and [Tailscale for the work tailnet](#work-tailnet-on-desktops) | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` |
 
 Apply fails until every Bitwarden item in the profile's row exists, except
 the optional [WireGuard item](#bitwarden-wireguard-item). Create them before the
@@ -25,9 +25,11 @@ gets the Collie client CA.
 
 Desktops get agent configuration and the `desktop` Home Manager profile, which
 installs the artifact-server publishing toolchain: the `artifactserver` CLI,
-Node.js, Chromium, and the DejaVu fonts. The profile also runs the Herdr user
-service, and its switch hands off to `update-agent-tools` to install the
-[agent toolchain](docs/workstation/toolchain.md#agent-toolchain) without pi.
+Node.js, Chromium, and the DejaVu fonts, plus the .NET 10 SDK, `ripgrep`,
+`fd`, and `fzf`. The profile also runs the Herdr user service, and its switch
+hands off to `update-agent-tools` to install the
+[agent toolchain](docs/workstation/toolchain.md#agent-toolchain), pi and the
+Azure CLI included.
 Apply installs the profile, as in [what apply sets up](#what-apply-sets-up);
 see the [desktop toolchain](docs/desktop-toolchain.md).
 
@@ -79,6 +81,7 @@ When the script finishes, it prints the remaining manual steps:
 
 - Open a new terminal, so that your shell finds Nix and `~/.local/bin`.
 - Run `codex login` to sign in to Codex on this machine.
+- Run `az login` to sign in the Azure CLI, as in [Azure CLI login](#azure-cli-login).
 - Run `tailscale up --operator=<your user> --accept-routes --accept-dns --shields-up`
   and sign in with your work account, to [join the work tailnet](#work-tailnet-on-desktops).
 
@@ -150,6 +153,10 @@ background schedule.
 
 For Collie's service-regeneration prerequisites and retry command, see
 [recovery after an LXC rebuild](docs/runbooks/collie.md#recovery-after-an-lxc-rebuild).
+
+## Azure CLI login
+
+Every profile installs the Azure CLI.
 
 Setup does not log in Azure CLI. There is no service principal, so agents act as
 your own account. Log in once; the session in `~/.azure` persists until it goes
@@ -343,13 +350,13 @@ that file when it connects:
   `~/.config/faviann-skills/artifact-server.json`.
 - Claude Code and Codex run `artifact-server-mcp-headers`, which prints the
   `Authorization` header from the file.
-- OpenCode, and pi on the workstation, read the file from their MCP
+- OpenCode and pi read the file from their MCP
   configuration.
 
 Apply sets only the `artifact-server` server in `~/.claude.json` and the
 `artifact_server` server in `~/.codex/config.toml`, plus the Codex
 [agent defaults](docs/workstation/toolchain.md#agent-defaults), and owns
-`~/.config/opencode/opencode.json` and, on the workstation,
+`~/.config/opencode/opencode.json` and
 `~/.pi/agent/mcp.json`. Other servers
 and other keys in those two files stay, as do keys of the artifact-server entry
 such as Codex's `enabled`. The entry's competing auth keys are removed so the

@@ -11,28 +11,6 @@ REAL_BASH="$(command -v bash)"
 readonly REAL_BASH
 export REAL_BASH
 
-render_hook() {
-  local output="$1"
-  local profile="$2"
-  local destination
-  local render_dir
-
-  render_dir="$(dirname "$output")"
-  destination="$render_dir/destination"
-  mkdir -p "$destination"
-  chezmoi \
-    --source "$REPO_ROOT" \
-    --destination "$destination" \
-    --config /dev/null \
-    --config-format toml \
-    --persistent-state "$render_dir/chezmoistate.boltdb" \
-    --override-data "{\"profile\":\"$profile\"}" \
-    execute-template \
-    --file "$REPO_ROOT/.chezmoiscripts/run_after_install-herdr-integrations.sh.tmpl" \
-    >"$output"
-  chmod +x "$output"
-}
-
 # The stub reports each target from a state file holding `current` or
 # `outdated`; a missing file is `not installed`. Like Herdr, install refuses
 # when the agent's config directory is missing.
@@ -75,11 +53,10 @@ STUB
 
 run_hook() {
   local test_dir="$1"
-  local profile="${2:-workstation}"
   local script="$test_dir/hook"
 
   mkdir -p "$test_dir/home" "$test_dir/state"
-  [[ -x "$script" ]] || render_hook "$script" "$profile"
+  [[ -x "$script" ]] || install -m 755 "$REPO_ROOT/.chezmoiscripts/run_after_install-herdr-integrations.sh" "$script"
   make_herdr_stub "$test_dir/bin"
   env \
     HOME="$test_dir/home" \
@@ -126,20 +103,13 @@ installs() {
     || fail 'second apply reinstalled current integrations'
 }
 
-@test "test_each_profile_installs_its_harness_integrations" {
+@test "test_every_profile_installs_all_four_harness_integrations" {
   local test_dir
 
   test_dir="$(mktemp -d)"
-  run_hook "$test_dir" workstation || fail 'workstation integration install failed'
+  run_hook "$test_dir" || fail 'integration install failed'
   diff -u \
     <(printf 'herdr integration install %s\n' claude codex pi opencode) \
     <(installs "$test_dir") \
-    || fail 'workstation did not install the Claude Code, Codex, pi, and OpenCode integrations'
-
-  test_dir="$(mktemp -d)"
-  run_hook "$test_dir" desktop || fail 'desktop integration install failed'
-  diff -u \
-    <(printf 'herdr integration install %s\n' claude codex opencode) \
-    <(installs "$test_dir") \
-    || fail 'desktop did not install exactly the Claude Code, Codex, and OpenCode integrations'
+    || fail 'did not install the Claude Code, Codex, pi, and OpenCode integrations'
 }

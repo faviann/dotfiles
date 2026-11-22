@@ -11,6 +11,7 @@ shell_inputs=(
   "$REPO_ROOT/dot_local/bin/executable_artifact-server-mcp-headers"
   "$REPO_ROOT/dot_local/bin/executable_dev-session"
   "$REPO_ROOT/dot_local/bin/executable_github-token"
+  "$REPO_ROOT/dot_local/bin/executable_update-agent-tools"
   "$REPO_ROOT/dot_local/bin/executable_workstation-update"
   "$REPO_ROOT/dot_bash_profile.tmpl"
   "$REPO_ROOT/dot_bashrc.tmpl"
@@ -26,7 +27,6 @@ shell_inputs=(
 )
 template_inputs=(
   "$REPO_ROOT"/.chezmoiscripts/*.sh.tmpl
-  "$REPO_ROOT/dot_local/bin/executable_update-agent-tools.tmpl"
 )
 
 render_dir="$(mktemp -d)"

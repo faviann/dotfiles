@@ -12,6 +12,7 @@ in
   imports = [
     ./agent-tools.nix
     ./artifact-tools.nix
+    ./dev-tools.nix
   ];
 
   home.username = envOrPureEvalFallback "USER" "faviann";
