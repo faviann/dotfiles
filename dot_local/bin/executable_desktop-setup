@@ -150,16 +150,20 @@ step_codex_login() {
 }
 
 # Only claude.ai artifacts need this login; the AI gateway works without it.
+claude_ai_logged_in() {
+  claude auth status --json 2>/dev/null | jq -e '.authMethod == "claude.ai"' >/dev/null 2>&1
+}
+
 step_claude_login() {
-  need 'Run update-agent-tools to install it.' claude || return "$FAILED"
-  if claude auth status >/dev/null 2>&1; then
+  need 'Run update-agent-tools to install it.' claude jq || return "$FAILED"
+  if claude_ai_logged_in; then
     ok 'Claude Code is logged in'
     return "$DONE"
   fi
   note 'Claude Code is not logged in to claude.ai. Only claude.ai artifacts need this;'
   note 'the AI gateway works without it. Use your work Claude account.'
   proceed 'Run claude auth login now?' || return "$SKIPPED"
-  if ! { claude auth login --claudeai && claude auth status >/dev/null 2>&1; }; then
+  if ! { claude auth login --claudeai && claude_ai_logged_in; }; then
     note 'Claude Code is still not logged in. Rerun to try again.'
     return "$FAILED"
   fi
@@ -188,6 +192,17 @@ step_azure_login() {
 step_wifi_networks() {
   local reminder
   need 'Rerun chezmoi apply to install it.' wifi-sync || return "$FAILED"
+  # wifi-sync remind stays silent with a locked vault, which would read as done.
+  if command -v bw >/dev/null 2>&1 && ! bw unlock --check >/dev/null 2>&1; then
+    note 'Bitwarden is locked, so the saved networks cannot be compared. wifi-sync unlocks it.'
+    proceed 'Run wifi-sync now?' || return "$SKIPPED"
+    wifi-sync || {
+      note 'wifi-sync failed. Rerun desktop-setup to try again.'
+      return "$FAILED"
+    }
+    ok 'Wi-Fi networks handled'
+    return "$DONE"
+  fi
   reminder="$(wifi-sync remind 2>/dev/null)" || true
   if [[ -z "$reminder" ]]; then
     ok 'every saved Wi-Fi network is in Bitwarden or kept local'

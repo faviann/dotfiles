@@ -89,7 +89,13 @@ esac
 STUB
   write_stub claude <<'STUB'
 case "$*" in
-  'auth status') [[ ! -e "$STATE/claude-logged-out" ]] ;;
+  'auth status --json')
+    if [[ -e "$STATE/claude-logged-out" ]]; then
+      printf '{"loggedIn":false,"authMethod":"none"}\n'
+      exit 1
+    fi
+    printf '{"loggedIn":true,"authMethod":"claude.ai"}\n'
+    ;;
   'auth login --claudeai') rm -f "$STATE/claude-logged-out" ;;
   *) exit 64 ;;
 esac
@@ -321,4 +327,35 @@ assert_summary() {
   [[ "$stderr" == *'standard input is not a terminal'* ]]
   [[ "$output" == *'1. Tailscale sign-in'* && "$output" == *'7. Wi-Fi networks in Bitwarden'* ]] || fail "steps not listed: $output"
   [ ! -s "$CALLS" ] || fail "ran a step without a terminal: $(calls)"
+}
+
+@test "test_a_locked_vault_offers_wifi_sync_instead_of_reading_as_done" {
+  write_stub bw <<'STUB'
+case "$*" in
+  'unlock --check') exit 1 ;;
+  *) exit 64 ;;
+esac
+STUB
+
+  run_setup ''
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Bitwarden is locked'* ]]
+  grep -qxF 'wifi-sync ' "$CALLS" || fail "wifi-sync did not run: $(calls)"
+  assert_summary 'Wi-Fi networks in Bitwarden' 'done'
+}
+
+@test "test_claude_login_requires_a_claude_ai_login_not_any_auth" {
+  write_stub claude <<'STUB'
+case "$*" in
+  'auth status --json') printf '{"loggedIn":true,"authMethod":"apiKey"}\n' ;;
+  'auth login --claudeai') : ;;
+  *) exit 64 ;;
+esac
+STUB
+
+  run_setup s
+
+  [[ "$output" == *'not logged in to claude.ai'* ]]
+  assert_summary 'Claude Code claude.ai login' skipped
 }
