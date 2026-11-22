@@ -48,6 +48,8 @@ locked() { [[ -n "${BW_LOCKED:-}" && "${BW_SESSION:-}" != fixture-session ]]; }
 case "$*" in
   'unlock --check') ! locked ;;
   'unlock --raw') printf 'fixture-session' ;;
+  'login --check') [[ -z "${BW_LOGGED_OUT:-}" ]] ;;
+  'login --raw') printf 'fixture-session' ;;
   'list items --search '*)
     locked && { printf 'Vault is locked.\n' >&2; exit 1; }
     jq --arg search "$4" '[.[] | select(.name | contains($search))]' "$STATE/items.json"
@@ -620,6 +622,17 @@ import-wifi-networks: error: NetworkManager rejected the profile of dotfiles/wif
   [ "$status" -eq 0 ]
   [[ "$output" == *'Hotel (wpa-psk)'* ]]
   grep -qxF 'bw unlock --raw' "$CALLS"
+}
+
+@test "test_wifi_sync_logs_in_when_bw_was_never_logged_in" {
+  add_connection gnome-hotel 'Hotel' wpa-psk "$PSK"
+
+  BW_LOCKED=1 BW_LOGGED_OUT=1 run_sync 'l'
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Hotel (wpa-psk)'* ]]
+  grep -qxF 'bw login --raw' "$CALLS"
+  ! grep -qxF 'bw unlock --raw' "$CALLS"
 }
 
 @test "test_wifi_sync_reminder_stays_silent_when_the_vault_is_locked" {

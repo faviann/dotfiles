@@ -80,7 +80,12 @@ remind() {
 
 ensure_unlocked() {
   bw unlock --check >/dev/null 2>&1 && return 0
-  BW_SESSION="$(bw unlock --raw)" || fail 'Bitwarden did not unlock'
+  # A machine that never ran these dotfiles may not have logged bw in yet.
+  if bw login --check >/dev/null 2>&1; then
+    BW_SESSION="$(bw unlock --raw)" || fail 'Bitwarden did not unlock'
+  else
+    BW_SESSION="$(bw login --raw)" || fail 'Bitwarden login failed'
+  fi
   export BW_SESSION
 }
 
@@ -167,7 +172,7 @@ decide_new() {
 
 # Offer to push a local password that differs from its item to Bitwarden.
 check_saved() {
-  local item="$1" network="$2" ssid uuid id differs answer imported_revision revision
+  local item="$1" network="$2" ssid uuid security id differs answer imported_revision revision
   ssid="$(jq -r .ssid <<<"$network")"
   uuid="$(jq -r .uuid <<<"$network")"
   security="$(jq -r .security <<<"$network")"
