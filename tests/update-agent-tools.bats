@@ -1,25 +1,5 @@
 #!/usr/bin/env bats
 
-render_updater() {
-  local profile="$1"
-  local runtime_dir="$BATS_TEST_TMPDIR/runtime"
-
-  mkdir -p "$runtime_dir/destination"
-  XDG_CACHE_HOME="$runtime_dir/cache" \
-  XDG_CONFIG_HOME="$runtime_dir/config" \
-  XDG_STATE_HOME="$runtime_dir/state" \
-    chezmoi \
-    --source "$BATS_TEST_DIRNAME/.." \
-    --destination "$runtime_dir/destination" \
-    --config /dev/null \
-    --config-format toml \
-    --persistent-state "$runtime_dir/chezmoistate.boltdb" \
-    --override-data "{\"profile\":\"$profile\"}" \
-    execute-template --file "$BATS_TEST_DIRNAME/../dot_local/bin/executable_update-agent-tools.tmpl" \
-    >"$BATS_TEST_TMPDIR/update-agent-tools-$profile"
-  printf '%s\n' "$BATS_TEST_TMPDIR/update-agent-tools-$profile"
-}
-
 installed_packages() {
   grep '^npm install ' "$COMMAND_LOG" | grep -v -- ' --dry-run ' \
     | sed 's/^.* --allow-scripts=[^ ]* //'
@@ -55,7 +35,7 @@ setup() {
   export PATH="$HOME/.local/bin:$PATH"
   export COMMAND_LOG="$HOME/commands"
   : >"$COMMAND_LOG"
-  COMMAND="$(render_updater workstation)"
+  COMMAND="$BATS_TEST_DIRNAME/../dot_local/bin/executable_update-agent-tools"
   export COMMAND
   export MARKETPLACE_LIST="$BATS_TEST_TMPDIR/marketplaces.json"
   printf '[{"name":"openai-codex","source":"github","repo":"openai/codex-plugin-cc"}]\n' >"$MARKETPLACE_LIST"
@@ -263,18 +243,7 @@ LOG
   [[ "$output" != *'Agent tools updated'* ]]
 }
 
-@test "test_desktop_installs_its_harnesses_and_verifies_the_bun_run_ones" {
-  run bash "$(render_updater desktop)"
-  [ "$status" -eq 0 ]
-  diff -u - <(installed_packages) <<'ARGS'
-@openai/codex@latest @anthropic-ai/claude-code@latest opencode-ai@latest
-ARGS
-  diff -u - <(verified_harnesses) <<'LOG'
-opencode --version
-LOG
-}
-
-@test "test_workstation_installs_its_harnesses_and_verifies_the_bun_run_ones" {
+@test "test_installs_its_harnesses_and_verifies_the_bun_run_ones" {
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
   diff -u - <(installed_packages) <<'ARGS'
@@ -286,7 +255,7 @@ pi --version
 LOG
 }
 
-@test "test_workstation_installs_or_upgrades_azure_cli_through_uv_and_verifies_it" {
+@test "test_installs_or_upgrades_azure_cli_through_uv_and_verifies_it" {
   run bash "$COMMAND"
   [ "$status" -eq 0 ]
   grep -qx 'uv tool install --upgrade azure-cli' "$COMMAND_LOG"
@@ -301,10 +270,4 @@ LOG
   run env FAIL_AT=az bash "$COMMAND"
   [ "$status" -ne 0 ]
   [[ "$output" == *'verification failed: az'* ]]
-}
-
-@test "test_desktop_does_not_install_azure_cli" {
-  run bash "$(render_updater desktop)"
-  [ "$status" -eq 0 ]
-  run ! grep -qE '^(uv|az) ' "$COMMAND_LOG"
 }

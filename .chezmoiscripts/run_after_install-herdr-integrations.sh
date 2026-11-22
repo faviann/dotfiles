@@ -9,9 +9,7 @@ set -euo pipefail
 integrations=(
   claude:.claude
   codex:.codex
-{{- if eq .profile "workstation" }}
   pi:.pi/agent
-{{- end }}
   opencode:.config/opencode
 )
 

@@ -49,6 +49,4 @@ packages/**
 .ansible/collie-ca/**
 .local/bin/workstation-update
 .local/bin/dev-session
-.pi/
-.pi/**
 {{- end }}
