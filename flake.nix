@@ -58,7 +58,7 @@
       };
       desktopHomeConfiguration = home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
-        extraSpecialArgs = { inherit artifactServerPackage; };
+        extraSpecialArgs = { inherit artifactServerPackage dotnetSdk; };
         modules = [ ./home/desktop.nix ];
       };
       homeConfigurationsByProfile = {

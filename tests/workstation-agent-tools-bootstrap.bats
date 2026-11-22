@@ -14,8 +14,7 @@ readonly profiles=(workstation desktop)
 
 bootstrap_probed_commands() {
   case "$1" in
-    workstation) printf '%s\n' bun codex claude opencode pi az ;;
-    desktop) printf '%s\n' bun codex claude opencode ;;
+    workstation | desktop) printf '%s\n' bun codex claude opencode pi az ;;
   esac
 }
 

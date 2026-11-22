@@ -101,9 +101,8 @@ in
   imports = [
     ./agent-tools.nix
     ./artifact-tools.nix
+    ./dev-tools.nix
   ];
-
-  agentTools.commands = [ "pi" "az" ];
 
   home.username = "faviann";
   home.homeDirectory = "/home/faviann";
@@ -112,13 +111,9 @@ in
   programs.home-manager.enable = true;
 
   home.packages = with pkgs; [
-    dotnetSdk
     nodejs
     gh
     jq
-    ripgrep
-    fd
-    fzf
     morainePackage
     tailscaleCli
     tailscaleLoginNotice
