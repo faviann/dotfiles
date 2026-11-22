@@ -8,17 +8,12 @@
       url = "github:nix-community/home-manager/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    fenix = {
-      url = "github:nix-community/fenix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
     {
       nixpkgs,
       dotnet-nixpkgs,
-      fenix,
       home-manager,
       ...
     }:
@@ -32,18 +27,7 @@
         inherit system;
       };
       dotnetSdk = dotnetPkgs.dotnet-sdk_10;
-      moraineToolchain =
-        (fenix.packages.${system}.toolchainOf {
-          channel = "1.96.0";
-          sha256 = "sha256-mvUGEOHYJpn3ikC5hckneuGixaC+yGrkMM/liDIDgoU=";
-        }).minimalToolchain;
-      moraineRustPlatform = pkgs.makeRustPlatform {
-        cargo = moraineToolchain;
-        rustc = moraineToolchain;
-      };
-      morainePackage = pkgs.callPackage ./packages/moraine.nix {
-        rustPlatform = moraineRustPlatform;
-      };
+      morainePackage = pkgs.callPackage ./packages/moraine.nix { };
       artifactServerPackage = pkgs.callPackage ./packages/artifact-server.nix { };
       behavioralTestInputs = [
         pkgs.bash
@@ -133,18 +117,13 @@
           moraineRelease = {
             inherit (morainePackage) version;
             inherit (morainePackage.passthru.release)
-              interactiveQueryMemoryBytes
-              releaseAssetHash
-              serverMemoryBytes
-              rustToolchainVersion
-              sourceHash
-              sourceRevision
-              sourceVersion
-              userQueryMemoryBytes
+              executables
+              hash
+              target
               ;
-            source = "https://github.com/eric-tramel/moraine/commit/${morainePackage.passthru.release.sourceRevision}";
+            release = morainePackage.passthru.release.version;
             storePath = "${morainePackage}";
-            hasReleasePassthru = morainePackage.passthru ? release;
+            license = morainePackage.meta.license.spdxId;
           };
           moraineConfig = builtins.fromTOML (builtins.unsafeDiscardStringContext (
             workstationHomeConfiguration.config.home.file.".moraine/config.toml".text
