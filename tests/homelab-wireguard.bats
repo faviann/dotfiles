@@ -24,7 +24,7 @@ PrivateKey = $PRIVATE_KEY
 Address = 10.20.151.2/32
 
 [Peer]
-AllowedIPs = 10.1.0.0/18, 10.0.0.2/32
+AllowedIPs = 10.1.0.0/18, 10.0.0.0/24, 10.200.196.0/24
 PublicKey = FIXTURE-PEER-PUBLIC-KEY=
 AllowedIPs = 0.0.0.0/0, ::/0
 Endpoint = vpn.example.test:51820"
@@ -236,7 +236,7 @@ PrivateKey = $PRIVATE_KEY
 Address = 10.20.151.3/32
 
 [Peer]
-AllowedIPs = 10.1.0.0/18, 10.0.0.2/32
+AllowedIPs = 10.1.0.0/18, 10.0.0.0/24, 10.200.196.0/24
 PublicKey = FIXTURE-PEER-PUBLIC-KEY=
 Endpoint = vpn.example.test:51820
 IMPORTED
