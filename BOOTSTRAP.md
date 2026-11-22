@@ -12,7 +12,7 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
 | `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, the pi configuration, and the Collie client CA | All ten items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, `dotfiles/github-cli-token`, and `dotfiles/tailscale-policy-oauth` |
-| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, `update-agent-tools`, fish, the `desktop` Home Manager profile, and the homelab WireGuard tunnel | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` |
+| anything else | `desktop` | Bash config, global git ignore, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, `update-agent-tools`, fish, the `desktop` Home Manager profile, the homelab WireGuard tunnel, and [Tailscale for the work tailnet](#work-tailnet-on-desktops) | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` |
 
 Apply fails until every Bitwarden item in the profile's row exists, except
 the optional [WireGuard item](#bitwarden-wireguard-item). Create them before the
@@ -39,7 +39,7 @@ from their sections.
 
 ## Desktop
 
-On a stock Ubuntu 24.04 desktop or laptop, run this as your own user:
+On a stock Ubuntu 24.04 or later desktop or laptop, run this as your own user:
 
 ```bash
 bash <(wget -qO- https://raw.githubusercontent.com/faviann/dotfiles/main/bootstrap.sh)
@@ -79,6 +79,8 @@ When the script finishes, it prints the remaining manual steps:
 
 - Open a new terminal, so that your shell finds Nix and `~/.local/bin`.
 - Run `codex login` to sign in to Codex on this machine.
+- Run `tailscale up --operator=<your user> --accept-routes --accept-dns --shields-up`
+  and sign in with your work account, to [join the work tailnet](#work-tailnet-on-desktops).
 
 To bootstrap from a branch, set `DOTFILES_REF` to the branch name and fetch the
 script from the same branch:
@@ -196,6 +198,36 @@ retries it.
 
 On a desktop with a [WireGuard item](#bitwarden-wireguard-item), the last
 apply script imports the homelab tunnel into NetworkManager.
+
+### Work tailnet on desktops
+
+Claude Code reaches the JES AI gateway only over the work tailnet, so every
+desktop runs Tailscale as a normal system service. Apply installs `tailscale`
+from Tailscale's apt repository for the release in `/etc/os-release`, then
+keeps these preferences, and sets nothing else:
+
+- `--operator=<your user>`, so you run `tailscale` without `sudo`.
+- `--accept-routes`, which sends the work routes through the tailnet: the
+  gatekeeper subnets `10.120.7.0/27` and `10.120.8.0/22`, the AI gateway at
+  `135.119.134.202/32`, and two hosts behind the exit-node VM. All other
+  traffic keeps its normal route, and no route overlaps the homelab ranges or
+  the WireGuard tunnel.
+- `--accept-dns`, which adds MagicDNS for `ts.net` names only. The tailnet sets
+  no global resolver.
+- `--shields-up`, so the laptop reaches work services and nothing reaches it.
+
+Apply never sets an exit node. Signing in is the one manual step, and apply
+prints it until you do it:
+
+```bash
+tailscale up --operator=<your user> --accept-routes --accept-dns --shields-up
+```
+
+Give `tailscale up` every flag. Before the first sign-in, a bare `tailscale up`
+or `tailscale login` resets these preferences, and apply sets them again on its
+next run. After `tailscale down`, apply stays silent. If `tailscaled` is not
+running, apply fails and names `systemctl status tailscaled`. The
+[workstation](docs/workstation/tailscale.md) runs its own userspace node.
 
 Apply also logs `gh` in with the [GitHub token](#github-token). On a new
 workstation, `gh` is not installed during the first apply, so

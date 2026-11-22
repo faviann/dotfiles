@@ -21,6 +21,10 @@ profile, so both machines get the same pins.
 - The `herdr.service` user unit, the same one the workstation runs
   ([herdr](workstation/herdr.md)).
 
+Tailscale is not part of the Home Manager profile. A chezmoi apply script
+installs it from Tailscale's apt repository as a system service; see
+[work tailnet on desktops](../BOOTSTRAP.md#work-tailnet-on-desktops).
+
 ## Agent toolchain
 
 The switch runs `update-agent-tools` when `bun`, `codex`, `claude`, or
