@@ -12,6 +12,7 @@ shell_inputs=(
   "$REPO_ROOT/dot_local/bin/executable_dev-session"
   "$REPO_ROOT/dot_local/bin/executable_github-token"
   "$REPO_ROOT/dot_local/bin/executable_update-agent-tools"
+  "$REPO_ROOT/dot_local/bin/executable_wifi-sync"
   "$REPO_ROOT/dot_local/bin/executable_workstation-update"
   "$REPO_ROOT/dot_bash_profile.tmpl"
   "$REPO_ROOT/dot_bashrc.tmpl"

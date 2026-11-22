@@ -12,10 +12,11 @@ prompt, and `.chezmoiignore` applies only that profile's targets:
 | Hostname | Profile | Gets | Bitwarden items |
 | --- | --- | --- | --- |
 | `workstation` | `workstation` | Everything below except fish and the `desktop` Home Manager profile, plus `workstation-update`, `dev-session`, and the Collie client CA | All ten items below: `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, `dotfiles/collie-ca`, `dotfiles/github-cli-token`, and `dotfiles/tailscale-policy-oauth` |
-| anything else | `desktop` | Bash config, global git ignore, the .NET 10 SDK, `ripgrep`, `fd`, `fzf`, the Azure CLI, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, the pi configuration, `update-agent-tools`, fish, the `desktop` Home Manager profile, the homelab WireGuard tunnel, and [Tailscale for the work tailnet](#work-tailnet-on-desktops) | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` |
+| anything else | `desktop` | Bash config, global git ignore, the .NET 10 SDK, `ripgrep`, `fd`, `fzf`, the Azure CLI, git identity and signing, SSH key and config, the homelab-iac controller files, `github-token` rotation and the `gh` login, agent setup, the pi configuration, `update-agent-tools`, fish, the `desktop` Home Manager profile, the homelab WireGuard tunnel, [your saved Wi-Fi networks](#bitwarden-wi-fi-items) with the `wifi-sync` command, and [Tailscale for the work tailnet](#work-tailnet-on-desktops) | `dotfiles/workstation-ssh-key`, `dotfiles/proxmox-lxc-ssh-key`, `dotfiles/ansible-vault-pass`, `dotfiles/sub2api-gateway-token`, `dotfiles/sub2api-admin-key`, `dotfiles/artifact-server-api-key`, `dotfiles/opencode-api-key`, and `dotfiles/github-cli-token`, plus the optional `dotfiles/wireguard/<hostname>` and any number of optional `dotfiles/wifi/<SSID>` |
 
 Apply fails until every Bitwarden item in the profile's row exists, except
-the optional [WireGuard item](#bitwarden-wireguard-item). Create them before the
+the optional [WireGuard item](#bitwarden-wireguard-item) and
+[Wi-Fi items](#bitwarden-wi-fi-items). Create them before the
 first apply. On an existing machine, create a new item before
 the `chezmoi update` or `workstation-update` that starts to read it.
 
@@ -84,6 +85,9 @@ When the script finishes, it prints the remaining manual steps:
 - Run `az login` to sign in the Azure CLI, as in [Azure CLI login](#azure-cli-login).
 - Run `tailscale up --operator=<your user> --accept-routes --accept-dns --shields-up`
   and sign in with your work account, to [join the work tailnet](#work-tailnet-on-desktops).
+
+Apply also prints a reminder to run `wifi-sync` when the machine holds Wi-Fi
+networks that Bitwarden does not, as in [Bitwarden Wi-Fi items](#bitwarden-wi-fi-items).
 
 To bootstrap from a branch, set `DOTFILES_REF` to the branch name and fetch the
 script from the same branch:
@@ -205,6 +209,9 @@ retries it.
 
 On a desktop with a [WireGuard item](#bitwarden-wireguard-item), the last
 apply script imports the homelab tunnel into NetworkManager.
+
+On a desktop with [Wi-Fi items](#bitwarden-wi-fi-items), an apply script
+ahead of the Home Manager switch adds each saved network to NetworkManager.
 
 ### Work tailnet on desktops
 
@@ -555,6 +562,92 @@ To check the connection and the DNS routing, run:
 nmcli -f connection.autoconnect,ipv4.dns,ipv4.dns-search connection show wg-homelab
 resolvectl status wg-homelab
 ```
+
+## Bitwarden Wi-Fi Items
+
+Bitwarden is the only store of Wi-Fi passwords. Each network you choose to
+save is one Bitwarden login item, and every desktop gets all of them on
+`chezmoi apply`. Nothing reaches Bitwarden unless you decide it, with
+`wifi-sync`, and apply never forgets a network you joined.
+
+Name the item after the network, with the exact SSID after the prefix:
+
+```text
+dotfiles/wifi/<SSID>
+```
+
+The item must contain:
+
+- Username: the SSID
+- Password: the network's password, empty for an open network
+- Custom field `key_mgmt`: `wpa-psk` (the default when there is a password),
+  `sae` for a WPA3-only network, or `none` for an open network
+- Optional custom field `hidden`: `true` for a hidden network
+
+Enterprise networks (WPA-EAP and 802.1X) are out of scope. Add them to
+NetworkManager by hand. Names are matched exactly, and two items with one name
+fail apply.
+
+### Apply
+
+For each item, apply writes a NetworkManager profile for the network. It adds
+the password to the profile through a file that only you can read, so the
+password never appears on a command line or in output. Apply installs the
+profile as `/etc/NetworkManager/system-connections/dotfiles-wifi-<item id>.nmconnection`,
+owned by root with mode 0600, and loads it. It then deletes any other Wi-Fi
+profile for the same SSID, such as one the GNOME settings created earlier with
+an old password. If the load fails, apply fails and the next apply retries.
+
+Apply imports an item again only when the item's revision date changes or the
+profile is gone. It records the last imported revision of each item in
+`~/.local/state/import-wifi-networks/imported`. The file holds no password and no
+hash of one.
+
+Deleting an item does not remove its profile. To remove one, run
+`sudo nmcli connection delete id <SSID>`.
+
+At the end, apply prints one line naming the Wi-Fi networks on the machine that
+have no item and that you have not chosen to keep local. It never asks a
+question.
+
+### wifi-sync
+
+`wifi-sync` asks about each Wi-Fi network on the machine that has no item:
+
+```bash
+wifi-sync
+```
+
+For each one, choose:
+
+- `s`, save: create the Bitwarden item from the password NetworkManager holds.
+  The next apply replaces the machine's profile with the one apply manages.
+- `k`, keep local only: remember the SSID in
+  `~/.local/state/wifi-sync/keep-local` and never ask again on this machine.
+- `f`, forget: delete the profile on this machine.
+- `l`, later: change nothing.
+
+Enterprise and other networks that `wifi-sync` cannot manage offer only keep
+local and later. If NetworkManager does not hold a network's password, because
+the desktop keyring does, `wifi-sync` cannot save it. For a network that has an
+item, `wifi-sync` also offers to update the item when this machine's password
+differs. It skips that offer when the item is newer than the last import, since
+the next apply then brings the machine up to date.
+
+`wifi-sync` needs a terminal and unlocks Bitwarden itself when the vault is
+locked. It needs only `bash`, `jq`, `bw`, `nmcli`, and `sudo`, so you can run it
+on a machine that has not applied these dotfiles, for example before you
+reinstall it:
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/faviann/dotfiles/main/dot_local/bin/executable_wifi-sync)
+```
+
+### A new machine
+
+The Ubuntu installer and the first boot still need one network that you join by
+hand. After the first apply, every saved network is there. Save the networks of a
+machine you are about to reinstall first, by running `wifi-sync` on it.
 
 ## GitHub Registration
 

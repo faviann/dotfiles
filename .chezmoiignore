@@ -39,6 +39,8 @@ packages/**
 .chezmoiscripts/connect-work-tailscale.sh
 .chezmoiscripts/install-packages.sh
 .chezmoiscripts/switch-home-manager.sh
+.chezmoiscripts/import-wifi-networks.sh
+.local/bin/wifi-sync
 {{- end }}
 
 {{- if ne .profile "workstation" }}

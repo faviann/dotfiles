@@ -24,6 +24,7 @@ readonly INVENTORY='
 .chezmoiscripts/clone-homelab-iac.sh            workstation desktop
 .chezmoiscripts/connect-work-tailscale.sh       desktop
 .chezmoiscripts/github-known-hosts.sh           workstation desktop
+.chezmoiscripts/import-wifi-networks.sh         desktop
 .chezmoiscripts/install-herdr-integrations.sh   workstation desktop
 .chezmoiscripts/install-herdr.sh                workstation desktop
 .chezmoiscripts/install-packages.sh             desktop
@@ -52,6 +53,7 @@ readonly INVENTORY='
 .local/bin/dev-session                          workstation
 .local/bin/github-token                         workstation desktop
 .local/bin/update-agent-tools                   workstation desktop
+.local/bin/wifi-sync                            desktop
 .local/bin/workstation-update                   workstation
 .local/share/opencode/auth.json                 workstation desktop
 .npmrc                                          workstation desktop
