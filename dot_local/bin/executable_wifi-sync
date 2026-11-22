@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# Decide, network by network, which of this machine's saved Wi-Fi networks
+# belong in Bitwarden. Needs only bash, jq, bw, nmcli, and sudo, so it also
+# runs before these dotfiles are applied:
+#   bash <(wget -qO- https://raw.githubusercontent.com/faviann/dotfiles/main/dot_local/bin/executable_wifi-sync)
+#
+#   wifi-sync              ask about each network that has no Bitwarden item
+#   wifi-sync local-json   print this machine's Wi-Fi connections as JSON
+#   wifi-sync remind       print one line naming the networks nobody decided on
+#
+# A password moves only through pipes and process substitutions, never a
+# command line or the terminal.
+set -euo pipefail
+umask 077
+
+readonly PREFIX='dotfiles/wifi/'
+readonly KEEP_LOCAL="${XDG_STATE_HOME:-$HOME/.local/state}/wifi-sync/keep-local"
+readonly IMPORTED="${XDG_STATE_HOME:-$HOME/.local/state}/import-wifi-networks/imported"
+
+fail() {
+  printf 'wifi-sync: error: %s\n' "$*" >&2
+  exit 1
+}
+
+need() {
+  local tool
+  for tool in "$@"; do
+    command -v "$tool" >/dev/null 2>&1 || fail "$tool is not installed"
+  done
+}
+
+# Prints a JSON array of the infrastructure Wi-Fi connections that
+# NetworkManager holds. `security` is open, wpa-psk, sae, enterprise, or
+# unsupported (WEP and other modes this repo does not manage).
+nm_property() {
+  nmcli -e no -g "$2" connection show uuid "$1"
+}
+
+local_networks() {
+  local uuid type ssid mode hidden key_mgmt
+  while IFS=: read -r uuid type; do
+    [[ "$type" == 802-11-wireless ]] || continue
+    # One property per call: with several, nmcli leaves out the empty ones and
+    # the lines shift. -e no stops it doubling backslashes and colons.
+    ssid="$(nm_property "$uuid" 802-11-wireless.ssid)"
+    mode="$(nm_property "$uuid" 802-11-wireless.mode)"
+    hidden="$(nm_property "$uuid" 802-11-wireless.hidden)"
+    key_mgmt="$(nm_property "$uuid" 802-11-wireless-security.key-mgmt)"
+    [[ -z "$mode" || "$mode" == infrastructure ]] || continue
+    jq -nc --arg uuid "$uuid" --arg ssid "$ssid" --arg hidden "$hidden" --arg key_mgmt "$key_mgmt" '
+      {uuid: $uuid, ssid: $ssid, hidden: ($hidden == "yes"),
+       security: ({"": "open", "wpa-psk": "wpa-psk", "sae": "sae",
+                   "wpa-eap": "enterprise", "ieee8021x": "enterprise", "wpa-eap-suite-b-192": "enterprise"}[$key_mgmt] // "unsupported")}'
+  done < <(nmcli -e no -g UUID,TYPE connection show) | jq -s '.'
+}
+
+saved_items() {
+  bw list items --search "$PREFIX" | jq --arg prefix "$PREFIX" '[.[] | select(.name | startswith($prefix))]'
+}
+
+keep_local_ssids() {
+  if [[ -s "$KEEP_LOCAL" ]]; then jq -s '.' "$KEEP_LOCAL"; else printf '[]\n'; fi
+}
+
+# Local networks with no item and no keep-local entry, as a JSON array.
+undecided() {
+  local items="$1" local_json="$2" saved
+  saved="$(jq -c --arg prefix "$PREFIX" '[.[].name | ltrimstr($prefix)]' <<<"$items")"
+  jq -n --argjson saved "$saved" --argjson local "$local_json" --argjson keep "$(keep_local_ssids)" '
+    [$local[] | select(.ssid as $ssid | ($saved | index($ssid) | not) and ($keep | index($ssid) | not))]'
+}
+
+remind() {
+  local local_json items pending
+  command -v nmcli >/dev/null 2>&1 && command -v bw >/dev/null 2>&1 || return 0
+  items="$(saved_items)" && local_json="$(local_networks)" || return 0
+  pending="$(undecided "$items" "$local_json" | jq -r '[.[].ssid] | unique | join(", ")')"
+  [[ -z "$pending" ]] || printf 'wifi-sync: Wi-Fi networks on this machine that are not in Bitwarden: %s. Run wifi-sync to save, keep, or forget them.\n' "$pending"
+}
+
+ensure_unlocked() {
+  bw unlock --check >/dev/null 2>&1 && return 0
+  BW_SESSION="$(bw unlock --raw)" || fail 'Bitwarden did not unlock'
+  export BW_SESSION
+}
+
+ask() {
+  local prompt="$1" choices="$2" answer
+  while true; do
+    IFS= read -r -p "$prompt " answer || answer=l
+    answer="${answer,,}"
+    answer="${answer:0:1}"
+    [[ -n "$answer" && "$choices" == *"$answer"* ]] && { printf '%s' "$answer"; return; }
+  done
+}
+
+# The password of a connection, as the root-only NetworkManager file holds it.
+# Callers read it through a process substitution, so it never has an argv.
+connection_psk() {
+  sudo nmcli -e no -s -g 802-11-wireless-security.psk connection show uuid "$1"
+}
+
+item_json() {
+  local ssid="$1" security="$2" hidden="$3" psk_file="$4"
+  bw get template item | jq -c --arg name "$PREFIX$ssid" --arg ssid "$ssid" --arg security "$security" --arg hidden "$hidden" --rawfile psk "$psk_file" '
+    ($psk | rtrimstr("\n")) as $psk
+    | .type = 1 | .name = $name | .notes = null
+    | .login = {username: $ssid, password: (if $psk == "" then null else $psk end), uris: []}
+    | .fields = [{name: "key_mgmt", value: ({"open": "none"}[$security] // $security), type: 0}]
+        + (if $hidden == "true" then [{name: "hidden", value: "true", type: 0}] else [] end)'
+}
+
+create_item() {
+  item_json "$@" | bw encode | bw create item >/dev/null
+}
+
+save() {
+  local ssid="$1" uuid="$2" security="$3" hidden="$4" created
+  if [[ "$security" == open ]]; then
+    create_item "$ssid" "$security" "$hidden" /dev/null && created=yes || created=no
+  elif [[ -z "$(connection_psk "$uuid")" ]]; then
+    # An empty password means NetworkManager does not hold one in its
+    # file, for example because the desktop keyring does.
+    printf '  NetworkManager holds no password for %s, so it cannot be saved from here.\n' "$ssid"
+    return 1
+  else
+    create_item "$ssid" "$security" "$hidden" <(connection_psk "$uuid") && created=yes || created=no
+  fi
+  if [[ "$created" == no ]]; then
+    printf '  Bitwarden did not save %s.\n' "$ssid"
+    return 1
+  fi
+  printf '  Saved %s to Bitwarden; the next chezmoi apply adopts it.\n' "$ssid"
+}
+
+keep_local() {
+  mkdir -p "${KEEP_LOCAL%/*}"
+  jq -nc --arg ssid "$1" '$ssid' >>"$KEEP_LOCAL"
+  printf '  Keeping %s on this machine only.\n' "$1"
+}
+
+decide_new() {
+  local network="$1" ssid uuid security hidden answer
+  ssid="$(jq -r .ssid <<<"$network")"
+  uuid="$(jq -r .uuid <<<"$network")"
+  security="$(jq -r .security <<<"$network")"
+  hidden="$(jq -r '.hidden | tostring' <<<"$network")"
+  case "$security" in
+    open | wpa-psk | sae)
+      printf '\n%s (%s)\n' "$ssid" "$security"
+      answer="$(ask '[s]ave to Bitwarden, [k]eep local only, [f]orget on this machine, [l]ater?' skfl)"
+      ;;
+    *)
+      printf '\n%s (%s): add it to Bitwarden by hand, wifi-sync cannot manage it\n' "$ssid" "$security"
+      answer="$(ask '[k]eep local only, [l]ater?' kl)"
+      ;;
+  esac
+  case "$answer" in
+    s) save "$ssid" "$uuid" "$security" "$hidden" || true ;;
+    k) keep_local "$ssid" ;;
+    f)
+      sudo nmcli connection delete uuid "$uuid" >/dev/null
+      printf '  Forgot %s on this machine.\n' "$ssid"
+      ;;
+  esac
+}
+
+# Offer to push a local password that differs from its item to Bitwarden.
+check_saved() {
+  local item="$1" network="$2" ssid uuid id differs answer imported_revision revision
+  ssid="$(jq -r .ssid <<<"$network")"
+  uuid="$(jq -r .uuid <<<"$network")"
+  security="$(jq -r .security <<<"$network")"
+  [[ "$security" == wpa-psk || "$security" == sae ]] || return 0
+  id="$(jq -r .id <<<"$item")"
+  revision="$(jq -r .revisionDate <<<"$item")"
+  # An item newer than the last import is the newer truth; apply will push it here.
+  imported_revision="$(awk -v id="$id" '$1 == id { print $2 }' "$IMPORTED" 2>/dev/null || true)"
+  [[ -z "$imported_revision" || "$imported_revision" == "$revision" ]] || return 0
+  differs="$(jq -r --rawfile local <(connection_psk "$uuid") '($local | rtrimstr("\n")) as $local | $local != "" and (.login.password // "") != $local' <<<"$item")"
+  [[ "$differs" == true ]] || return 0
+  printf '\n%s: the password on this machine differs from its Bitwarden item\n' "$ssid"
+  answer="$(ask '[u]pdate Bitwarden from this machine, [l]eave both as they are?' ul)"
+  [[ "$answer" == u ]] || return 0
+  bw get item "$id" \
+    | jq -c --rawfile psk <(connection_psk "$uuid") '.login.password = ($psk | rtrimstr("\n"))' \
+    | bw encode | bw edit item "$id" >/dev/null
+  printf '  Updated the Bitwarden item for %s.\n' "$ssid"
+}
+
+main() {
+  local items local_json network item count=0 ssid
+
+  [[ -t 0 ]] || fail 'wifi-sync asks questions, so run it in a terminal'
+  need bw jq nmcli sudo
+  ensure_unlocked
+  items="$(saved_items)"
+  local_json="$(local_networks)"
+
+  while IFS= read -r -u 3 network; do
+    count=$((count + 1))
+    decide_new "$network"
+  done 3< <(undecided "$items" "$local_json" | jq -c '.[]')
+
+  while IFS= read -r -u 3 network; do
+    ssid="$(jq -r .ssid <<<"$network")"
+    item="$(jq -c --arg name "$PREFIX$ssid" '[.[] | select(.name == $name)][0] // empty' <<<"$items")"
+    [[ -n "$item" ]] || continue
+    check_saved "$item" "$network"
+  done 3< <(jq -c '.[]' <<<"$local_json")
+
+  ((count > 0)) || printf 'Every Wi-Fi network on this machine is in Bitwarden or kept local.\n'
+}
+
+case "${1:-}" in
+  local-json) need nmcli jq; local_networks ;;
+  remind) remind ;;
+  '') main ;;
+  *) fail 'usage: wifi-sync [local-json | remind]' ;;
+esac
