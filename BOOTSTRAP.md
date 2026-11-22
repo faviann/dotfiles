@@ -201,8 +201,9 @@ apply script imports the homelab tunnel into NetworkManager.
 
 ### Work tailnet on desktops
 
-Claude Code reaches the JES AI gateway only over the work tailnet, so every
-desktop runs Tailscale as a normal system service. Apply installs `tailscale`
+Once the temporary allowlist for the home IP ends, Claude Code reaches the
+JES AI gateway only over the work tailnet, so every desktop runs Tailscale as
+a normal system service. Apply installs `tailscale`
 from Tailscale's apt repository for the release in `/etc/os-release`, then
 keeps these preferences, and sets nothing else:
 
