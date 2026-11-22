@@ -36,6 +36,7 @@ packages/**
 .config/fish/
 .config/fish/**
 .chezmoiscripts/zz-connect-homelab-wireguard.sh
+.chezmoiscripts/connect-work-tailscale.sh
 .chezmoiscripts/install-packages.sh
 .chezmoiscripts/switch-home-manager.sh
 {{- end }}
