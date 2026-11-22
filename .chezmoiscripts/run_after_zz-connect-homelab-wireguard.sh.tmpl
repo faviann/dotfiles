@@ -40,7 +40,7 @@ if ! printf '%s\n' "$items" \
       key ~ /^dns=/ { next }
       { print }
       key == "[interface]" { interfaces++; print "DNS = 10.1.0.1, ~faviann.vms, ~proxmox.lan" }
-      key == "[peer]" { peers++; print "AllowedIPs = 10.1.0.0/18, 10.0.0.2/32" }
+      key == "[peer]" { peers++; print "AllowedIPs = 10.1.0.0/18, 10.0.0.0/24, 10.200.196.0/24" }
       END { exit !(interfaces == 1 && peers == 1) }
     ' >"$conf"; then
   printf 'connect-homelab-wireguard: error: the Notes of Bitwarden item %s must hold a WireGuard profile with one [Interface] and one [Peer] section\n' "$item" >&2

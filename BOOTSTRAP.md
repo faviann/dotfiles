@@ -498,10 +498,13 @@ NetworkManager starts the connection at once, at boot, and on every network.
 Before the import, apply changes the profile in two ways, so the homelab is
 reachable whatever the profile routes:
 
-- It adds `10.1.0.0/18` and `10.0.0.2` to the peer's `AllowedIPs`.
-  NetworkManager routes each range through the tunnel. Other traffic follows
-  the profile: the Firewalla's default `AllowedIPs = 0.0.0.0/0` sends all
-  traffic through the tunnel.
+- It adds `10.1.0.0/18`, `10.0.0.0/24`, and `10.200.196.0/24` to the peer's
+  `AllowedIPs`: the homelab, the `10.0.0.0/24` network, and the Firewalla's
+  WireGuard clients, the same local ranges Traefik's `local-ip-restriction`
+  allows. NetworkManager routes each range through the tunnel. Other traffic
+  follows the profile: the Firewalla's default `AllowedIPs = 0.0.0.0/0` sends
+  all traffic through the tunnel. Delete the profile's own `AllowedIPs` line
+  from the item to keep everything else off the tunnel.
 - It replaces the profile's `DNS` with `10.1.0.1`, for `faviann.vms` and
   `proxmox.lan` names only. With systemd-resolved, as on stock Ubuntu, other
   names use the DNS server of the network that the machine is on, even on a
